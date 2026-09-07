@@ -140,6 +140,7 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
         :final peerId,
         :final state,
         :final revision,
+        :final generation,
         :final error,
       ):
         _events.add(
@@ -148,6 +149,7 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
             peerId: peerId,
             state: _mapState(state),
             revision: revision,
+            generation: generation,
             error: error == null ? null : _mapError(error),
           ),
         );
@@ -156,6 +158,7 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
         :final peerId,
         :final state,
         :final revision,
+        :final generation,
         :final error,
       ):
         // 快照在 session 存在前到达时由 SDK coordinator 忽略；这里只做类型映射。
@@ -166,6 +169,7 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
               peerId: peerId,
               state: _mapState(state),
               revision: revision,
+              generation: generation,
               error: error == null ? null : _mapError(error),
             ),
           ),
@@ -273,6 +277,22 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
     NativeOperationStatus.failure => _failure(
       code: NetworkErrorCode.ioError,
       message: 'Native Realtime command was not queued.',
+      operation: operation,
+      peerId: peerId,
+    ),
+    // These statuses belong to the dedicated realtime-media ABI. They are
+    // not expected from the generic command queue, so fail closed if a
+    // native implementation ever leaks one through this path.
+    NativeOperationStatus.unknownSession ||
+    NativeOperationStatus.staleGeneration ||
+    NativeOperationStatus.staleEndpoint ||
+    NativeOperationStatus.directionMismatch ||
+    NativeOperationStatus.duplicateEndpoint ||
+    NativeOperationStatus.driverUnavailable ||
+    NativeOperationStatus.peerMismatch ||
+    NativeOperationStatus.frameRejected => _failure(
+      code: NetworkErrorCode.ioError,
+      message: 'Native Realtime command returned an unexpected media status.',
       operation: operation,
       peerId: peerId,
     ),

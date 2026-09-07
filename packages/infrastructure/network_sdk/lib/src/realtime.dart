@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'network_models.dart';
 
@@ -20,15 +19,6 @@ enum RealtimeSessionState {
 /// High-level remote audio state.
 enum RealtimeAudioState { unavailable, inactive, active, muted, failed }
 
-/// A decoded or otherwise renderable remote video frame supplied by native.
-final class RealtimeVideoFrame {
-  RealtimeVideoFrame({required Uint8List bytes, required this.timestamp})
-    : bytes = Uint8List.fromList(bytes);
-
-  final Uint8List bytes;
-  final DateTime timestamp;
-}
-
 /// Events emitted by an App/native adapter into [RealtimeClient].
 sealed class RealtimeBackendEvent {
   const RealtimeBackendEvent();
@@ -42,6 +32,7 @@ final class RealtimeSessionStateChangedEvent extends RealtimeBackendEvent {
     required this.state,
     this.error,
     this.revision = 0,
+    this.generation,
   });
 
   final String realtimeId;
@@ -51,6 +42,11 @@ final class RealtimeSessionStateChangedEvent extends RealtimeBackendEvent {
 
   /// Signaling revision associated with this state; 0 when unspecified.
   final int revision;
+
+  /// Native-authoritative media/session generation. Synthetic backends may
+  /// omit it, but a production native adapter must always provide it; it must
+  /// never be derived from [revision].
+  final int? generation;
 }
 
 /// A complete Realtime session state snapshot published by native.
@@ -61,6 +57,7 @@ final class RealtimeSnapshot {
     required this.state,
     required this.revision,
     this.error,
+    this.generation,
   });
 
   final String realtimeId;
@@ -68,6 +65,36 @@ final class RealtimeSnapshot {
   final RealtimeSessionState state;
   final int revision;
   final NetworkError? error;
+
+  /// Native-authoritative media/session generation, independent of signaling
+  /// revision. A production native snapshot always carries this value.
+  final int? generation;
+}
+
+/// Immutable token required to bind a media endpoint to one native session.
+///
+/// The token is created only from a native-authoritative generation carried by
+/// a state/snapshot event. Signaling revisions are intentionally absent.
+final class RealtimeSessionToken {
+  const RealtimeSessionToken({
+    required this.realtimeId,
+    required this.peerId,
+    required this.generation,
+  });
+
+  final String realtimeId;
+  final String peerId;
+  final int generation;
+
+  @override
+  bool operator ==(Object other) =>
+      other is RealtimeSessionToken &&
+      other.realtimeId == realtimeId &&
+      other.peerId == peerId &&
+      other.generation == generation;
+
+  @override
+  int get hashCode => Object.hash(realtimeId, peerId, generation);
 }
 
 /// A backend snapshot event consumed by the SDK session coordinator.
@@ -75,21 +102,6 @@ final class RealtimeSnapshotBackendEvent extends RealtimeBackendEvent {
   const RealtimeSnapshotBackendEvent(this.snapshot);
 
   final RealtimeSnapshot snapshot;
-}
-
-/// A backend video event consumed by the SDK session coordinator.
-final class RealtimeRemoteVideoFrameEvent extends RealtimeBackendEvent {
-  RealtimeRemoteVideoFrameEvent({
-    required this.realtimeId,
-    required this.peerId,
-    required Uint8List bytes,
-    required this.timestamp,
-  }) : bytes = Uint8List.fromList(bytes);
-
-  final String realtimeId;
-  final String peerId;
-  final Uint8List bytes;
-  final DateTime timestamp;
 }
 
 /// A backend audio state event consumed by the SDK session coordinator.
@@ -134,7 +146,12 @@ abstract interface class RealtimeSession {
   /// Latest signaling revision observed from state/snapshot backend events.
   int get revision;
 
-  Stream<RealtimeVideoFrame> get remoteVideo;
+  /// Native-authoritative generation for the current session, when the
+  /// adapter has delivered its first state/snapshot event.
+  int? get generation;
+
+  /// Token used by the media adapter; null until native reports a generation.
+  RealtimeSessionToken? get mediaToken;
 
   RealtimeAudioState get audioState;
 
@@ -213,17 +230,16 @@ final class RealtimeClientImpl implements RealtimeClient {
       case RealtimeSessionStateChangedEvent(:final realtimeId, :final peerId):
         final session = _sessions[realtimeId];
         if (session == null || session.peerId != peerId) return;
-        session._applyState(event.state, event.error, revision: event.revision);
+        session._applyState(
+          event.state,
+          event.error,
+          revision: event.revision,
+          generation: event.generation,
+        );
       case RealtimeSnapshotBackendEvent(:final snapshot):
         final session = _sessions[snapshot.realtimeId];
         if (session == null || session.peerId != snapshot.peerId) return;
         session._applySnapshot(snapshot);
-      case RealtimeRemoteVideoFrameEvent(:final realtimeId, :final peerId):
-        final session = _sessions[realtimeId];
-        if (session == null || session.peerId != peerId) return;
-        session._addVideoFrame(
-          RealtimeVideoFrame(bytes: event.bytes, timestamp: event.timestamp),
-        );
       case RealtimeAudioStateChangedEvent(:final realtimeId, :final peerId):
         final session = _sessions[realtimeId];
         if (session == null || session.peerId != peerId) return;
@@ -266,11 +282,11 @@ final class _RealtimeSession implements RealtimeSession {
   });
 
   final RealtimeClientImpl _client;
-  final StreamController<RealtimeVideoFrame> _videoController =
-      StreamController<RealtimeVideoFrame>.broadcast();
   RealtimeSessionState _state = RealtimeSessionState.idle;
   RealtimeAudioState _audioState = RealtimeAudioState.unavailable;
   int _revision = 0;
+  int? _generation;
+  bool _awaitingGenerationAdvance = false;
   Future<SdkResult<void>>? _startFuture;
   Future<SdkResult<void>>? _stopFuture;
   bool _stopCommandCompleted = false;
@@ -289,7 +305,18 @@ final class _RealtimeSession implements RealtimeSession {
   int get revision => _revision;
 
   @override
-  Stream<RealtimeVideoFrame> get remoteVideo => _videoController.stream;
+  int? get generation => _generation;
+
+  @override
+  RealtimeSessionToken? get mediaToken {
+    final generation = _generation;
+    if (generation == null || generation <= 0) return null;
+    return RealtimeSessionToken(
+      realtimeId: realtimeId,
+      peerId: peerId,
+      generation: generation,
+    );
+  }
 
   @override
   RealtimeAudioState get audioState => _audioState;
@@ -310,6 +337,7 @@ final class _RealtimeSession implements RealtimeSession {
     // WebRTC peer). Reset the recorded revision so the new generation's low
     // revisions are not mistaken for stale events from the previous session.
     _revision = 0;
+    _awaitingGenerationAdvance = _generation != null;
     _stopCommandCompleted = false;
     _state = RealtimeSessionState.starting;
     final future = _startInternal();
@@ -376,8 +404,26 @@ final class _RealtimeSession implements RealtimeSession {
     RealtimeSessionState state,
     NetworkError? error, {
     int revision = 0,
+    int? generation,
   }) {
     if (_disposed) return;
+    if (generation != null) {
+      if (generation <= 0) return;
+      final currentGeneration = _generation;
+      if (_awaitingGenerationAdvance &&
+          currentGeneration != null &&
+          generation <= currentGeneration) {
+        return;
+      }
+      if (currentGeneration != null && generation < currentGeneration) {
+        return;
+      }
+      if (currentGeneration == null || generation > currentGeneration) {
+        _generation = generation;
+        _revision = 0;
+        _awaitingGenerationAdvance = false;
+      }
+    }
     // Revision reconciliation (ADR-029): a strictly lower revision is a stale
     // snapshot/event and must not roll back a newer state — including a stale
     // `failed`/error event. Equal revisions are idempotent reapplications and
@@ -394,12 +440,12 @@ final class _RealtimeSession implements RealtimeSession {
 
   void _applySnapshot(RealtimeSnapshot snapshot) {
     if (_disposed) return;
-    _applyState(snapshot.state, snapshot.error, revision: snapshot.revision);
-  }
-
-  void _addVideoFrame(RealtimeVideoFrame frame) {
-    if (_disposed) return;
-    _videoController.add(frame);
+    _applyState(
+      snapshot.state,
+      snapshot.error,
+      revision: snapshot.revision,
+      generation: snapshot.generation,
+    );
   }
 
   void _applyAudioState(RealtimeAudioState state) {
@@ -424,7 +470,6 @@ final class _RealtimeSession implements RealtimeSession {
       );
     }
     _state = RealtimeSessionState.stopped;
-    await _videoController.close();
   }
 
   void _ensureUsable() {

@@ -1,4 +1,4 @@
-最新更新时间：2026-08-25
+最新更新时间：2026-09-07
 
 # network_sdk
 
@@ -37,8 +37,10 @@ breaking refactor 不得把 native wire schema 升为 V3。
   unavailable/invalid-argument 边界；Feature text/clipboard 继续使用 authenticated
   HTTPS + application E2E，SDK 不增加临时 message 实现或明文 fallback。
 - `RealtimeClient` 只提供 Feature-facing `RealtimeSession`，包括
-  `start()`、`stop()`、`state`、`remoteVideo` 和 `audioState`；PeerConnection、
-  ICE、SDP、signaling、socket 和 native media resource 全部由 App/native Owner 持有；
+  `start()`、`stop()`、`state`、`revision`、native-authoritative `generation`/
+  `mediaToken` 和 `audioState`；屏幕媒体端点与渲染
+  capability 由独立 `realtime_media` 生命周期契约协调，PeerConnection、ICE、SDP、
+  signaling、socket 和 native media resource 全部由 App/native Owner 持有；
 - 不创建 Socket、FFI handle、HTTP client 或 secure-storage 实现；
 - `SdkRequestExecutor`、TLS、连接复用和平台网络策略由 App Shell 提供；
 - 不拥有数据库或 App/Feature 生命周期资源。
@@ -53,12 +55,18 @@ import 'package:network_sdk/network_sdk.dart';
 `SdkRequestExecutor`，不会自行创建 HTTP client。Feature 只使用所需的最小客户端
 或 App Shell 注入的 Feature Port。
 
-`RealtimeSession` 是唯一的 Realtime Feature 边界。`RealtimeClientImpl` 只协调
-App Shell 注入的 backend 事件和生命周期；当前 native DataChannel 暴露的是 typed
-session state，未解码的视频帧和音频设备能力保持 unavailable，不把 SDP/ICE 事件
-泄漏给 Feature。`start()`/`stop()` 的 Future 等待 App Shell 关联到
+`RealtimeSession` 是唯一的 Realtime 信令/状态 Feature 边界。`RealtimeClientImpl` 只协调
+App Shell 注入的 backend 事件和生命周期；它不再提供合成视频帧流。屏幕共享使用
+`realtime_media` 的不透明 endpoint/surface 生命周期，未解码的视频帧和音频设备能力
+保持 unavailable，不把 SDP/ICE 事件泄漏给 Feature。`start()`/`stop()` 的 Future 等待 App Shell 关联到
 `NativeCommandResultEvent` 的命令完成；队列入列成功不会被当作操作完成，且 stop
 只有在 native `closed` 状态事件到达后才把 session 状态置为 `stopped`。
+
+Native state/snapshot events also carry the native-authoritative Realtime
+`generation`. `RealtimeSession.mediaToken` exposes `(realtimeId, peerId,
+generation)` only after that event arrives; media adapters must pass this token
+unchanged to the native endpoint ABI and must never derive it from signaling
+`revision`.
 
 Network V2 的命令边界按功能域提供 Connection、Identity、Transfer、Realtime 和
 Relay lifecycle ports；`NetworkV2FacadeImpl` 只编排这些 port，不拥有注入的

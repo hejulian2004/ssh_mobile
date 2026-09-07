@@ -13,7 +13,7 @@ function JobNative{
   Write-Host 'ENVIRONMENT GAP: Linux host-network coturn is unavailable on the native Windows gate; TURN fallback was not run.'
   exit$gap
 }
-function JobSdk{if(-not(Need @('dart','flutter'))){exit$gap};$scopes=@('network_sdk','network_transport','ssh_mobile_network_native');Melos 'dart format --output=none --set-exit-if-changed lib test' $scopes;Melos 'flutter analyze --no-fatal-infos --no-pub' $scopes;Melos "flutter test --no-pub --concurrency $MelosTestConcurrency" $scopes}
+function JobSdk{if(-not(Need @('dart','flutter'))){exit$gap};$scopes=@('network_sdk','network_transport','realtime_media','ssh_mobile_network_native');Melos 'dart format --output=none --set-exit-if-changed lib test' $scopes;Melos 'flutter analyze --no-fatal-infos --no-pub' $scopes;Melos "flutter test --no-pub --concurrency $MelosTestConcurrency" $scopes}
 function JobLanNetworkV2{
   if(-not(Need @('dart','flutter','cargo'))){exit$gap}
   $featureDirectory=Join-Path $root 'packages\features\feature_lan_share'

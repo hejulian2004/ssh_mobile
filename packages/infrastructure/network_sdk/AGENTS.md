@@ -1,4 +1,4 @@
-最新更新时间：2026-08-30
+最新更新时间：2026-09-07
 
 # network_sdk 维护约束
 
@@ -36,9 +36,12 @@ and Native Network V2 remain separate domains.
   layer; `EventStreamClient` exposes one typed event stream. `sendMessage` remains the
   stable unavailable/invalid-argument boundary; LAN text/clipboard use
   authenticated HTTPS + application E2E, with no temporary plaintext fallback.
-- `RealtimeSession` is the only Feature realtime API (`state`, `remoteVideo`,
-  `audioState`, `start()`, `stop()`). No SDP/ICE/PeerConnection/socket/native
-  handle/media resource leaks to Features. App adapter maps backend events;
+- `RealtimeSession` is the Feature signaling/state API (`state`, `revision`,
+  native-authoritative `generation`/`mediaToken`, `audioState`, `start()`,
+  `stop()`). Opaque screen-media endpoint/surface
+  lifecycle belongs to `realtime_media`; no per-frame Dart API or
+  SDP/ICE/PeerConnection/socket/native handle/media resource leaks to Features.
+  App adapter maps backend events;
   `start/stop` Futures complete only after `NativeCommandResultEvent`; queue
   acceptance never advances state. `RealtimeStateChangedEvent` is the state
   source of truth, and stop waits for native `closed`.

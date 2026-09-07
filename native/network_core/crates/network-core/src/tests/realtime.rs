@@ -2,16 +2,396 @@ use super::*;
 use network_protocol::{network_event, NetworkErrorCode};
 use network_relay::v2::{DiscoveryAck, DiscoverySnapshot, ResolvePeerResponse};
 use network_relay::RelayError;
-use network_webrtc::{DataChannelReliability, SignalingState};
+use network_webrtc::media::RtpPacketizer;
+use network_webrtc::{
+    DataChannelReliability, EncodedVideoFrame, MediaDirection, RealtimeIoDriver, SignalingState,
+    VideoCodec, VideoEnqueueResult, WebRtcConfig, WebRtcPeer,
+};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::discovery::DiscoveryControlPlane;
 use crate::runtime::ConnectDecision;
 use crate::runtime::PeerConfig;
+use crate::NetworkRuntime;
+
+#[test]
+fn media_endpoint_driver_requires_a_current_matching_realtime_session() {
+    let realtime_id = "00112233445566778899aabbccddeeff";
+    let mut manager = RealtimeManager::default();
+
+    assert!(matches!(
+        manager.media_endpoint_driver(realtime_id, "peer-a"),
+        Err(crate::realtime_media::RealtimeMediaError::UnknownRealtimeSession)
+    ));
+
+    manager.insert_existing_session(
+        realtime_id.into(),
+        RealtimeSession {
+            peer_id: "peer-a".into(),
+            connection_session_id: None,
+            peer: None,
+            driver: None,
+            revision: 1,
+            remote_revision: 0,
+            ice_revision: 1,
+            seen_candidates: HashSet::new(),
+        },
+    );
+
+    assert!(matches!(
+        manager.media_endpoint_driver(realtime_id, "peer-b"),
+        Err(crate::realtime_media::RealtimeMediaError::PeerMismatch)
+    ));
+    assert!(matches!(
+        manager.media_endpoint_driver(realtime_id, "peer-a"),
+        Err(crate::realtime_media::RealtimeMediaError::DriverUnavailable)
+    ));
+}
+
+#[tokio::test]
+async fn delayed_old_generation_cannot_create_an_endpoint_on_a_replacement_session() {
+    let (state, _event_rx) = realtime_test_state().await;
+    let realtime_id = "00112233445566778899aabbccddeeff";
+    let peer_id = "peer-a";
+    let first_driver = RealtimeIoDriver::bind(
+        WebRtcPeer::new(WebRtcConfig::default()).expect("first peer"),
+        "127.0.0.1:0".parse().expect("first bind address"),
+    )
+    .await
+    .expect("first driver")
+    .into_handle();
+    let stale_generation = {
+        let mut manager = state.realtime.lock().await;
+        manager.insert_new_session(
+            realtime_id.into(),
+            RealtimeSession {
+                peer_id: peer_id.into(),
+                connection_session_id: None,
+                peer: None,
+                driver: Some(first_driver),
+                revision: 1,
+                remote_revision: 0,
+                ice_revision: 1,
+                seen_candidates: HashSet::new(),
+            },
+        );
+        manager
+            .session_generation(realtime_id)
+            .expect("first generation")
+    };
+
+    let second_driver = RealtimeIoDriver::bind(
+        WebRtcPeer::new(WebRtcConfig::default()).expect("replacement peer"),
+        "127.0.0.1:0".parse().expect("replacement bind address"),
+    )
+    .await
+    .expect("replacement driver")
+    .into_handle();
+    let current_generation = {
+        let mut manager = state.realtime.lock().await;
+        manager.remove_session(realtime_id);
+        manager.insert_new_session(
+            realtime_id.into(),
+            RealtimeSession {
+                peer_id: peer_id.into(),
+                connection_session_id: None,
+                peer: None,
+                driver: Some(second_driver),
+                revision: 2,
+                remote_revision: 0,
+                ice_revision: 2,
+                seen_candidates: HashSet::new(),
+            },
+        );
+        manager
+            .session_generation(realtime_id)
+            .expect("replacement generation")
+    };
+    assert_ne!(stale_generation, current_generation);
+
+    assert!(matches!(
+        crate::realtime_media::create_endpoint(
+            &state,
+            realtime_id,
+            peer_id,
+            crate::realtime_media::RealtimeMediaDirection::Send,
+            stale_generation,
+        )
+        .await,
+        Err(crate::realtime_media::RealtimeMediaError::StaleGeneration)
+    ));
+    assert!(crate::realtime_media::create_endpoint(
+        &state,
+        realtime_id,
+        peer_id,
+        crate::realtime_media::RealtimeMediaDirection::Send,
+        current_generation,
+    )
+    .await
+    .is_ok());
+}
+
+#[tokio::test]
+async fn media_endpoints_bridge_native_h264_without_exposing_a_peer_handle() {
+    let (state, _event_rx) = realtime_test_state().await;
+    let realtime_id = "00112233445566778899aabbccddeeff";
+    let peer_id = "peer-a";
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("native WebRTC peer");
+    peer.configure_h264_screen_video(MediaDirection::Sendrecv, Some(0x1357_2468))
+        .expect("H.264 screen-video track");
+    let driver =
+        RealtimeIoDriver::bind(peer, "127.0.0.1:0".parse().expect("loopback bind address"))
+            .await
+            .expect("native I/O driver")
+            .into_handle();
+    state.realtime.lock().await.insert_new_session(
+        realtime_id.into(),
+        RealtimeSession {
+            peer_id: peer_id.into(),
+            connection_session_id: None,
+            peer: None,
+            driver: Some(Arc::clone(&driver)),
+            revision: 1,
+            remote_revision: 0,
+            ice_revision: 1,
+            seen_candidates: HashSet::new(),
+        },
+    );
+    let generation = state
+        .realtime
+        .lock()
+        .await
+        .session_generation(realtime_id)
+        .expect("session generation");
+
+    let send = crate::realtime_media::create_endpoint(
+        &state,
+        realtime_id,
+        peer_id,
+        crate::realtime_media::RealtimeMediaDirection::Send,
+        generation,
+    )
+    .await
+    .expect("send endpoint");
+    let receive = crate::realtime_media::create_endpoint(
+        &state,
+        realtime_id,
+        peer_id,
+        crate::realtime_media::RealtimeMediaDirection::Receive,
+        generation,
+    )
+    .await
+    .expect("receive endpoint");
+    let mut payload = vec![
+        0, 0, 0, 1, 0x67, 0x42, 0, 0x1f, 0xe5, 0x88, 0x68, 0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80, 0,
+        0, 0, 1, 0x65,
+    ];
+    payload.extend((0..640).map(|index| (index as u8).wrapping_mul(37)));
+    let input = EncodedVideoFrame::new(
+        VideoCodec::H264,
+        42,
+        90_000,
+        1_280,
+        720,
+        true,
+        payload,
+        std::time::Instant::now() + Duration::from_secs(1),
+    );
+
+    assert!(matches!(
+        crate::realtime_media::push_endpoint(&state, send, input.clone()),
+        Ok(VideoEnqueueResult::Accepted)
+    ));
+    assert_eq!(
+        driver
+            .lock()
+            .expect("driver lock")
+            .peer_mut()
+            .pending_h264_screen_video_frames(),
+        1,
+        "the opaque send endpoint reaches the native-only ingress queue"
+    );
+
+    let mut packetizer = RtpPacketizer::new(1_200, 102, 0x1357_2468, 1);
+    let packets = packetizer.packetize(&input).expect("packetize H.264 input");
+    {
+        let mut driver = driver.lock().expect("driver lock");
+        for packet in &packets {
+            driver
+                .peer_mut()
+                .receive_h264_screen_video_rtp(packet, std::time::Instant::now())
+                .expect("native RTP ingress");
+        }
+    }
+
+    let received = crate::realtime_media::pop_endpoint(&state, receive)
+        .expect("opaque receive endpoint")
+        .expect("completed native H.264 frame");
+    assert_eq!(received.codec, VideoCodec::H264);
+    assert_eq!(received.sequence, 0);
+    assert_eq!(received.timestamp, input.timestamp);
+    assert_eq!(received.width, 1_920);
+    assert_eq!(received.height, 1_080);
+    assert!(received.keyframe);
+    assert_eq!(received.payload, input.payload);
+
+    crate::realtime_media::release_endpoint(&state, send).expect("release send endpoint");
+    assert!(matches!(
+        crate::realtime_media::push_endpoint(&state, send, input),
+        Err(crate::realtime_media::RealtimeMediaError::StaleEndpoint)
+    ));
+}
+
+#[test]
+fn runtime_stop_revokes_live_media_endpoints_before_runtime_state_is_released() {
+    let runtime = NetworkRuntime::new().expect("create runtime");
+    runtime.start().expect("start runtime");
+    let state = runtime
+        .state
+        .lock()
+        .expect("runtime state lock")
+        .clone()
+        .expect("running runtime state");
+    let realtime_id = "00112233445566778899aabbccddeeff";
+    let peer_id = "peer-a";
+    let driver = runtime.handle().block_on(async {
+        let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("native WebRTC peer");
+        peer.configure_h264_screen_video(MediaDirection::Sendrecv, Some(0x2468_1357))
+            .expect("H.264 screen-video track");
+        RealtimeIoDriver::bind(peer, "127.0.0.1:0".parse().expect("loopback bind address"))
+            .await
+            .expect("native I/O driver")
+            .into_handle()
+    });
+    let generation = runtime.handle().block_on(async {
+        state.realtime.lock().await.insert_new_session(
+            realtime_id.into(),
+            RealtimeSession {
+                peer_id: peer_id.into(),
+                connection_session_id: None,
+                peer: None,
+                driver: Some(Arc::clone(&driver)),
+                revision: 1,
+                remote_revision: 0,
+                ice_revision: 1,
+                seen_candidates: HashSet::new(),
+            },
+        );
+        state
+            .realtime
+            .lock()
+            .await
+            .session_generation(realtime_id)
+            .expect("session generation")
+    });
+
+    let endpoint = runtime
+        .create_realtime_media_endpoint(
+            realtime_id,
+            peer_id,
+            crate::realtime_media::RealtimeMediaDirection::Send,
+            generation,
+        )
+        .expect("create runtime-owned endpoint");
+
+    runtime.stop().expect("stop runtime");
+
+    assert!(matches!(
+        crate::realtime_media::push_endpoint(
+            &state,
+            endpoint,
+            EncodedVideoFrame::new(
+                VideoCodec::H264,
+                1,
+                90_000,
+                1280,
+                720,
+                true,
+                vec![0x65],
+                std::time::Instant::now() + Duration::from_secs(1),
+            ),
+        ),
+        Err(crate::realtime_media::RealtimeMediaError::StaleEndpoint)
+    ));
+    assert!(runtime.release_realtime_media_endpoint(endpoint).is_ok());
+    assert!(matches!(
+        runtime.create_realtime_media_endpoint(
+            realtime_id,
+            peer_id,
+            crate::realtime_media::RealtimeMediaDirection::Send,
+            1,
+        ),
+        Err(crate::realtime_media::RealtimeMediaError::RuntimeNotRunning)
+    ));
+}
+
+#[tokio::test]
+async fn connection_session_loss_invalidates_bound_media_endpoints() {
+    let (state, _event_rx) = realtime_test_state().await;
+    let realtime_id = "00112233445566778899aabbccddeeff";
+    let peer_id = "peer-a";
+    let connection_session_id = SessionId::from_bytes([9u8; 16]);
+    let driver = RealtimeIoDriver::bind(
+        WebRtcPeer::new(WebRtcConfig::default()).expect("native WebRTC peer"),
+        "127.0.0.1:0".parse().expect("loopback bind address"),
+    )
+    .await
+    .expect("native I/O driver")
+    .into_handle();
+
+    state.realtime.lock().await.insert_new_session(
+        realtime_id.into(),
+        RealtimeSession {
+            peer_id: peer_id.into(),
+            connection_session_id: Some(connection_session_id),
+            peer: None,
+            driver: Some(Arc::clone(&driver)),
+            revision: 1,
+            remote_revision: 0,
+            ice_revision: 1,
+            seen_candidates: HashSet::new(),
+        },
+    );
+    let generation = state
+        .realtime
+        .lock()
+        .await
+        .session_generation(realtime_id)
+        .expect("session generation");
+    let endpoint = crate::realtime_media::create_endpoint(
+        &state,
+        realtime_id,
+        peer_id,
+        crate::realtime_media::RealtimeMediaDirection::Send,
+        generation,
+    )
+    .await
+    .expect("media endpoint");
+
+    close_realtime_sessions_for_session(&state, peer_id, connection_session_id).await;
+
+    assert!(matches!(
+        crate::realtime_media::push_endpoint(
+            &state,
+            endpoint,
+            EncodedVideoFrame::new(
+                VideoCodec::H264,
+                1,
+                90_000,
+                1280,
+                720,
+                true,
+                vec![0x65],
+                std::time::Instant::now() + Duration::from_secs(1),
+            ),
+        ),
+        Err(crate::realtime_media::RealtimeMediaError::StaleEndpoint)
+    ));
+}
 
 #[tokio::test]
 async fn realtime_snapshot_carries_authoritative_state_and_revision_after_connected() {
@@ -126,15 +506,6 @@ async fn realtime_io_event_matrix_maps_lifecycle_and_failure_boundaries() {
             &state,
             realtime_id,
             "peer-a",
-            RealtimeIoEvent::PeerDisconnected,
-        )
-        .await
-    );
-    assert!(
-        !handle_io_event(
-            &state,
-            realtime_id,
-            "peer-a",
             RealtimeIoEvent::DataChannelMessage {
                 channel_id: 7,
                 is_string: false,
@@ -160,14 +531,25 @@ async fn realtime_io_event_matrix_maps_lifecycle_and_failure_boundaries() {
         Some(network_event::Payload::RealtimeState(ref state))
             if state.state == RealtimeSessionState::Connected as i32
     )));
-    assert!(state_events.iter().any(|event| matches!(
+    assert!(
+        handle_io_event(
+            &state,
+            realtime_id,
+            "peer-a",
+            RealtimeIoEvent::PeerDisconnected,
+        )
+        .await,
+        "a disconnected peer is terminal: retry needs a new session and PeerConnection"
+    );
+    let mut terminal_events = Vec::new();
+    while let Ok(event) = event_rx.try_recv() {
+        terminal_events.push(event);
+    }
+    assert!(terminal_events.iter().any(|event| matches!(
         event.payload,
         Some(network_event::Payload::RealtimeState(ref state))
-            if state.state == RealtimeSessionState::Negotiating as i32
+            if state.state == RealtimeSessionState::Failed as i32
     )));
-
-    assert!(handle_io_event(&state, realtime_id, "peer-a", RealtimeIoEvent::PeerFailed,).await);
-    assert!(handle_io_event(&state, realtime_id, "peer-a", RealtimeIoEvent::IceFailed,).await);
     remove_realtime_session(&state, realtime_id, "peer-a").await;
     assert!(!state
         .realtime
@@ -181,19 +563,6 @@ async fn realtime_io_event_matrix_maps_lifecycle_and_failure_boundaries() {
 async fn realtime_session_io_removes_owner_after_driver_failure() {
     let (state, mut event_rx) = realtime_test_state().await;
     let realtime_id = "00112233445566778899aabbccddeeff";
-    state.realtime.lock().await.sessions.insert(
-        realtime_id.into(),
-        RealtimeSession {
-            peer_id: "peer-a".into(),
-            connection_session_id: None,
-            peer: None,
-            driver: None,
-            revision: 5,
-            remote_revision: 1,
-            ice_revision: 5,
-            seen_candidates: HashSet::new(),
-        },
-    );
     let driver = RealtimeIoDriver::bind(
         WebRtcPeer::new(WebRtcConfig::default()).expect("driver peer"),
         "127.0.0.1:0".parse().expect("driver bind address"),
@@ -201,6 +570,19 @@ async fn realtime_session_io_removes_owner_after_driver_failure() {
     .await
     .expect("driver");
     let driver = driver.into_handle();
+    state.realtime.lock().await.insert_new_session(
+        realtime_id.into(),
+        RealtimeSession {
+            peer_id: "peer-a".into(),
+            connection_session_id: None,
+            peer: None,
+            driver: Some(Arc::clone(&driver)),
+            revision: 5,
+            remote_revision: 1,
+            ice_revision: 5,
+            seen_candidates: HashSet::new(),
+        },
+    );
     let poison = Arc::clone(&driver);
     let poison_task = std::thread::spawn(move || {
         let _guard = poison.lock().expect("driver lock");
@@ -483,6 +865,7 @@ fn ice_restart_emits_a_new_offer_and_close_rejects_stale_revisions() {
     let restart_offer = restart.outbound.expect("restart offer");
     assert_eq!(restart_offer.kind, RealtimeSignalKind::WebRtcOffer);
     assert!(restart_offer.revision > answer.revision);
+    assert!(manager.session_generations.contains_key(realtime_id));
 
     assert!(apply_signal(
         &mut manager,
@@ -494,6 +877,7 @@ fn ice_restart_emits_a_new_offer_and_close_rejects_stale_revisions() {
     )
     .is_err());
     assert!(manager.sessions.contains_key(realtime_id));
+    assert!(manager.session_generations.contains_key(realtime_id));
     let closed = apply_signal(
         &mut manager,
         realtime_id,
@@ -1278,6 +1662,53 @@ async fn realtime_peer_and_session_helpers_fail_closed_and_remove_exact_owner() 
 }
 
 #[tokio::test]
+async fn stale_realtime_cleanup_does_not_remove_a_replacement_driver() {
+    let (state, _event_rx) = realtime_test_state().await;
+    let realtime_id = "00112233445566778899aabbccddeeff";
+    let old_driver = RealtimeIoDriver::bind(
+        WebRtcPeer::new(WebRtcConfig::default()).expect("old driver peer"),
+        "127.0.0.1:0".parse().expect("old driver bind address"),
+    )
+    .await
+    .expect("old driver")
+    .into_handle();
+    let replacement_driver = RealtimeIoDriver::bind(
+        WebRtcPeer::new(WebRtcConfig::default()).expect("replacement peer"),
+        "127.0.0.1:0"
+            .parse()
+            .expect("replacement driver bind address"),
+    )
+    .await
+    .expect("replacement driver")
+    .into_handle();
+    state.realtime.lock().await.sessions.insert(
+        realtime_id.into(),
+        RealtimeSession {
+            peer_id: "peer-a".into(),
+            connection_session_id: None,
+            peer: None,
+            driver: Some(Arc::clone(&replacement_driver)),
+            revision: 1,
+            remote_revision: 0,
+            ice_revision: 1,
+            seen_candidates: HashSet::new(),
+        },
+    );
+
+    remove_realtime_session_if_owned(&state, realtime_id, "peer-a", &old_driver).await;
+
+    let sessions = state.realtime.lock().await;
+    let session = sessions
+        .sessions
+        .get(realtime_id)
+        .expect("replacement session remains registered");
+    assert!(session
+        .driver
+        .as_ref()
+        .is_some_and(|driver| Arc::ptr_eq(driver, &replacement_driver)));
+}
+
+#[tokio::test]
 async fn realtime_manager_close_all_and_connection_close_are_owner_scoped() {
     let mut manager = RealtimeManager::default();
     let s1 = SessionId::from_bytes([1; 16]);
@@ -1308,6 +1739,7 @@ async fn realtime_manager_close_all_and_connection_close_are_owner_scoped() {
             "00112233445566778899aabbccddeeff".into(),
             "peer-a".into(),
             2,
+            0,
         )]
     );
     assert_eq!(manager.sessions.len(), 2);
@@ -1747,19 +2179,41 @@ async fn stop_realtime_session_closes_session_routes_close_and_emits_event() {
     let control = RecordingControl::new();
     *state.relay.control.write().await = Some(control.clone());
     let realtime_id = "00112233445566778899aabbccddeeff";
-    state.realtime.lock().await.sessions.insert(
+    let driver = RealtimeIoDriver::bind(
+        WebRtcPeer::new(WebRtcConfig::default()).expect("driver peer"),
+        "127.0.0.1:0".parse().expect("driver bind address"),
+    )
+    .await
+    .expect("driver")
+    .into_handle();
+    state.realtime.lock().await.insert_new_session(
         realtime_id.into(),
         RealtimeSession {
             peer_id: "peer-a".into(),
             connection_session_id: None,
             peer: None,
-            driver: None,
+            driver: Some(Arc::clone(&driver)),
             revision: 7,
             remote_revision: 5,
             ice_revision: 7,
             seen_candidates: HashSet::new(),
         },
     );
+    let generation = state
+        .realtime
+        .lock()
+        .await
+        .session_generation(realtime_id)
+        .expect("session generation");
+    let endpoint = crate::realtime_media::create_endpoint(
+        &state,
+        realtime_id,
+        "peer-a",
+        crate::realtime_media::RealtimeMediaDirection::Send,
+        generation,
+    )
+    .await
+    .expect("media endpoint");
 
     stop_session(
         &state,
@@ -1771,6 +2225,23 @@ async fn stop_realtime_session_closes_session_routes_close_and_emits_event() {
     .expect("existing realtime session stops");
 
     assert!(state.realtime.lock().await.sessions.is_empty());
+    assert!(matches!(
+        crate::realtime_media::push_endpoint(
+            &state,
+            endpoint,
+            EncodedVideoFrame::new(
+                VideoCodec::H264,
+                1,
+                90_000,
+                1280,
+                720,
+                true,
+                vec![0, 0, 0, 1, 0x65],
+                Instant::now() + Duration::from_secs(1),
+            ),
+        ),
+        Err(crate::realtime_media::RealtimeMediaError::StaleEndpoint)
+    ));
     let calls = control.signal_calls();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].kind, V2RealtimeSignalKind::Close);

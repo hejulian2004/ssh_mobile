@@ -14,6 +14,7 @@ pub(crate) fn emit_realtime_state(
     peer_id: &str,
     state: i32,
     revision: u64,
+    generation: u64,
     error: Option<ProtocolError>,
 ) {
     let _ = event_tx.send(NetworkEvent {
@@ -27,6 +28,7 @@ pub(crate) fn emit_realtime_state(
                 state,
                 revision,
                 error,
+                generation,
             },
         )),
     });
@@ -65,6 +67,7 @@ pub(crate) fn emit_realtime_snapshot(
     peer_id: &str,
     state: i32,
     revision: u64,
+    generation: u64,
     error: Option<ProtocolError>,
 ) {
     let _ = event_tx.send(NetworkEvent {
@@ -78,6 +81,7 @@ pub(crate) fn emit_realtime_snapshot(
                 state,
                 revision,
                 error,
+                generation,
             },
         )),
     });

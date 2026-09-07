@@ -1,4 +1,4 @@
-> Last updated: 2026-08-31
+> Last updated: 2026-09-04
 
 # Memory Map
 
@@ -114,6 +114,15 @@ and [ADR-033 telemetry](../../../../docs/adr/ADR-033-telemetry-data-tracking-arc
 - Backend API → Backend default + Relay README; add Front for admin consumers, SDK for wire/device changes.
 - Front Admin → Front overview/README/AGENTS; add Front UI Architecture for design system/shared UI/forms; add Backend for API/auth/session changes.
 - Client↔SDK → both defaults + architecture, both contracts, dependency/resource docs, exact ADRs.
+- Screen Share / Realtime Media (`feature_screen_share`, `realtime_media`, or
+  `network-webrtc`) → Client + SDK defaults and architecture, Transport and
+  Routing, Module Dependency, Resource Ownership, Compatibility Inventory,
+  `ADR-BUSINESS-RECOVERY-V2`, ADR-016/020/021/024/026 and ADR-034. Read the
+  protocol source/contract (`protocol/RELAY_V2_CONTRACT.md` and the owning
+  schema/generated-artifact contract) plus every nearest Feature/SDK/App
+  `AGENTS.md`/`README.md` when the boundary changes. Add Backend overview/current
+  state and Relay README only for Relay signaling/consent or TURN credential
+  issuance; add ADR-033 and telemetry design only for telemetry work.
 - Relay architecture → Backend + SDK architecture/current + Transport and Routing + Relay README + exact ADRs; add Front only for dashboard/API.
 - Telemetry → ADR-033 + [telemetry design](../../../../docs/数据埋点架构.md) + Client/Backend/Front overviews + `contracts/telemetry/`; add owning contracts for UI/storage.
 

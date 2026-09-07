@@ -36,6 +36,12 @@ extension _AppRuntimeFactoryCore on _AppRuntimeFactoryContext {
     runtimeRealtimeClient = RealtimeClientImpl(
       backend: AppRealtimeSessionBackend(networkRuntime: runtimeNetworkRuntime),
     );
+    runtimeRealtimeMediaBackend = AppRealtimeMediaBackend(
+      networkRuntime: runtimeNetworkRuntime,
+    );
+    runtimeRealtimeMediaSessionFactory = AppRealtimeMediaSessionFactory(
+      backend: runtimeRealtimeMediaBackend,
+    );
     cleanup.add(
       runtimeRealtimeClient.dispose,
       priority: _CleanupPriority.realtime,

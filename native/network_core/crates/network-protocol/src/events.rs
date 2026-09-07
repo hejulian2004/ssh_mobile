@@ -232,6 +232,8 @@ pub struct RealtimeStateChangedEvent {
     pub revision: u64,
     #[prost(message, optional, tag = "5")]
     pub error: Option<NetworkError>,
+    #[prost(uint64, tag = "6")]
+    pub generation: u64,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -248,7 +250,8 @@ pub struct RealtimeSignalEvent {
     pub payload: Vec<u8>,
 }
 
-/// Realtime Session 稳定后发布的完整状态快照；携带当前 revision 与最近错误。
+/// Realtime Session 稳定后发布的完整状态快照；携带当前 revision、native
+/// generation 与最近错误。
 #[derive(Clone, PartialEq, Message)]
 pub struct RealtimeSnapshotEvent {
     #[prost(string, tag = "1")]
@@ -261,6 +264,8 @@ pub struct RealtimeSnapshotEvent {
     pub revision: u64,
     #[prost(message, optional, tag = "5")]
     pub error: Option<NetworkError>,
+    #[prost(uint64, tag = "6")]
+    pub generation: u64,
 }
 
 #[derive(Clone, PartialEq, Message)]

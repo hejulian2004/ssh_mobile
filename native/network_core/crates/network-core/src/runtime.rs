@@ -157,6 +157,10 @@ pub(crate) struct RuntimeState {
     pub(crate) crypto: SessionCryptoManager,
     pub(crate) delivery: DeliveryManager,
     pub(crate) realtime: AsyncMutex<crate::realtime::RealtimeManager>,
+    /// Native-only endpoint leases for encoded screen-media ingress/egress.
+    /// The registry does not own a PeerConnection; it borrows the current
+    /// Realtime I/O owner and rejects stale session generations.
+    pub(crate) realtime_media: Mutex<crate::realtime_media::RealtimeMediaRegistry>,
     /// Runtime-owned Relay control/data/transfer state.
     pub(crate) relay: crate::relay_state::RelayDomainState,
     /// transport-network v2：本地 Discovery 生命周期 owner（§9/§29）。
@@ -211,6 +215,7 @@ impl RuntimeState {
             crypto: SessionCryptoManager::new(),
             delivery: DeliveryManager::new(),
             realtime: AsyncMutex::new(crate::realtime::RealtimeManager::default()),
+            realtime_media: Mutex::new(crate::realtime_media::RealtimeMediaRegistry::new()),
             relay: crate::relay_state::RelayDomainState::new(),
             local_discovery: RwLock::new(None),
             ready_session_index: crate::connect::ready_index::ReadySessionIndex::new(),
@@ -1599,6 +1604,118 @@ impl NetworkRuntime {
         (port != 0).then_some(port)
     }
 
+    /// Acquires an opaque native screen-media endpoint for a live Realtime
+    /// session. The endpoint is bound to the current runtime/session generation
+    /// and cannot expose the peer, socket, or media payload through this API.
+    pub fn create_realtime_media_endpoint(
+        &self,
+        realtime_id: &str,
+        peer_id: &str,
+        direction: crate::realtime_media::RealtimeMediaDirection,
+        expected_generation: u64,
+    ) -> Result<
+        crate::realtime_media::RealtimeMediaEndpointId,
+        crate::realtime_media::RealtimeMediaError,
+    > {
+        let state = self.media_state()?;
+        self.runtime
+            .block_on(crate::realtime_media::create_endpoint(
+                &state,
+                realtime_id,
+                peer_id,
+                direction,
+                expected_generation,
+            ))
+    }
+
+    /// Test-only seam used by network-ffi to exercise the complete C ABI
+    /// success path against a live native Realtime driver. It is excluded from
+    /// normal builds and never exposes the driver or PeerConnection handle.
+    #[cfg(feature = "ffi-test-support")]
+    #[doc(hidden)]
+    pub fn install_ffi_test_realtime_session(
+        &self,
+        realtime_id: &str,
+        peer_id: &str,
+    ) -> Result<u64, crate::realtime_media::RealtimeMediaError> {
+        let state = self.media_state()?;
+        self.runtime.block_on(async move {
+            let mut driver = network_webrtc::RealtimeIoDriver::bind(
+                network_webrtc::WebRtcPeer::new(network_webrtc::WebRtcConfig::default())
+                    .map_err(|_| crate::realtime_media::RealtimeMediaError::DriverUnavailable)?,
+                "127.0.0.1:0".parse().expect("valid loopback bind address"),
+            )
+            .await
+            .map_err(|_| crate::realtime_media::RealtimeMediaError::DriverUnavailable)?;
+            driver
+                .peer_mut()
+                .configure_h264_screen_video(
+                    network_webrtc::MediaDirection::Sendrecv,
+                    Some(0x1357_2468),
+                )
+                .map_err(|_| crate::realtime_media::RealtimeMediaError::DriverUnavailable)?;
+            let driver = driver.into_handle();
+            let mut manager = state.realtime.lock().await;
+            Ok(manager.insert_ffi_test_driver_session(
+                realtime_id.to_owned(),
+                peer_id.to_owned(),
+                driver,
+            ))
+        })
+    }
+
+    /// Test-only packet injection companion for
+    /// [`install_ffi_test_realtime_session`]. Real callers receive RTP from
+    /// the I/O driver; this only makes the pull half of the C ABI deterministic.
+    #[cfg(feature = "ffi-test-support")]
+    #[doc(hidden)]
+    pub fn inject_ffi_test_realtime_media_frame(
+        &self,
+        endpoint_id: crate::realtime_media::RealtimeMediaEndpointId,
+        frame: network_webrtc::EncodedVideoFrame,
+    ) -> Result<(), crate::realtime_media::RealtimeMediaError> {
+        let state = self.media_state()?;
+        crate::realtime_media::inject_test_endpoint_frame(&state, endpoint_id, frame)
+    }
+
+    /// Releases an endpoint lease. Release remains idempotent after runtime
+    /// stop because the registry has already invalidated every endpoint.
+    pub fn release_realtime_media_endpoint(
+        &self,
+        endpoint_id: crate::realtime_media::RealtimeMediaEndpointId,
+    ) -> Result<(), crate::realtime_media::RealtimeMediaError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| crate::realtime_media::RealtimeMediaError::Internal)?
+            .clone();
+        let Some(state) = state else {
+            return Ok(());
+        };
+        crate::realtime_media::release_endpoint(&state, endpoint_id)
+    }
+
+    /// Submits a native-resident encoded H.264 access unit to a send endpoint.
+    pub fn push_realtime_media_h264(
+        &self,
+        endpoint_id: crate::realtime_media::RealtimeMediaEndpointId,
+        frame: network_webrtc::EncodedVideoFrame,
+    ) -> Result<network_webrtc::VideoEnqueueResult, crate::realtime_media::RealtimeMediaError> {
+        let state = self.media_state()?;
+        crate::realtime_media::push_endpoint(&state, endpoint_id, frame)
+    }
+
+    /// Reads one native-resident encoded H.264 access unit from a receive
+    /// endpoint. It never routes through the protobuf event queue.
+    pub fn pop_realtime_media_h264(
+        &self,
+        endpoint_id: crate::realtime_media::RealtimeMediaEndpointId,
+    ) -> Result<Option<network_webrtc::EncodedVideoFrame>, crate::realtime_media::RealtimeMediaError>
+    {
+        let state = self.media_state()?;
+        crate::realtime_media::pop_endpoint(&state, endpoint_id)
+    }
+
     /// 返回原生轮询边界使用的 Tokio handle。
     pub fn handle(&self) -> &tokio::runtime::Handle {
         self.runtime.handle()
@@ -1648,17 +1765,34 @@ impl NetworkRuntime {
         let _ = self.event_tx.send(event);
     }
 
+    fn media_state(&self) -> Result<Arc<RuntimeState>, crate::realtime_media::RealtimeMediaError> {
+        if self.lifecycle.load(Ordering::Acquire) != RUNTIME_RUNNING {
+            return Err(crate::realtime_media::RealtimeMediaError::RuntimeNotRunning);
+        }
+        self.state
+            .lock()
+            .map_err(|_| crate::realtime_media::RealtimeMediaError::Internal)?
+            .clone()
+            .ok_or(crate::realtime_media::RealtimeMediaError::RuntimeNotRunning)
+    }
+
     /// Cancel the root, close every native I/O owner, then await every task
     /// registered in the supervisor before releasing the runtime state.
     fn shutdown_listener(&self, state: Arc<RuntimeState>) {
         self.runtime.block_on(async move {
             state.task_supervisor.cancel_root();
+            crate::realtime_media::invalidate_all(&state);
             state.peer_supervisors.stop_all();
             state.close_all_transport_paths().await;
             // 控制面 Drop 会中止后台读写 worker（RelayControlClient::drop）；显式
             // take 释放共享引用即可。
             state.relay.control.write().await.take();
             state.realtime.lock().await.close_all();
+            // A caller that observed `Running` immediately before `stop()`
+            // moved the lifecycle to Stopping can still hold a cloned state.
+            // Revoke again after the terminal peer close so that race cannot
+            // publish a fresh endpoint into a stopped runtime generation.
+            crate::realtime_media::invalidate_all(&state);
             if let Some(endpoint) = state.lifecycle.endpoint.write().await.take() {
                 endpoint.close(quinn::VarInt::from_u32(0), b"runtime stopping");
             }
@@ -1705,6 +1839,7 @@ impl Drop for NetworkRuntime {
                     }
                 }
                 if let Ok(mut realtime) = state.realtime.try_lock() {
+                    crate::realtime_media::invalidate_all(&state);
                     realtime.close_all();
                 }
                 state.peer_supervisors.stop_all();

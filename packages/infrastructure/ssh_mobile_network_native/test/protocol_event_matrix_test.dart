@@ -29,6 +29,27 @@ void main() {
       NativeOperationStatus.fromNativeCode(99),
       NativeOperationStatus.failure,
     );
+    const expected = <int, NativeOperationStatus>{
+      0: NativeOperationStatus.success,
+      -1: NativeOperationStatus.invalidArgument,
+      -2: NativeOperationStatus.unknownSession,
+      -3: NativeOperationStatus.failure,
+      -4: NativeOperationStatus.stopped,
+      -5: NativeOperationStatus.staleGeneration,
+      -6: NativeOperationStatus.staleEndpoint,
+      -7: NativeOperationStatus.directionMismatch,
+      -8: NativeOperationStatus.duplicateEndpoint,
+      -9: NativeOperationStatus.driverUnavailable,
+      -10: NativeOperationStatus.peerMismatch,
+      -11: NativeOperationStatus.frameRejected,
+    };
+    for (final entry in expected.entries) {
+      expect(
+        NativeOperationStatus.fromRealtimeMediaCode(entry.key),
+        entry.value,
+        reason: 'media status ${entry.key} must remain typed',
+      );
+    }
   });
 
   test('all public V2 command builders accept bounded edge values', () {

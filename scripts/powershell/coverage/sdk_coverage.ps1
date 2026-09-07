@@ -16,6 +16,7 @@ New-Item -ItemType Directory $run|Out-Null
 $packages=@(
  @{Name='network_sdk';Dir='packages\infrastructure\network_sdk';Tests=@('test/network_sdk_contract_test.dart','test/network_v2_contract_test.dart','test/network_v2_facade_test.dart','test/network_models_boundaries_test.dart','test/realtime_test.dart')},
  @{Name='network_transport';Dir='packages\infrastructure\network_transport';Tests=@('test/event_mux_test.dart','test/network_boundary_test.dart','test/network_runtime_test.dart','test/transport_contract_test.dart')},
+ @{Name='realtime_media';Dir='packages\infrastructure\realtime_media';Tests=@('test/realtime_media_lifecycle_test.dart','test/realtime_media_public_contract_test.dart')},
  @{Name='ssh_mobile_network_native';Dir='packages\infrastructure\ssh_mobile_network_native';Tests=@('test/ssh_mobile_network_native_test.dart','test/protocol_event_matrix_test.dart','test/protocol_event_matrix_events_test.dart')}
 )
 function Measure-Lcov([string]$Name,[string]$Path){

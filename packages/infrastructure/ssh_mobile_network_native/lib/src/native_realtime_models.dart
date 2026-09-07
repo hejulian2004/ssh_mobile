@@ -11,6 +11,7 @@ final class NativeRealtimeStateChangedEvent extends NativeNetworkEvent {
     required this.peerId,
     required this.state,
     required this.revision,
+    required this.generation,
     this.error,
   });
 
@@ -25,6 +26,10 @@ final class NativeRealtimeStateChangedEvent extends NativeNetworkEvent {
 
   /// Signaling revision associated with this state.
   final int revision;
+
+  /// Native-authoritative media/session generation. This is independent from
+  /// [revision] and is the only value accepted by media endpoint creation.
+  final int generation;
 
   /// Structured failure, when [state] is failed.
   final NativeNetworkError? error;
@@ -41,6 +46,7 @@ final class NativeRealtimeSnapshotEvent extends NativeNetworkEvent {
     required this.peerId,
     required this.state,
     required this.revision,
+    required this.generation,
     this.error,
   });
 
@@ -55,6 +61,10 @@ final class NativeRealtimeSnapshotEvent extends NativeNetworkEvent {
 
   /// Signaling revision associated with this snapshot.
   final int revision;
+
+  /// Native-authoritative media/session generation. This is independent from
+  /// [revision] and is the only value accepted by media endpoint creation.
+  final int generation;
 
   /// Structured failure, when [state] is failed.
   final NativeNetworkError? error;

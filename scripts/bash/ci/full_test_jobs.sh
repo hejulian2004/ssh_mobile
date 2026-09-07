@@ -253,14 +253,17 @@ job_sdk() {
   step 'Format SDK packages' melos_exec 'dart format --output=none --set-exit-if-changed lib test' \
     --scope=network_sdk \
     --scope=network_transport \
+    --scope=realtime_media \
     --scope=ssh_mobile_network_native
   step 'Analyze SDK packages' melos_exec 'flutter analyze --no-fatal-infos --no-pub' \
     --scope=network_sdk \
     --scope=network_transport \
+    --scope=realtime_media \
     --scope=ssh_mobile_network_native
   step 'Test SDK packages' melos_exec "flutter test --no-pub --concurrency $MELOS_TEST_CONCURRENCY" \
     --scope=network_sdk \
     --scope=network_transport \
+    --scope=realtime_media \
     --scope=ssh_mobile_network_native
 }
 

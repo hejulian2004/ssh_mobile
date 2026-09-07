@@ -118,7 +118,10 @@ final class NetworkRuntimeImpl implements NetworkRuntime {
     if (handle == null) {
       throw StateError('Network native handle is unavailable.');
     }
-    return RuntimeNetworkRealtimeGateway(_RuntimeCommandGateway(handle));
+    return RuntimeNetworkRealtimeGateway(
+      _RuntimeCommandGateway(handle),
+      handle,
+    );
   }
 
   Future<void> _initializeCapability(NetworkCapability capability) async {

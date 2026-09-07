@@ -1,4 +1,4 @@
-最新更新时间：2026-08-25
+最新更新时间：2026-09-07
 
 # 兼容层迁移引用清单
 
@@ -19,6 +19,11 @@ Network V2 的 wire/pairing/storage 重构已经完成。LAN Share 当前遵循
 `ADR-032-lan-control-v2-breaking-refactor.md` 的 breaking-only 约束：旧 pairing
 schema、`pending_remote` 和 `/api/lan/upload` 的删除由该 ADR 的专项验收负责，不能
 以本表的“旧 App 路径已关闭”代替。
+
+屏幕共享的 `realtime_media` 是新增的 Infrastructure 生命周期契约，不是旧 App
+路径兼容层：此前 `network_sdk` 中的合成 `remoteVideo` 帧占位 API 已在 Phase 2
+删除，替换为绑定 `(realtimeId, peerId, generation, direction)` 的不透明 native
+endpoint。没有保留帧流别名、降级路径或旧导出。
 
 | 模块 | 唯一 Package Owner | 旧引用基线 | 状态 | 保留的 App Shell 边界 | 删除条件 |
 | --- | --- | ---: | --- | --- | --- |

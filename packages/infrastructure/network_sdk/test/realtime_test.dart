@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:test/test.dart';
 import 'package:network_sdk/network_sdk.dart';
@@ -12,10 +11,7 @@ void main() {
       realtimeId: '00112233445566778899aabbccddeeff',
       peerId: 'peer-a',
     );
-    final frames = <RealtimeVideoFrame>[];
-    final frameSubscription = session.remoteVideo.listen(frames.add);
     addTearDown(() async {
-      await frameSubscription.cancel();
       await client.dispose();
     });
 
@@ -40,14 +36,6 @@ void main() {
       ),
     );
     backend.emit(
-      RealtimeRemoteVideoFrameEvent(
-        realtimeId: '00112233445566778899aabbccddeeff',
-        peerId: 'peer-a',
-        bytes: Uint8List.fromList(<int>[1, 2, 3]),
-        timestamp: DateTime.utc(2026, 8, 12),
-      ),
-    );
-    backend.emit(
       const RealtimeAudioStateChangedEvent(
         realtimeId: '00112233445566778899aabbccddeeff',
         peerId: 'peer-a',
@@ -58,7 +46,6 @@ void main() {
 
     expect(session.state, RealtimeSessionState.connected);
     expect(session.audioState, RealtimeAudioState.active);
-    expect(frames.single.bytes, orderedEquals(<int>[1, 2, 3]));
 
     expect(await session.stop(), isA<SdkSuccess<void>>());
     expect(session.state, RealtimeSessionState.connected);
@@ -447,6 +434,42 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(session.state, RealtimeSessionState.connected);
+    },
+  );
+
+  test(
+    'session exposes native generation without using signaling revision',
+    () async {
+      final backend = _FakeRealtimeBackend();
+      final client = RealtimeClientImpl(backend: backend);
+      final session = client.createSession(
+        realtimeId: '00112233445566778899aabbccddeeff',
+        peerId: 'peer-a',
+      );
+      addTearDown(client.dispose);
+
+      await session.start();
+      backend.emit(
+        const RealtimeSessionStateChangedEvent(
+          realtimeId: '00112233445566778899aabbccddeeff',
+          peerId: 'peer-a',
+          state: RealtimeSessionState.connected,
+          revision: 99,
+          generation: 7,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(session.revision, 99);
+      expect(session.generation, 7);
+      expect(
+        session.mediaToken,
+        const RealtimeSessionToken(
+          realtimeId: '00112233445566778899aabbccddeeff',
+          peerId: 'peer-a',
+          generation: 7,
+        ),
+      );
     },
   );
 }

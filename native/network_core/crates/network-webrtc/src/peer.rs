@@ -2,7 +2,6 @@ use std::time::Instant;
 
 use bytes::BytesMut;
 use rtc::data_channel::{RTCDataChannelId, RTCDataChannelInit};
-use rtc::peer_connection::configuration::media_engine::MediaEngine;
 use rtc::peer_connection::configuration::{
     RTCConfigurationBuilder, RTCIceServer, RTCIceTransportPolicy,
 };
@@ -12,12 +11,13 @@ use rtc::peer_connection::sdp::RTCSessionDescription;
 use rtc::peer_connection::transport::RTCIceCandidateInit;
 use rtc::peer_connection::{RTCPeerConnection, RTCPeerConnectionBuilder};
 use rtc::rtp_transceiver::rtp_sender::{
-    RTCRtpCodingParameters, RTCRtpEncodingParameters, RtpCodecKind,
+    RTCRtpCodec, RTCRtpCodingParameters, RTCRtpEncodingParameters, RtpCodecKind,
 };
 use rtc::rtp_transceiver::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit};
 use rtc::sansio::Protocol;
 use rtc::shared::TaggedBytesMut;
 
+use crate::media::{h264_media_engine, H264ScreenVideo, RtpMediaError, VideoFrameError};
 use crate::qos::{MediaFrame, MediaKind, MediaQos, MediaQosConfig};
 use crate::signaling::{
     DescriptionType, IceCandidate, SessionDescription, SignalingError, SignalingState,
@@ -103,12 +103,23 @@ pub enum WebRtcError {
     DataChannelNotFound(RTCDataChannelId),
     #[error("WebRTC data channel payload exceeds the size limit")]
     DataChannelPayloadTooLarge,
+    #[error("H.264 screen video has not been configured for this peer")]
+    ScreenVideoNotConfigured,
+    #[error("H.264 screen video cannot send until signaling negotiation is connected")]
+    ScreenVideoNotReady,
+    #[error("H.264 screen video is already configured for this peer")]
+    ScreenVideoAlreadyConfigured,
+    #[error(transparent)]
+    VideoFrame(#[from] VideoFrameError),
+    #[error(transparent)]
+    RtpMedia(#[from] RtpMediaError),
 }
 
 pub struct WebRtcPeer {
-    peer: RTCPeerConnection,
-    signaling: SignalingStateMachine,
+    pub(crate) peer: RTCPeerConnection,
+    pub(crate) signaling: SignalingStateMachine,
     qos: MediaQos,
+    pub(crate) screen_video: Option<H264ScreenVideo>,
 }
 
 impl WebRtcPeer {
@@ -124,8 +135,7 @@ impl WebRtcPeer {
             .iter()
             .map(to_rtc_ice_server)
             .collect::<Result<Vec<_>, _>>()?;
-        let mut media_engine = MediaEngine::default();
-        media_engine.register_default_codecs().map_err(rtc_error)?;
+        let media_engine = h264_media_engine()?;
         let mut configuration_builder =
             RTCConfigurationBuilder::new().with_ice_servers(ice_servers);
         if config.relay_only {
@@ -143,6 +153,7 @@ impl WebRtcPeer {
             peer,
             signaling: SignalingStateMachine::default(),
             qos: MediaQos::from_config(config.qos),
+            screen_video: None,
         })
     }
 
@@ -239,6 +250,9 @@ impl WebRtcPeer {
     pub fn restart_ice(&mut self) -> Result<(), WebRtcError> {
         self.peer.restart_ice();
         self.signaling.restart()?;
+        if let Some(video) = &mut self.screen_video {
+            video.on_ice_restart();
+        }
         Ok(())
     }
 
@@ -247,6 +261,16 @@ impl WebRtcPeer {
         kind: MediaKind,
         direction: MediaDirection,
         ssrc: Option<u32>,
+    ) -> Result<(), WebRtcError> {
+        self.add_media_transceiver_with_codec(kind, direction, ssrc, None)
+    }
+
+    pub(crate) fn add_media_transceiver_with_codec(
+        &mut self,
+        kind: MediaKind,
+        direction: MediaDirection,
+        ssrc: Option<u32>,
+        codec: Option<RTCRtpCodec>,
     ) -> Result<(), WebRtcError> {
         let (codec_kind, rtc_direction) = match kind {
             MediaKind::Audio => (RtpCodecKind::Audio, direction),
@@ -276,6 +300,7 @@ impl WebRtcPeer {
                     ssrc: Some(ssrc),
                     ..Default::default()
                 },
+                codec: codec.clone().unwrap_or_default(),
                 ..Default::default()
             }]
         } else {
@@ -357,6 +382,9 @@ impl WebRtcPeer {
 
     pub fn on_connection_lost(&mut self) {
         self.qos.on_connection_lost();
+        if let Some(video) = &mut self.screen_video {
+            video.on_connection_lost();
+        }
     }
 
     pub fn take_keyframe_request(&mut self) -> bool {
@@ -393,6 +421,7 @@ impl WebRtcPeer {
 
     pub fn close(&mut self) -> Result<(), WebRtcError> {
         self.signaling.close();
+        self.on_connection_lost();
         self.peer.close().map_err(rtc_error)
     }
 }
@@ -415,7 +444,7 @@ fn to_rtc_ice_server(config: &IceServerConfig) -> Result<RTCIceServer, WebRtcErr
     })
 }
 
-fn rtc_error(error: impl std::fmt::Display) -> WebRtcError {
+pub(crate) fn rtc_error(error: impl std::fmt::Display) -> WebRtcError {
     WebRtcError::Rtc(error.to_string())
 }
 

@@ -1,0 +1,14 @@
+name: realtime_media
+description: Opaque lifecycle contracts for native realtime screen media.
+publish_to: none
+
+resolution: workspace
+
+environment:
+  sdk: '>=3.12.0 <4.0.0'
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+  test: 1.31.1

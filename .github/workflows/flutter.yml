@@ -205,18 +205,21 @@ jobs:
           dart run melos run format
           --scope=network_sdk
           --scope=network_transport
+          --scope=realtime_media
           --scope=ssh_mobile_network_native
       - name: Analyze SDK packages
         run: >-
           dart run melos run analyze
           --scope=network_sdk
           --scope=network_transport
+          --scope=realtime_media
           --scope=ssh_mobile_network_native
       - name: Test SDK packages
         run: >-
           dart run melos run test
           --scope=network_sdk
           --scope=network_transport
+          --scope=realtime_media
           --scope=ssh_mobile_network_native
 
   lan-network-v2-targeted:

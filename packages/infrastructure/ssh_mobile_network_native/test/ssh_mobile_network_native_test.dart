@@ -27,6 +27,65 @@ void main() {
     await runtime.dispose();
   });
 
+  test(
+    'media endpoint controls are opaque and stop with their runtime',
+    () async {
+      final runtime = await native.createRuntime();
+      const realtimeId = '00112233445566778899aabbccddeeff';
+
+      expect(
+        runtime
+            .createRealtimeMediaEndpoint(
+              realtimeId: 'invalid',
+              peerId: 'peer-a',
+              direction: NativeRealtimeMediaDirection.send,
+              generation: 1,
+            )
+            .status,
+        NativeOperationStatus.invalidArgument,
+      );
+      expect(
+        runtime
+            .createRealtimeMediaEndpoint(
+              realtimeId: realtimeId,
+              peerId: 'peer-a',
+              direction: NativeRealtimeMediaDirection.send,
+              generation: 1,
+            )
+            .status,
+        NativeOperationStatus.unknownSession,
+      );
+      expect(
+        runtime
+            .createRealtimeMediaEndpoint(
+              realtimeId: realtimeId,
+              peerId: 'peer-a',
+              direction: NativeRealtimeMediaDirection.send,
+              generation: 0,
+            )
+            .status,
+        NativeOperationStatus.invalidArgument,
+      );
+      expect(await runtime.stop(), NativeOperationStatus.success);
+      expect(
+        runtime
+            .createRealtimeMediaEndpoint(
+              realtimeId: realtimeId,
+              peerId: 'peer-a',
+              direction: NativeRealtimeMediaDirection.receive,
+              generation: 1,
+            )
+            .status,
+        NativeOperationStatus.stopped,
+      );
+      expect(
+        runtime.releaseRealtimeMediaEndpoint(NativeRealtimeMediaEndpointId(1)),
+        NativeOperationStatus.success,
+      );
+      await runtime.dispose();
+    },
+  );
+
   test('native runtime polls events on a helper isolate', () async {
     final runtime = await native.createRuntime();
     addTearDown(runtime.dispose);
@@ -271,6 +330,8 @@ void main() {
       NativeRealtimeSessionState.connected.wireValue,
       0x20,
       0x07,
+      0x30,
+      0x01,
     ];
     final frame = Uint8List.fromList(<int>[
       0x0a,
@@ -293,6 +354,7 @@ void main() {
     expect(snapshot.peerId, equals('peer-a'));
     expect(snapshot.state, NativeRealtimeSessionState.connected);
     expect(snapshot.revision, 7);
+    expect(snapshot.generation, 1);
     expect(snapshot.error, isNull);
   });
 
@@ -319,6 +381,8 @@ void main() {
       NativeRealtimeSessionState.failed.wireValue,
       0x20,
       0x03,
+      0x30,
+      0x01,
       0x2a,
       errorNested.length,
       ...errorNested,
@@ -341,6 +405,7 @@ void main() {
     final snapshot = event! as NativeRealtimeSnapshotEvent;
     expect(snapshot.state, NativeRealtimeSessionState.failed);
     expect(snapshot.revision, 3);
+    expect(snapshot.generation, 1);
     expect(snapshot.error, isNotNull);
     expect(snapshot.error!.code, 12);
     expect(

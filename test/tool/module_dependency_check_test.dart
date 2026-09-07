@@ -14,7 +14,7 @@ void _testCurrentRepositoryPasses() {
     repositoryRoot: Directory.current,
   ).audit();
   _expect(report.isValid, '当前 workspace 不应有依赖违规：${report.violations}');
-  _expect(report.packages.length == 21, '应审计根 workspace 的 21 个成员。');
+  _expect(report.packages.length == 22, '应审计根 workspace 的 22 个成员。');
   _expect(
     report.edges.any(
       (edge) =>

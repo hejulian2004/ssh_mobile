@@ -293,7 +293,7 @@ void main() {
     r'^\s+- ((?:apps|packages)/[^\s]+)$',
     multiLine: true,
   ).allMatches(pubspec).map((match) => match.group(1)!).toList();
-  _expect(workspaceMembers.length == 21, 'Workspace Member 数量发生漂移');
+  _expect(workspaceMembers.length == 22, 'Workspace Member 数量发生漂移');
   for (final member in workspaceMembers) {
     _expect(
       Directory('${root.path}/$member').existsSync(),
@@ -470,6 +470,7 @@ const _featurePackageNames = <String>[
 const _sdkPackageNames = <String>[
   'network_sdk',
   'network_transport',
+  'realtime_media',
   'ssh_mobile_network_native',
 ];
 

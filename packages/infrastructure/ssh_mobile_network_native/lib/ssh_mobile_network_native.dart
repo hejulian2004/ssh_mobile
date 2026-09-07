@@ -3,16 +3,21 @@
 // 网络状态由 Rust 运行时拥有；Dart 只提交命令并轮询类型化线协议事件。
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
 import 'src/native_operation_status.dart';
+import 'src/native_realtime_media.dart';
 import 'src/native_realtime_protocol.dart';
 import 'src/network_native_isolate.dart';
 export 'src/native_operation_status.dart';
+export 'src/native_realtime_media.dart';
 export 'src/native_realtime_protocol.dart';
+
+part 'src/native_realtime_media_bindings.dart';
 
 enum _NativeRuntimeLifecycle { running, stopping, stopped, destroyed }
 
@@ -275,6 +280,74 @@ class NativeNetworkRuntime {
     }
   }
 
+  /// Requests one native-only media endpoint for the active realtime session.
+  ///
+  /// Dart receives only the opaque lease ID. The native capture, encoder,
+  /// decoder, RTP path, and renderer retain all high-frequency media data.
+  NativeRealtimeMediaEndpointCreateResult createRealtimeMediaEndpoint({
+    required String realtimeId,
+    required String peerId,
+    required NativeRealtimeMediaDirection direction,
+    required int generation,
+  }) {
+    if (_handle == nullptr || _lifecycle != _NativeRuntimeLifecycle.running) {
+      return const NativeRealtimeMediaEndpointCreateResult(
+        status: NativeOperationStatus.stopped,
+      );
+    }
+    if (!_isValidRealtimeMediaId(realtimeId) ||
+        !_isValidRealtimeMediaPeerId(peerId) ||
+        generation <= 0) {
+      return const NativeRealtimeMediaEndpointCreateResult(
+        status: NativeOperationStatus.invalidArgument,
+      );
+    }
+
+    final realtimeIdBytes = utf8.encode(realtimeId);
+    final peerIdBytes = utf8.encode(peerId);
+    final realtimeIdPointer = realtimeId.toNativeUtf8();
+    final peerIdPointer = peerId.toNativeUtf8();
+    final outEndpoint = calloc<Uint64>();
+    try {
+      final status = NativeOperationStatus.fromRealtimeMediaCode(
+        _sshNetRealtimeMediaEndpointCreateNative(
+          _handle,
+          realtimeIdPointer.cast<Uint8>(),
+          realtimeIdBytes.length,
+          peerIdPointer.cast<Uint8>(),
+          peerIdBytes.length,
+          generation,
+          direction.nativeValue,
+          outEndpoint,
+        ),
+      );
+      if (!status.isSuccess || outEndpoint.value == 0) {
+        return NativeRealtimeMediaEndpointCreateResult(status: status);
+      }
+      return NativeRealtimeMediaEndpointCreateResult(
+        status: status,
+        endpointId: NativeRealtimeMediaEndpointId(outEndpoint.value),
+      );
+    } finally {
+      calloc.free(realtimeIdPointer);
+      calloc.free(peerIdPointer);
+      calloc.free(outEndpoint);
+    }
+  }
+
+  /// Releases a media endpoint ID. Releasing after native shutdown is a safe
+  /// no-op because shutdown invalidates the whole endpoint generation first.
+  NativeOperationStatus releaseRealtimeMediaEndpoint(
+    NativeRealtimeMediaEndpointId endpointId,
+  ) {
+    if (_handle == nullptr || _lifecycle != _NativeRuntimeLifecycle.running) {
+      return NativeOperationStatus.success;
+    }
+    return NativeOperationStatus.fromRealtimeMediaCode(
+      _sshNetRealtimeMediaEndpointReleaseNative(_handle, endpointId.value),
+    );
+  }
+
   /// Sends a bounded SDP/ICE/close signal through the native control plane.
   NativeOperationStatus sendRealtimeSignal({
     required String realtimeId,
@@ -396,4 +469,12 @@ class NativeNetworkRuntime {
       return null;
     }
   }
+}
+
+bool _isValidRealtimeMediaId(String value) =>
+    RegExp(r'^[0-9a-f]{32}$').hasMatch(value);
+
+bool _isValidRealtimeMediaPeerId(String value) {
+  final bytes = utf8.encode(value);
+  return value.trim().isNotEmpty && bytes.length <= 128;
 }

@@ -1,9 +1,9 @@
-最新更新时间：2026-08-30
+最新更新时间：2026-09-07
 
 # 模块依赖审计
 
 本文件记录 Step 32 的最终依赖审计结果。审计对象是根 `pubspec.yaml` 明确列出的
-21 个 workspace 成员，依赖边只统计各 Package `dependencies` 中指向另一个
+22 个 workspace 成员，依赖边只统计各 Package `dependencies` 中指向另一个
 workspace 成员的直接生产依赖。
 
 ## 审计命令
@@ -63,6 +63,7 @@ Feature。Feature 之间默认禁止直接依赖，当前唯一登记的例外�
 | Feature | `feature_webview` | `app_core`, `app_ui` | WebView 会话与安全策略 |
 | Infrastructure | `network_transport` | `app_core`, `ssh_mobile_network_native` | App Scope 网络门面和 Native handle 适配器 |
 | Infrastructure | `network_sdk` | 无 | Flutter 层 Bootstrap、鉴权 API、Session、事件流客户端及注入式 JSON 适配 |
+| Infrastructure | `realtime_media` | 无 | 不透明屏幕媒体端点的 Dart 生命周期契约；不拥有 Runtime、采集、编解码或渲染实现 |
 | Infrastructure | `ssh_core` | `app_core`, `connection_core` | SSH Session、Pool、Client 和 Host Key 契约 |
 | Infrastructure | `ssh_mobile_network_native` | 无 | Dart/FFI Native 网络绑定 |
 

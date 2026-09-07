@@ -147,6 +147,11 @@ pub async fn run_realtime_io(
             let mut driver = lock_driver(&handle)?;
             let socket = driver.socket();
             let local_addr = driver.local_addr_value();
+            let now = Instant::now();
+            // Encoded screen frames are drained directly into the sole native
+            // RTP sender before network packets are collected. They never use
+            // the DataChannel or this runtime event channel.
+            driver.peer.flush_pending_h264_screen_video(now)?;
             let mut outbound = Vec::new();
             while let Some(packet) = driver.peer.poll_network_packet() {
                 if packet.transport.transport_protocol != TransportProtocol::UDP {
@@ -158,15 +163,27 @@ pub async fn run_realtime_io(
             }
             let mut pending_events = Vec::new();
             while let Some(event) = driver.peer.poll_event() {
-                pending_events.extend(map_peer_event(event)?);
+                driver.peer.observe_screen_video_event(&event);
+                for mapped in map_peer_event(event)? {
+                    apply_terminal_media_policy(driver.peer_mut(), &mapped);
+                    pending_events.push(mapped);
+                }
             }
             while let Some(message) = driver.peer.poll_message() {
-                if let RTCMessage::DataChannelMessage(channel_id, message) = message {
-                    pending_events.push(RealtimeIoEvent::DataChannelMessage {
-                        channel_id,
-                        is_string: message.is_string,
-                        payload: message.data.to_vec(),
-                    });
+                match message {
+                    RTCMessage::DataChannelMessage(channel_id, message) => {
+                        pending_events.push(RealtimeIoEvent::DataChannelMessage {
+                            channel_id,
+                            is_string: message.is_string,
+                            payload: message.data.to_vec(),
+                        });
+                    }
+                    RTCMessage::RtpPacket(track_id, packet) => {
+                        driver
+                            .peer
+                            .receive_h264_screen_video_rtp_for_track(&track_id, &packet, now)?;
+                    }
+                    _ => {}
                 }
             }
             let timeout = driver.peer.poll_timeout();
@@ -272,6 +289,17 @@ fn map_peer_event(event: RTCPeerConnectionEvent) -> Result<Vec<RealtimeIoEvent>,
         _ => {}
     }
     Ok(mapped)
+}
+
+fn apply_terminal_media_policy(peer: &mut WebRtcPeer, event: &RealtimeIoEvent) {
+    if matches!(
+        event,
+        RealtimeIoEvent::IceFailed
+            | RealtimeIoEvent::PeerDisconnected
+            | RealtimeIoEvent::PeerFailed
+    ) {
+        peer.on_connection_lost();
+    }
 }
 
 fn host_candidate(ip: IpAddr, port: u16) -> String {

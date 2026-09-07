@@ -127,6 +127,7 @@ report_dart_misses() {
 
 network_sdk_dir="$ROOT_DIR/packages/infrastructure/network_sdk"
 network_transport_dir="$ROOT_DIR/packages/infrastructure/network_transport"
+realtime_media_dir="$ROOT_DIR/packages/infrastructure/realtime_media"
 native_sdk_dir="$ROOT_DIR/packages/infrastructure/ssh_mobile_network_native"
 
 run_dart_package network_sdk "$network_sdk_dir" "$RUN_DIR/network-sdk.lcov" \
@@ -140,6 +141,9 @@ run_dart_package network_transport "$network_transport_dir" "$RUN_DIR/network-tr
   test/network_boundary_test.dart \
   test/network_runtime_test.dart \
   test/transport_contract_test.dart
+run_dart_package realtime_media "$realtime_media_dir" "$RUN_DIR/realtime-media.lcov" \
+  test/realtime_media_lifecycle_test.dart \
+  test/realtime_media_public_contract_test.dart
 run_dart_package ssh_mobile_network_native "$native_sdk_dir" "$RUN_DIR/native-sdk.lcov" \
   test/ssh_mobile_network_native_test.dart \
   test/protocol_event_matrix_test.dart \
@@ -147,10 +151,11 @@ run_dart_package ssh_mobile_network_native "$native_sdk_dir" "$RUN_DIR/native-sd
 
 dart_total_found=0
 dart_total_hit=0
-for package_name in network_sdk network_transport ssh_mobile_network_native; do
+for package_name in network_sdk network_transport realtime_media ssh_mobile_network_native; do
   case "$package_name" in
     network_sdk) profile="$RUN_DIR/network-sdk.lcov" ;;
     network_transport) profile="$RUN_DIR/network-transport.lcov" ;;
+    realtime_media) profile="$RUN_DIR/realtime-media.lcov" ;;
     ssh_mobile_network_native) profile="$RUN_DIR/native-sdk.lcov" ;;
   esac
   coverage_line="$(dart_coverage "$package_name" "$profile")" || {

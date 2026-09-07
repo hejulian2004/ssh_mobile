@@ -7,6 +7,14 @@
 enum NativeOperationStatus {
   success,
   invalidArgument,
+  unknownSession,
+  staleGeneration,
+  staleEndpoint,
+  directionMismatch,
+  duplicateEndpoint,
+  driverUnavailable,
+  peerMismatch,
+  frameRejected,
   stopped,
   failure;
 
@@ -17,6 +25,27 @@ enum NativeOperationStatus {
     -4 => stopped,
     _ => failure,
   };
+
+  /// Converts the media-bridge ABI status space. The general command ABI
+  /// keeps its historical `-2 == invalidArgument` mapping; media lifecycle
+  /// calls use this typed translation so stale/ownership failures survive the
+  /// Dart/native boundary.
+  static NativeOperationStatus fromRealtimeMediaCode(int value) =>
+      switch (value) {
+        0 => success,
+        -1 => invalidArgument,
+        -2 => unknownSession,
+        -3 => failure,
+        -4 => stopped,
+        -5 => staleGeneration,
+        -6 => staleEndpoint,
+        -7 => directionMismatch,
+        -8 => duplicateEndpoint,
+        -9 => driverUnavailable,
+        -10 => peerMismatch,
+        -11 => frameRejected,
+        _ => failure,
+      };
 
   /// 返回当前状态是否表示操作已成功完成。
   bool get isSuccess => this == success;

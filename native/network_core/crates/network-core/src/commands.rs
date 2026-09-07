@@ -180,7 +180,6 @@ pub(crate) async fn dispatch_command(
     command: NetworkCommand,
     state: Arc<RuntimeState>,
 ) -> Result<(), ProtocolError> {
-    let command_id = command.command_id.clone();
     if command.protocol_version != NETWORK_PROTOCOL_VERSION {
         return Err(protocol_error(
             NetworkErrorCode::InvalidArgument,
@@ -196,6 +195,17 @@ pub(crate) async fn dispatch_command(
             "command_id must contain 1-128 characters",
         ));
     }
+    // Command payloads have independent, potentially substantial async
+    // lifecycles (notably native WebRTC I/O). Heap-bound the selected payload
+    // future so command-worker stack use stays bounded as domains evolve.
+    Box::pin(dispatch_command_payload(command, state)).await
+}
+
+async fn dispatch_command_payload(
+    command: NetworkCommand,
+    state: Arc<RuntimeState>,
+) -> Result<(), ProtocolError> {
+    let command_id = command.command_id.clone();
     match command.payload {
         Some(network_command::Payload::ConfigureRuntime(config)) => {
             peer::configure_runtime(state, config).await

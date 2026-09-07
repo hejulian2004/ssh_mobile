@@ -911,8 +911,10 @@ final class _FakeRealtimeSession implements RealtimeSession {
   int get revision => 0;
 
   @override
-  Stream<RealtimeVideoFrame> get remoteVideo =>
-      const Stream<RealtimeVideoFrame>.empty();
+  int? get generation => null;
+
+  @override
+  RealtimeSessionToken? get mediaToken => null;
 
   @override
   RealtimeAudioState get audioState => RealtimeAudioState.unavailable;

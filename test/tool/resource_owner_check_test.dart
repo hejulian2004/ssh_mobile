@@ -18,6 +18,18 @@ void _testCurrentResourceTablePasses() {
     report.records.length >= requiredResourceNames.length,
     '资源表至少应覆盖所有关键资源。',
   );
+  for (final resource in <String>[
+    'RealtimeMediaSession',
+    'RealtimeMediaEndpoint',
+    'Native media ingress queue',
+    'Native media egress queue',
+    'RemoteVideoSurface',
+  ]) {
+    _expect(
+      report.records.any((record) => record.resource == resource),
+      '屏幕媒体资源必须有明确 Owner：$resource',
+    );
+  }
 }
 
 void _testIncompleteResourceTableIsRejected() {

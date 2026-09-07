@@ -1,4 +1,4 @@
-> Last updated: 2026-08-31
+> Last updated: 2026-09-07
 
 # Coverage policy
 
@@ -105,7 +105,7 @@ error mapping remains covered by Flutter tests.
 | `front_coverage.sh` | React/Vite `front/src`, with generated/test/bootstrap files excluded | Vitest statements, lines, functions, and branches: 90% each |
 | `backend_coverage.sh` | Hand-written Go Relay and Admin code; generated protobuf/catalog and process-only `cmd/{relay,admin}/main.go` excluded | Go line coverage: 90%; hand-written `internal/telemetry` has its own 90% gate |
 | `client_coverage.sh` | App-owned Network Protocol V2 boundary in `apps/ssh_mobile_full/lib/services/network/`, exercised by its codec, transfer, realtime, and runtime tests | Dart line coverage: 90% |
-| `sdk_coverage.sh` | Dart `network_sdk`, `network_transport`, and `ssh_mobile_network_native` public libraries, plus the public Rust SDK crates (`network-ffi`, `network-identity`, `network-nat`, `network-protocol`, `network-quic`, `network-relay-proto`, `network-transfer`, `network-transport`, `network-webrtc`) | Each Dart package and the Rust public-crate aggregate: 90% lines |
+| `sdk_coverage.sh` | Dart `network_sdk`, `network_transport`, `realtime_media`, and `ssh_mobile_network_native` public libraries, plus the public Rust SDK crates (`network-ffi`, `network-identity`, `network-nat`, `network-protocol`, `network-quic`, `network-relay-proto`, `network-transfer`, `network-transport`, `network-webrtc`) | Each Dart package and the Rust public-crate aggregate: 90% lines |
 
 Set `BACKEND_TELEMETRY_COVERAGE_MINIMUM` to override the telemetry sub-gate
 independently; it defaults to `BACKEND_COVERAGE_MINIMUM` when unset. Both

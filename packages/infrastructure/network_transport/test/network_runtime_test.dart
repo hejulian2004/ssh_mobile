@@ -373,6 +373,23 @@ final class _FakeNativeNetworkHandle implements NativeNetworkHandle {
       : TransportOperationStatus.success;
 
   @override
+  NativeRealtimeMediaEndpointCreateResult createMediaEndpoint({
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  }) => const NativeRealtimeMediaEndpointCreateResult(
+    status: NativeOperationStatus.driverUnavailable,
+  );
+
+  @override
+  NativeOperationStatus releaseMediaEndpoint(
+    NativeRealtimeMediaEndpointId endpointId,
+  ) => _closed
+      ? NativeOperationStatus.success
+      : NativeOperationStatus.staleEndpoint;
+
+  @override
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
@@ -413,6 +430,8 @@ Uint8List _connectedRealtimeStateFrame() {
     NativeRealtimeSessionState.connected.wireValue,
     0x20,
     0x03,
+    0x30,
+    0x01,
   ];
   return Uint8List.fromList(<int>[
     0x0a,

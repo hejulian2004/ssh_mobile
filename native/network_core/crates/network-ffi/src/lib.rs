@@ -16,6 +16,8 @@ use std::slice;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod realtime_media;
+
 pub const SSH_NET_ABI_VERSION: u32 = 1;
 pub const SSH_NET_MAX_COMMAND_BYTES: usize = 1024 * 1024;
 pub const SSH_NET_MAX_EVENT_BYTES: usize = 1024 * 1024;
@@ -637,3 +639,7 @@ pub unsafe extern "C" fn ssh_net_runtime_destroy(handle: SshNetRuntimeHandle) ->
 #[cfg(test)]
 #[path = "tests/mod.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/realtime_media.rs"]
+mod realtime_media_tests;

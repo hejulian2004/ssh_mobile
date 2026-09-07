@@ -16,6 +16,7 @@ mod events;
 mod generic_auth;
 mod peer;
 mod realtime;
+mod realtime_media;
 mod relay;
 pub(crate) mod relay_state;
 mod runtime;
@@ -27,6 +28,7 @@ mod task_supervisor;
 mod transfer;
 
 pub use errors::NetworkError;
+pub use realtime_media::{RealtimeMediaDirection, RealtimeMediaEndpointId, RealtimeMediaError};
 pub use runtime::NetworkRuntime;
 
 #[cfg(test)]

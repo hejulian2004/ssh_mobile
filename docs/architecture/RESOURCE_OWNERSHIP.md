@@ -1,4 +1,4 @@
-最新更新时间：2026-08-28
+最新更新时间：2026-09-07
 
 # 资源 Owner 审计
 
@@ -17,6 +17,11 @@
 | Native handle | Network native adapter via `NetworkRuntime` | App/Native | stop isolate, then `destroy` handle |
 | NetworkCommandGateway | `NetworkRuntime` / borrowed by App Shell adapter | App/borrowed Session | cancel adapter subscriptions; never stop or destroy the Runtime/native handle |
 | NetworkRealtimeGateway | `NetworkRuntime` / borrowed by App Shell Realtime adapter | App/borrowed Session | cancel event subscription before Runtime dispose; never stop or destroy the Runtime/native handle |
+| RealtimeMediaSession | `RealtimeMediaSessionController` / App Realtime adapter | Realtime session lease | release endpoint leases before the owning Realtime session; controller never stops the App Runtime |
+| RealtimeMediaEndpoint | native `RealtimeMediaRegistry`; borrowed by `RealtimeMediaSessionController` | Runtime + realtime generation | invalidate before WebRTC peer close; release is idempotent and old `(runtime, realtime, peer, direction)` generations fail closed |
+| Native media ingress queue | `network-webrtc::WebRtcPeer` through `RealtimeIoDriver` | Native PeerConnection generation | stop capture/encoder, drop stale queued H.264, then close the native peer; borrowers never own the queue |
+| Native media egress queue | `network-webrtc::WebRtcPeer` through `RealtimeIoDriver` | Native PeerConnection generation | terminal peer loss invalidates decoder output before decoder/surface teardown; never emit frames through the Dart event queue |
+| RemoteVideoSurface | platform renderer adapter; surfaced as an opaque `realtime_media` capability | Renderer/session lease | detach from endpoint, release platform texture/surface, then mark the capability released; no Runtime or peer ownership |
 | NetworkIdentityBundle | `AppRuntimeFactory` / `NetworkIdentityService` | App | secure-storage-backed identity is reused for the App process; no Feature release or replacement; App shutdown only releases in-memory key material |
 | NetworkFacade | `AppRuntime` | App/borrowed Feature | dispose Feature subscriptions and Facade-owned Session state before Realtime/NetworkRuntime; LAN deactivate only detaches its subscriptions |
 | SDK control-plane HttpClient | `AppSdkRequestExecutor` | Request | read bounded response, then `close(force: true)` on success or error |
@@ -69,6 +74,8 @@
   普通 Widget teardown 复用同一个 Future，不能通过直接 `runApp` 丢弃异步释放。
 - Native 资源必须完成 `stop → destroy`，Isolate 必须在 Native handle destroy 前
   停止并等待退出；这是防止 FFI handle 和后台事件泄漏的硬约束。
+- Realtime 媒体端点先于对应 PeerConnection 失效；屏幕视频仅在 native ingress/
+  egress queue、RTP 和平台采集/渲染 owner 间流动，Dart 只协调不透明端点和生命周期。
 
 新增数据库、网络连接、SSH Session、Timer、Stream、Controller、Isolate 或
 Native handle 时，先在本表增加 Owner/Scope/Release，再补生命周期测试。自动检查：

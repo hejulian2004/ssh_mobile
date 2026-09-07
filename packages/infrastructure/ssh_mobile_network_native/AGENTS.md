@@ -1,4 +1,4 @@
-最新更新时间：2026-08-30
+最新更新时间：2026-09-07
 
 # ssh_mobile_network_native 维护约束
 
@@ -52,6 +52,11 @@
   use authenticated signaling; `relay_only` is reserved for TURN fallback/
   privacy validation. Local E2E and coturn relay-only tests remain network-quality
   gates.
+- Screen-media Dart FFI is lifecycle-only: Dart may create/release an opaque
+  endpoint ID bound to the active runtime/realtime generation, but no encoded
+  frame, decoder output, renderer handle, or capture buffer may cross this
+  facade. The separate native-only C ABI may push/pull encoded H.264 between
+  platform owners and Rust by that opaque ID; it is never declared to Dart.
 - No database or persisted secret; upper secure storage/Feature Module owns
   pairing credentials, Tokens, and history. `NativeNetworkRuntime` enforces
   `Running → Stopping → Stopped → Destroyed`, idempotent stop, and rejects

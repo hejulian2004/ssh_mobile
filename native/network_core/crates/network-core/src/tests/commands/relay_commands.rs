@@ -61,6 +61,31 @@ async fn relay_command_validation_checks_runtime_identity_and_credentials() {
 }
 #[tokio::test]
 async fn relay_command_reports_async_control_connect_failure() {
+    // A closed well-known port is environment-dependent: some Windows network
+    // filters black-hole the SYN instead of returning connection-refused. Own
+    // the failure fixture so the assertion observes a deterministic rejected
+    // WebSocket handshake rather than a platform TCP timeout.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind deterministic rejected relay fixture");
+    let relay_url = format!(
+        "ws://{}",
+        listener
+            .local_addr()
+            .expect("fixture listener must expose its bound address")
+    );
+    let rejected_handshake = tokio::spawn(async move {
+        let (mut socket, _) = listener
+            .accept()
+            .await
+            .expect("relay fixture should receive the control connection");
+        socket
+            .write_all(
+                b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .await
+            .expect("relay fixture should reject the WebSocket handshake");
+    });
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
     let state = Arc::new(RuntimeState::new(
         event_tx,
@@ -77,7 +102,7 @@ async fn relay_command_reports_async_control_connect_failure() {
     start_configure_relay(
         Arc::clone(&state),
         network_protocol::ConfigureRelayCommand {
-            relay_url: "ws://127.0.0.1:9".into(),
+            relay_url,
             relay_credential: "credential".into(),
             relay_signing_seed: vec![0; 32],
         },
@@ -108,8 +133,12 @@ async fn relay_command_reports_async_control_connect_failure() {
     })
     .await
     .expect("Relay failure event should arrive");
+    rejected_handshake
+        .await
+        .expect("rejected relay fixture task should complete");
     state.task_supervisor.shutdown().await;
     assert!(saw_connecting);
     assert!(saw_failed);
     assert!(!saw_connected, "failed Relay setup must not emit Connected");
 }
+use tokio::io::AsyncWriteExt;
