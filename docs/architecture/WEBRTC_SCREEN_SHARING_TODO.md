@@ -69,6 +69,9 @@ Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，按架构规则不能
   codec 只通过显式 screen transceiver 配置，generic codec registration 保留。
 - [x] endpoint release 在 queue/order 清理失败时保留 lease，成功清理后才移除；
   forced driver-cleanup failure 有 retry regression test。
+- [x] Dart release 在 native queue/order cleanup 失败时保留 endpoint lease；
+  endpoint 与 controller 都会进入可重试的 failed 状态，后续 release/stop
+  成功后才 finalize，并有 endpoint/controller 两组回归测试。
 - [x] 真实 C ABI success path 已通过：live test Realtime driver 的 create →
   push（含 malformed Annex-B rejection）→ pull → release，另覆盖 duplicate 和
   stale-generation status；`network_sdk` public API 已独立 analyzer/test 验证；
@@ -185,7 +188,7 @@ Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，按架构规则不能
 ## 下一步
 
 1. 保留当前工作树和用户提供的中文架构原文，不混入无关文件。
-2. 补齐仍未完成的 real Dart→native adapter parity，并记录真实结果/环境限制。
+2. 保留已完成的 real Dart→native adapter parity 证据，不再扩展 Phase 2 scope。
 3. 等待 Phase 2 PR 被接受；接受前不开始 Phase 3。
 4. PR 接受后更新本清单，再按 Phase 3 的 owner、Windows 工具链和手工 E2E
    入口推进。

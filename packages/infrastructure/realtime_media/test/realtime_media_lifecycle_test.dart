@@ -272,6 +272,78 @@ void main() {
     ]);
   });
 
+  test(
+    'retryable endpoint release failure retains the lease for retry',
+    () async {
+      final endpoint = await controller.start(RealtimeMediaDirection.send);
+      backend.releaseFailuresRemaining = 1;
+
+      await expectLater(
+        controller.release(endpoint),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.driverUnavailable,
+          ),
+        ),
+      );
+
+      expect(endpoint.state, RealtimeMediaEndpointState.failed);
+      expect(controller.state, RealtimeMediaSessionState.failed);
+      expect(
+        backend.operations.where(
+          (operation) => operation == 'release:endpoint-1',
+        ),
+        hasLength(1),
+      );
+
+      await controller.release(endpoint);
+
+      expect(endpoint.state, RealtimeMediaEndpointState.released);
+      expect(controller.state, RealtimeMediaSessionState.ready);
+      expect(
+        backend.operations.where(
+          (operation) => operation == 'release:endpoint-1',
+        ),
+        hasLength(2),
+      );
+    },
+  );
+
+  test(
+    'stop remains retryable while a native endpoint lease is retained',
+    () async {
+      final endpoint = await controller.start(RealtimeMediaDirection.send);
+      backend.releaseFailuresRemaining = 1;
+
+      await expectLater(
+        controller.stop(),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.driverUnavailable,
+          ),
+        ),
+      );
+
+      expect(endpoint.state, RealtimeMediaEndpointState.failed);
+      expect(controller.state, RealtimeMediaSessionState.failed);
+
+      await controller.stop();
+
+      expect(endpoint.state, RealtimeMediaEndpointState.released);
+      expect(controller.state, RealtimeMediaSessionState.released);
+      expect(
+        backend.operations.where(
+          (operation) => operation == 'release:endpoint-1',
+        ),
+        hasLength(2),
+      );
+    },
+  );
+
   test('concurrent stops share one terminal endpoint cleanup', () async {
     final endpoint = await controller.start(RealtimeMediaDirection.send);
     backend.releaseGate = Completer<void>();
@@ -512,6 +584,7 @@ final class RecordingBackend implements RealtimeMediaBackend {
   bool failAttach = false;
   bool failTypedAttach = false;
   bool failDetach = false;
+  int releaseFailuresRemaining = 0;
   bool returnMismatchedSurface = false;
   Completer<void>? attachGate;
   Completer<void>? attachStarted;
@@ -607,6 +680,13 @@ final class RecordingBackend implements RealtimeMediaBackend {
       releaseStarted!.complete();
     }
     if (releaseGate != null) await releaseGate!.future;
+    if (releaseFailuresRemaining > 0) {
+      releaseFailuresRemaining -= 1;
+      throw const RealtimeMediaException(
+        RealtimeMediaErrorCode.driverUnavailable,
+        'synthetic driver unavailable',
+      );
+    }
   }
 
   @override

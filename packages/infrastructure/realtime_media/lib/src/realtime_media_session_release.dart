@@ -17,7 +17,8 @@ extension RealtimeMediaSessionRelease on RealtimeMediaSessionController {
     _ensureEndpointIdentity(endpoint);
     await _releaseEndpoint(endpoint);
     if (_terminalRelease == null &&
-        state != RealtimeMediaSessionState.released) {
+        state != RealtimeMediaSessionState.released &&
+        (state != RealtimeMediaSessionState.failed || _endpoints.isEmpty)) {
       state = RealtimeMediaSessionState.ready;
     }
   }
@@ -53,9 +54,18 @@ extension RealtimeMediaSessionRelease on RealtimeMediaSessionController {
         RealtimeMediaErrorCode.backendFailure,
         'Native endpoint cleanup failed.',
       );
-    } finally {
+    }
+    // A retryable native release leaves its endpoint in [_endpoints]. Keep
+    // the controller failed (and the release entry point open) until a later
+    // stop/release call can retry that lease. A detach error alone does not
+    // block finalization when the subsequent native release succeeded.
+    final hasRetainedLeases = _endpoints.isNotEmpty;
+    if (hasRetainedLeases) {
+      state = RealtimeMediaSessionState.failed;
+    } else {
       state = RealtimeMediaSessionState.released;
     }
+    _terminalRelease = null;
     if (firstFailure != null) {
       completion.completeError(firstFailure);
     } else {
@@ -95,53 +105,69 @@ extension RealtimeMediaSessionRelease on RealtimeMediaSessionController {
     Completer<void> completion,
   ) async {
     RealtimeMediaException? failure;
-    try {
-      if (endpoint.isAttached) {
-        try {
-          await backend.detach(
-            endpointId: endpoint.id,
-            identity: endpoint.identity,
-          );
-        } on RealtimeMediaException catch (error) {
-          failure = error;
-        } catch (_) {
-          failure = const RealtimeMediaException(
-            RealtimeMediaErrorCode.backendFailure,
-            'Native endpoint detach failed.',
-          );
-        }
-      }
-    } catch (_) {
-      failure ??= const RealtimeMediaException(
-        RealtimeMediaErrorCode.backendFailure,
-        'Native endpoint cleanup failed.',
-      );
-    } finally {
+    RemoteVideoSurface? detachedSurface;
+    var nativeLeaseFinalized = !endpoint.isAttached;
+    if (endpoint.isAttached) {
       try {
-        await backend.release(
+        await backend.detach(
           endpointId: endpoint.id,
           identity: endpoint.identity,
         );
+        detachedSurface = endpoint.surface;
+        endpoint.source = null;
+        endpoint.surface = null;
+        endpoint.state = RealtimeMediaEndpointState.detached;
       } on RealtimeMediaException catch (error) {
-        failure ??= error;
+        failure = error;
       } catch (_) {
-        failure ??= const RealtimeMediaException(
+        failure = const RealtimeMediaException(
           RealtimeMediaErrorCode.backendFailure,
-          'Native endpoint release failed.',
+          'Native endpoint detach failed.',
         );
       }
+    }
+    try {
+      await backend.release(
+        endpointId: endpoint.id,
+        identity: endpoint.identity,
+      );
+      nativeLeaseFinalized = true;
+    } on RealtimeMediaException catch (error) {
+      failure ??= error;
+      nativeLeaseFinalized = _releaseFinalizesLease(error);
+    } catch (_) {
+      failure ??= const RealtimeMediaException(
+        RealtimeMediaErrorCode.backendFailure,
+        'Native endpoint release failed.',
+      );
+      nativeLeaseFinalized = false;
+    }
+
+    if (nativeLeaseFinalized) {
       endpoint.source = null;
+      // Keep the released capability observable to callers, matching the
+      // endpoint contract, while not treating it as attached on a retry.
+      endpoint.surface ??= detachedSurface;
       endpoint.surface?.release();
       endpoint.state = RealtimeMediaEndpointState.released;
       _endpoints.remove(endpoint.id);
-      _endpointReleases.remove(endpoint.id);
+    } else {
+      // The native lease is still owned by this controller. Retain its ID and
+      // mark the endpoint failed so a later release call can retry cleanup.
+      endpoint.state = RealtimeMediaEndpointState.failed;
+      state = RealtimeMediaSessionState.failed;
     }
+    _endpointReleases.remove(endpoint.id);
     if (failure != null) {
       completion.completeError(failure);
     } else {
       completion.complete();
     }
   }
+
+  bool _releaseFinalizesLease(RealtimeMediaException error) =>
+      error.code == RealtimeMediaErrorCode.staleEndpoint ||
+      error.code == RealtimeMediaErrorCode.sessionReleased;
 
   void _beginStart() {
     if (_pendingStartCount == 0) {
