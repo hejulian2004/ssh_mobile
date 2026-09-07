@@ -48,9 +48,8 @@ ADR-034 或原始技术架构文档。
 - [ ] Phase 2 PR 接受。
 - [x] 获得授权后提交、推送并创建 Phase 2 PR（GitHub PR #67）。
 
-当前阻塞：Phase 0、Phase 1、Phase 2 的本地实现证据已齐；当前 corrective
-head 的 GitHub Actions 需在推送后重新通过，Phase 2 PR #67 仍需独立 PR
-接受。在 PR 接受前，按架构规则不能实现 Phase 3–7。
+当前阻塞：Phase 0、Phase 1、Phase 2 的本地实现与 exact-head CI 证据已齐；
+Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，按架构规则不能实现 Phase 3–7。
 
 ## PR #67 评审修正清单
 
@@ -159,11 +158,11 @@ head 的 GitHub Actions 需在推送后重新通过，Phase 2 PR #67 仍需独�
 - [x] ignored coturn relay-only video test：显式运行并通过（1 passed）。
 - [x] live C-ABI endpoint test：create/send/receive/pull/release 全链路通过，
   并验证 malformed Annex-B、duplicate endpoint、stale generation 和 released ID。
-- [x] GitHub Actions：上一轮 amended head `bd3ae683` 的 run
-  [34075485885](https://github.com/hejulian2004/ssh_mobile/actions/runs/34075485885)
-  已完成，全部 jobs success；旧 head 的失败 run 不作为 merge evidence。
-- [ ] 当前 corrective head 的 exact-commit GitHub Actions run：代码推送后补记，
-  在所有 jobs success 前不能作为 merge evidence。
+- [x] GitHub Actions：corrective exact head
+  `d96116047a5ebad50c5a13563d61357bbab22ce3` 的 run
+  [34090393793](https://github.com/hejulian2004/ssh_mobile/actions/runs/34090393793)
+  已完成，全部 jobs success（含 architecture、native/sdk Dart quality、平台
+  build、app tests 和 90% coverage gate）。
 - [x] native binding 的 Flutter FFI 测试从其 package 根目录运行，以便解析
   package native asset；从仓库根目录调用会缺少该 asset。
 - [x] surface generation 不匹配时的 detach/release/fail-closed 回归测试通过。
