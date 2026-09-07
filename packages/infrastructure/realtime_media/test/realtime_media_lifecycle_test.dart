@@ -430,6 +430,60 @@ void main() {
   );
 
   test(
+    'late start cleanup failure retains the lease for stop retry',
+    () async {
+      backend.startGate = Completer<void>();
+      backend.startStarted = Completer<void>();
+      backend.releaseFailuresRemaining = 1;
+
+      final starting = controller.start(RealtimeMediaDirection.send);
+      await backend.startStarted!.future;
+      final stopping = controller.stop();
+      backend.startGate!.complete();
+
+      await expectLater(
+        starting,
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.driverUnavailable,
+          ),
+        ),
+      );
+      await expectLater(
+        stopping,
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.driverUnavailable,
+          ),
+        ),
+      );
+
+      expect(controller.state, RealtimeMediaSessionState.failed);
+      expect(backend.activeEndpointIds, contains('endpoint-1'));
+      expect(
+        backend.operations.where(
+          (operation) => operation == 'release:endpoint-1',
+        ),
+        hasLength(1),
+      );
+
+      await controller.stop();
+
+      expect(controller.state, RealtimeMediaSessionState.released);
+      expect(backend.activeEndpointIds, isEmpty);
+      expect(backend.operations, <String>[
+        'start:realtime-1:7:send',
+        'release:endpoint-1',
+        'release:endpoint-1',
+      ]);
+    },
+  );
+
+  test(
     'dispose before start is safe and permanently closes the controller',
     () async {
       await controller.dispose();
@@ -586,6 +640,7 @@ final class RecordingBackend implements RealtimeMediaBackend {
   bool failDetach = false;
   int releaseFailuresRemaining = 0;
   bool returnMismatchedSurface = false;
+  final Set<String> activeEndpointIds = <String>{};
   Completer<void>? attachGate;
   Completer<void>? attachStarted;
   Completer<void>? releaseGate;
@@ -614,7 +669,9 @@ final class RecordingBackend implements RealtimeMediaBackend {
         'synthetic typed start failure',
       );
     }
-    return RealtimeMediaEndpointId('endpoint-$_nextEndpoint');
+    final endpointId = 'endpoint-$_nextEndpoint';
+    activeEndpointIds.add(endpointId);
+    return RealtimeMediaEndpointId(endpointId);
   }
 
   @override
@@ -687,6 +744,7 @@ final class RecordingBackend implements RealtimeMediaBackend {
         'synthetic driver unavailable',
       );
     }
+    activeEndpointIds.remove(endpointId.value);
   }
 
   @override

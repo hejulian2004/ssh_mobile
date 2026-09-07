@@ -86,22 +86,6 @@ final class RealtimeMediaSessionController {
     final identity = _identity(direction);
     try {
       final endpointId = await backend.start(identity);
-      if (_terminalRelease != null ||
-          state == RealtimeMediaSessionState.stopping ||
-          state == RealtimeMediaSessionState.released) {
-        await _releaseEndpointAcquiredDuringStop(endpointId, identity);
-        throw const RealtimeMediaException(
-          RealtimeMediaErrorCode.sessionReleased,
-          'The media session controller is stopping or has been released.',
-        );
-      }
-      if (state == RealtimeMediaSessionState.failed) {
-        await _releaseEndpointAcquiredDuringStop(endpointId, identity);
-        throw const RealtimeMediaException(
-          RealtimeMediaErrorCode.failedState,
-          'The media session controller is failed.',
-        );
-      }
       if (_endpoints.containsKey(endpointId)) {
         state = RealtimeMediaSessionState.failed;
         throw const RealtimeMediaException(
@@ -109,11 +93,29 @@ final class RealtimeMediaSessionController {
           'Native bridge returned a duplicate endpoint ID.',
         );
       }
+      // From the moment native returns an ID, this controller must own a
+      // record for the lease, even when stop/release already won the race.
       final endpoint = RealtimeMediaEndpoint.lease(
         id: endpointId,
         identity: identity,
       );
       _endpoints[endpointId] = endpoint;
+      if (_terminalRelease != null ||
+          state == RealtimeMediaSessionState.stopping ||
+          state == RealtimeMediaSessionState.released) {
+        await _releaseAcquiredEndpoint(endpoint);
+        throw const RealtimeMediaException(
+          RealtimeMediaErrorCode.sessionReleased,
+          'The media session controller is stopping or has been released.',
+        );
+      }
+      if (state == RealtimeMediaSessionState.failed) {
+        await _releaseAcquiredEndpoint(endpoint);
+        throw const RealtimeMediaException(
+          RealtimeMediaErrorCode.failedState,
+          'The media session controller is failed.',
+        );
+      }
       return endpoint;
     } on RealtimeMediaException {
       if (_terminalRelease == null &&

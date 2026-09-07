@@ -39,10 +39,12 @@ extension RealtimeMediaSessionRelease on RealtimeMediaSessionController {
 
   Future<void> _releaseAllEndpoints(Completer<void> completion) async {
     RealtimeMediaException? firstFailure;
+    final endpointsToRelease = _endpoints.values.toList();
     try {
       await _waitForPendingStarts();
       firstFailure = _lateStartCleanupFailure;
-      for (final lease in _endpoints.values.toList()) {
+      _lateStartCleanupFailure = null;
+      for (final lease in endpointsToRelease) {
         try {
           await _releaseEndpoint(lease);
         } on RealtimeMediaException catch (error) {
@@ -73,12 +75,28 @@ extension RealtimeMediaSessionRelease on RealtimeMediaSessionController {
     }
   }
 
+  Future<void> _releaseAcquiredEndpoint(
+    RealtimeMediaEndpoint endpoint,
+  ) async {
+    try {
+      await _releaseEndpoint(endpoint);
+    } on RealtimeMediaException catch (error) {
+      // The endpoint is already in [_endpoints], so a retryable failure can
+      // be reclaimed by the next controller-level stop/release attempt.
+      if (_terminalRelease != null) {
+        _lateStartCleanupFailure ??= error;
+      }
+      rethrow;
+    }
+  }
+
   /// Stops this session and releases every endpoint lease it owns.
   ///
-  /// Stopping is terminal for this controller's immutable realtime generation.
-  /// It is deliberately an idempotent lifecycle alias for a controller-level
-  /// [release], while [release] with an endpoint retains the narrower lease
-  /// cleanup operation.
+  /// Successful stopping is terminal for this controller's immutable
+  /// realtime generation. A retryable cleanup failure leaves the controller
+  /// failed so a later call can retry the retained leases. It is deliberately
+  /// an idempotent lifecycle alias for a controller-level [release], while
+  /// [release] with an endpoint retains the narrower lease cleanup operation.
   Future<void> stop() => release();
 
   /// Disposes this controller without taking ownership of its NetworkRuntime.
@@ -193,26 +211,4 @@ extension RealtimeMediaSessionRelease on RealtimeMediaSessionController {
     }
   }
 
-  Future<void> _releaseEndpointAcquiredDuringStop(
-    RealtimeMediaEndpointId endpointId,
-    RealtimeMediaEndpointIdentity identity,
-  ) async {
-    try {
-      await backend.release(endpointId: endpointId, identity: identity);
-    } on RealtimeMediaException catch (error) {
-      if (_terminalRelease != null) {
-        _lateStartCleanupFailure ??= error;
-      }
-      rethrow;
-    } catch (_) {
-      const failure = RealtimeMediaException(
-        RealtimeMediaErrorCode.backendFailure,
-        'Native endpoint cleanup after a stopped start failed.',
-      );
-      if (_terminalRelease != null) {
-        _lateStartCleanupFailure ??= failure;
-      }
-      throw failure;
-    }
-  }
 }

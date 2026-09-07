@@ -72,6 +72,9 @@ Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，按架构规则不能
 - [x] Dart release 在 native queue/order cleanup 失败时保留 endpoint lease；
   endpoint 与 controller 都会进入可重试的 failed 状态，后续 release/stop
   成功后才 finalize，并有 endpoint/controller 两组回归测试。
+- [x] pending start 在 stop 竞态中取得的 native endpoint 先进入同一 ownership
+  registry；late-start cleanup 失败会保留 endpoint，后续 stop 可重试同一个 ID，
+  并有失败竞态回归测试。
 - [x] 真实 C ABI success path 已通过：live test Realtime driver 的 create →
   push（含 malformed Annex-B rejection）→ pull → release，另覆盖 duplicate 和
   stale-generation status；`network_sdk` public API 已独立 analyzer/test 验证；
@@ -155,7 +158,7 @@ Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，按架构规则不能
 - [x] 本轮 `network-core` 全量 lib 测试：579 passed；`network-webrtc` 普通测试：
   46 passed、2 ignored；`network-ffi`：22 passed（含 live C-ABI success path）。
 - [x] Rust workspace clippy（`--workspace --all-targets --locked -D warnings`）通过。
-- [x] `realtime_media` analyzer/test：analyzer 无问题、23 项通过；
+- [x] `realtime_media` analyzer/test：analyzer 无问题、24 项通过；
   `ssh_mobile_network_native` analyzer 无问题、28 项通过；`network_sdk`
   analyzer 无问题、88 项通过。
 - [x] ignored coturn relay-only video test：显式运行并通过（1 passed）。
