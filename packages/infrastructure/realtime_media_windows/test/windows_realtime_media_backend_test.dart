@@ -53,7 +53,9 @@ void main() {
     ]);
     expect(endpointBackend.operations, <String>[
       'start:realtime-1:7:send',
+      'owner-open:1',
       'detach:1',
+      'owner-close:1',
       'release:1',
     ]);
   });
@@ -84,7 +86,10 @@ void main() {
           ),
         ),
       );
-      expect(endpointBackend.operations, <String>['start:realtime-1:7:send']);
+      expect(endpointBackend.operations, <String>[
+        'start:realtime-1:7:send',
+        'owner-open:1',
+      ]);
       expect(platform.operations, <String>['capture:1:window:1']);
     },
   );
@@ -110,10 +115,88 @@ void main() {
     expect(stats.framesDropped, 1);
     expect(platform.operations, <String>['stats:1']);
   });
+
+  test('retains the owner token when endpoint release is retryable', () async {
+    endpointBackend.releaseFailure = const RealtimeMediaException(
+      RealtimeMediaErrorCode.driverUnavailable,
+      'driver is stopping',
+    );
+    final endpoint = await backend.start(identity);
+
+    await expectLater(
+      backend.release(endpointId: endpoint, identity: identity),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.driverUnavailable,
+        ),
+      ),
+    );
+    endpointBackend.releaseFailure = null;
+    await backend.release(endpointId: endpoint, identity: identity);
+
+    expect(platform.operations, <String>['release:1', 'release:1']);
+    expect(endpointBackend.operations, <String>[
+      'start:realtime-1:7:send',
+      'owner-open:1',
+      'owner-close:1',
+      'release:1',
+      'owner-close:1',
+      'release:1',
+    ]);
+  });
+
+  test('fails closed when endpoint backend has no native owner port', () async {
+    final backendWithoutOwner = WindowsRealtimeMediaBackend(
+      endpointBackend: EndpointBackendWithoutOwner(),
+      platform: platform,
+    );
+
+    await expectLater(
+      backendWithoutOwner.start(identity),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.backendFailure,
+        ),
+      ),
+    );
+  });
+
+  test(
+    'rejects platform operations from another endpoint generation',
+    () async {
+      final endpoint = await backend.start(identity);
+      final replacementIdentity = RealtimeMediaEndpointIdentity(
+        realtimeId: identity.realtimeId,
+        peerId: identity.peerId,
+        generation: identity.generation + 1,
+        direction: identity.direction,
+      );
+
+      expect(
+        () => backend.readStats(
+          endpointId: endpoint,
+          identity: replacementIdentity,
+        ),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.staleEndpoint,
+          ),
+        ),
+      );
+    },
+  );
 }
 
-final class RecordingEndpointBackend implements RealtimeMediaBackend {
+final class RecordingEndpointBackend
+    implements RealtimeMediaBackend, RealtimeMediaNativeOwnerBackend {
   final List<String> operations = <String>[];
+  RealtimeMediaException? releaseFailure;
 
   @override
   Future<RealtimeMediaEndpointId> start(
@@ -152,7 +235,64 @@ final class RecordingEndpointBackend implements RealtimeMediaBackend {
     required RealtimeMediaEndpointIdentity identity,
   }) async {
     operations.add('release:${endpointId.value}');
+    final failure = releaseFailure;
+    if (failure != null) throw failure;
   }
+
+  @override
+  Future<RealtimeMediaNativeOwnerToken> openNativeOwner({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) async {
+    operations.add('owner-open:${endpointId.value}');
+    return RealtimeMediaNativeOwnerToken('owner-${endpointId.value}');
+  }
+
+  @override
+  Future<void> closeNativeOwner({
+    required RealtimeMediaNativeOwnerToken token,
+    required RealtimeMediaEndpointIdentity identity,
+  }) async {
+    operations.add('owner-close:${token.value.split('-').last}');
+  }
+
+  @override
+  Future<RealtimeMediaStats> readStats({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) => throw UnimplementedError();
+}
+
+final class EndpointBackendWithoutOwner implements RealtimeMediaBackend {
+  @override
+  Future<RealtimeMediaEndpointId> start(
+    RealtimeMediaEndpointIdentity identity,
+  ) async => RealtimeMediaEndpointId('1');
+
+  @override
+  Future<void> attachCaptureSource({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    required ScreenCaptureSource source,
+  }) async {}
+
+  @override
+  Future<RemoteVideoSurface> attachRemoteVideoSurface({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<void> detach({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) async {}
+
+  @override
+  Future<void> release({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) async {}
 
   @override
   Future<RealtimeMediaStats> readStats({
@@ -174,6 +314,7 @@ final class RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
     required ScreenCaptureSource source,
+    RealtimeMediaNativeOwnerToken? ownerToken,
   }) async {
     operations.add('capture:${endpointId.value}:${source.id.value}');
     final error = failure;
@@ -184,6 +325,7 @@ final class RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
   Future<RemoteVideoSurface> attachRemoteVideoSurface({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
   }) async {
     operations.add('surface:${endpointId.value}');
     return RemoteVideoSurface(
@@ -197,6 +339,7 @@ final class RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
   Future<void> detach({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
   }) async {
     operations.add('detach:${endpointId.value}');
   }
@@ -205,6 +348,7 @@ final class RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
   Future<void> release({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
   }) async {
     operations.add('release:${endpointId.value}');
   }
@@ -213,6 +357,7 @@ final class RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
   Future<RealtimeMediaStats> readStats({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
   }) async {
     operations.add('stats:${endpointId.value}');
     return stats;

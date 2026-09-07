@@ -458,6 +458,7 @@ pub unsafe extern "C" fn ssh_net_runtime_stop(handle: SshNetRuntimeHandle) -> i3
 
     let result = catch_unwind(|| {
         let runtime = unsafe { &*(handle as *const SshNetRuntime) };
+        realtime_media::invalidate_media_owners(handle as *mut SshNetRuntime);
         match runtime.stop() {
             Ok(()) => 0,
             Err(_) => -3,
@@ -626,6 +627,11 @@ pub unsafe extern "C" fn ssh_net_runtime_destroy(handle: SshNetRuntimeHandle) ->
 
     let result = catch_unwind(|| {
         let runtime = unsafe { &*(handle as *const SshNetRuntime) };
+        // Destroy calls the internal stop path directly, so invalidate the
+        // process-local platform-owner registry here as well as in the public
+        // stop ABI. No late native callback may retain this runtime pointer
+        // after the allocation is dropped below.
+        realtime_media::invalidate_media_owners(handle as *mut SshNetRuntime);
         if runtime.stop().is_err() {
             return -3;
         }

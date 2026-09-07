@@ -33,6 +33,7 @@ final class MethodChannelWindowsRealtimeMediaPlatform
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
     required ScreenCaptureSource source,
+    RealtimeMediaNativeOwnerToken? ownerToken,
   }) async {
     await _invoke<void>('startCapture', <String, Object?>{
       'endpoint_id': endpointId.value,
@@ -42,6 +43,7 @@ final class MethodChannelWindowsRealtimeMediaPlatform
       'direction': identity.direction.name,
       'source_id': source.id.value,
       'source_kind': source.kind.name,
+      'owner_token': ownerToken?.value,
     });
   }
 
@@ -49,6 +51,7 @@ final class MethodChannelWindowsRealtimeMediaPlatform
   Future<RemoteVideoSurface> attachRemoteVideoSurface({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
   }) async {
     final result = await _invoke<Map<Object?, Object?>>(
       'attachRemoteVideoSurface',
@@ -57,6 +60,8 @@ final class MethodChannelWindowsRealtimeMediaPlatform
         'realtime_id': identity.realtimeId,
         'peer_id': identity.peerId,
         'generation': identity.generation,
+        'direction': identity.direction.name,
+        'owner_token': ownerToken?.value,
       },
     );
     final surfaceId = result['surface_id'];
@@ -84,22 +89,31 @@ final class MethodChannelWindowsRealtimeMediaPlatform
   Future<void> detach({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
-  }) => _invoke<void>('detach', _identityArguments(endpointId, identity));
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) => _invoke<void>(
+    'detach',
+    _identityArguments(endpointId, identity, ownerToken),
+  );
 
   @override
   Future<void> release({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
-  }) => _invoke<void>('release', _identityArguments(endpointId, identity));
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) => _invoke<void>(
+    'release',
+    _identityArguments(endpointId, identity, ownerToken),
+  );
 
   @override
   Future<RealtimeMediaStats> readStats({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
   }) async {
     final result = await _invoke<Map<Object?, Object?>>(
       'readStats',
-      _identityArguments(endpointId, identity),
+      _identityArguments(endpointId, identity, ownerToken),
     );
     return RealtimeMediaStats(
       width: _nonNegativeInt(result['width']),
@@ -115,12 +129,14 @@ final class MethodChannelWindowsRealtimeMediaPlatform
   Map<String, Object?> _identityArguments(
     RealtimeMediaEndpointId endpointId,
     RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
   ) => <String, Object?>{
     'endpoint_id': endpointId.value,
     'realtime_id': identity.realtimeId,
     'peer_id': identity.peerId,
     'generation': identity.generation,
     'direction': identity.direction.name,
+    'owner_token': ownerToken?.value,
   };
 
   Future<T> _invoke<T>(String method, [Object? arguments]) async {
@@ -160,6 +176,9 @@ final class MethodChannelWindowsRealtimeMediaPlatform
       return ScreenCaptureSource(
         id: ScreenCaptureSourceId(id),
         kind: sourceKind,
+        label: _boundedLabel(value['label']),
+        width: _positiveInt(value['width']),
+        height: _positiveInt(value['height']),
       );
     } on ArgumentError {
       return null;
@@ -171,14 +190,33 @@ final class MethodChannelWindowsRealtimeMediaPlatform
     return value.toInt();
   }
 
-  static RealtimeMediaErrorCode _mapPlatformError(String code) => switch (code) {
-    'permission_denied' => RealtimeMediaErrorCode.permissionDenied,
-    'capture_source_ended' => RealtimeMediaErrorCode.captureSourceEnded,
-    'encoder_unavailable' => RealtimeMediaErrorCode.encoderUnavailable,
-    'encoder_failed' => RealtimeMediaErrorCode.encoderFailed,
-    'decoder_unavailable' => RealtimeMediaErrorCode.decoderUnavailable,
-    'decoder_failed' => RealtimeMediaErrorCode.decoderFailed,
-    'unsupported_codec' => RealtimeMediaErrorCode.unsupportedCodec,
-    _ => RealtimeMediaErrorCode.backendFailure,
-  };
+  static int? _positiveInt(Object? value) {
+    final result = _nonNegativeInt(value);
+    return result > 0 && result <= 16_384 ? result : null;
+  }
+
+  static String? _boundedLabel(Object? value) {
+    if (value is! String) return null;
+    final label = value.trim();
+    return label.isEmpty || label.length > 128 ? null : label;
+  }
+
+  static RealtimeMediaErrorCode _mapPlatformError(String code) =>
+      switch (code) {
+        'permission_denied' => RealtimeMediaErrorCode.permissionDenied,
+        'capture_source_ended' => RealtimeMediaErrorCode.captureSourceEnded,
+        'encoder_unavailable' => RealtimeMediaErrorCode.encoderUnavailable,
+        'encoder_failed' => RealtimeMediaErrorCode.encoderFailed,
+        'decoder_unavailable' => RealtimeMediaErrorCode.decoderUnavailable,
+        'decoder_failed' => RealtimeMediaErrorCode.decoderFailed,
+        'unsupported_codec' => RealtimeMediaErrorCode.unsupportedCodec,
+        'stale_generation' => RealtimeMediaErrorCode.staleGeneration,
+        'stale_endpoint' => RealtimeMediaErrorCode.staleEndpoint,
+        'direction_mismatch' => RealtimeMediaErrorCode.directionMismatch,
+        'duplicate_endpoint' => RealtimeMediaErrorCode.duplicateEndpoint,
+        'driver_unavailable' => RealtimeMediaErrorCode.driverUnavailable,
+        'peer_mismatch' => RealtimeMediaErrorCode.peerMismatch,
+        'frame_rejected' => RealtimeMediaErrorCode.frameRejected,
+        _ => RealtimeMediaErrorCode.backendFailure,
+      };
 }

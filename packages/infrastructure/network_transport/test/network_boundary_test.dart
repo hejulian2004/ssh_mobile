@@ -154,6 +154,21 @@ final class _BoundaryNativeHandle implements NativeNetworkHandle {
       : NativeOperationStatus.staleEndpoint;
 
   @override
+  NativeRealtimeMediaOwnerOpenResult openMediaOwner({
+    required NativeRealtimeMediaEndpointId endpointId,
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  }) => const NativeRealtimeMediaOwnerOpenResult(
+    status: NativeOperationStatus.driverUnavailable,
+  );
+
+  @override
+  NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token) =>
+      NativeOperationStatus.success;
+
+  @override
   Future<void> close() async {
     closed = true;
   }

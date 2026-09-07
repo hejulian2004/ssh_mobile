@@ -44,6 +44,7 @@ enum NativeOperationStatus {
         -9 => driverUnavailable,
         -10 => peerMismatch,
         -11 => frameRejected,
+        -12 => staleEndpoint,
         _ => failure,
       };
 

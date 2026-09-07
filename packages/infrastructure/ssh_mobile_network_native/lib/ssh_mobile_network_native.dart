@@ -348,6 +348,73 @@ class NativeNetworkRuntime {
     );
   }
 
+  /// Registers an existing endpoint with the native platform owner. The
+  /// returned ID is safe to pass to a platform plugin; it is not a pointer and
+  /// does not expose media bytes to Dart.
+  NativeRealtimeMediaOwnerOpenResult openRealtimeMediaOwner({
+    required NativeRealtimeMediaEndpointId endpointId,
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  }) {
+    if (_handle == nullptr || _lifecycle != _NativeRuntimeLifecycle.running) {
+      return const NativeRealtimeMediaOwnerOpenResult(
+        status: NativeOperationStatus.stopped,
+      );
+    }
+    if (endpointId.value <= 0 ||
+        !_isValidRealtimeMediaId(realtimeId) ||
+        !_isValidRealtimeMediaPeerId(peerId) ||
+        generation <= 0) {
+      return const NativeRealtimeMediaOwnerOpenResult(
+        status: NativeOperationStatus.invalidArgument,
+      );
+    }
+
+    final realtimeIdPointer = realtimeId.toNativeUtf8();
+    final peerIdPointer = peerId.toNativeUtf8();
+    final outOwner = calloc<Uint64>();
+    try {
+      final status = NativeOperationStatus.fromRealtimeMediaCode(
+        _sshNetRealtimeMediaOwnerOpenNative(
+          _handle,
+          endpointId.value,
+          realtimeIdPointer.cast<Uint8>(),
+          utf8.encode(realtimeId).length,
+          peerIdPointer.cast<Uint8>(),
+          utf8.encode(peerId).length,
+          generation,
+          direction.nativeValue,
+          outOwner,
+        ),
+      );
+      if (!status.isSuccess || outOwner.value == 0) {
+        return NativeRealtimeMediaOwnerOpenResult(status: status);
+      }
+      return NativeRealtimeMediaOwnerOpenResult(
+        status: status,
+        token: NativeRealtimeMediaOwnerToken(outOwner.value),
+      );
+    } finally {
+      calloc.free(realtimeIdPointer);
+      calloc.free(peerIdPointer);
+      calloc.free(outOwner);
+    }
+  }
+
+  /// Closes a native platform owner. Repeating a close is idempotent.
+  NativeOperationStatus closeRealtimeMediaOwner(
+    NativeRealtimeMediaOwnerToken token,
+  ) {
+    if (_handle == nullptr || _lifecycle != _NativeRuntimeLifecycle.running) {
+      return NativeOperationStatus.success;
+    }
+    return NativeOperationStatus.fromRealtimeMediaCode(
+      _sshNetRealtimeMediaOwnerCloseNative(token.value),
+    );
+  }
+
   /// Sends a bounded SDP/ICE/close signal through the native control plane.
   NativeOperationStatus sendRealtimeSignal({
     required String realtimeId,

@@ -13,6 +13,12 @@ dependencies:
   realtime_media:
     path: ../realtime_media
 
+flutter:
+  plugin:
+    platforms:
+      windows:
+        pluginClass: RealtimeMediaWindowsPlugin
+
 dev_dependencies:
   flutter_lints: ^6.0.0
   test: 1.31.1

@@ -261,6 +261,33 @@ impl RealtimeMediaRegistry {
             .get(&endpoint_id)
             .map(|endpoint| endpoint.session_generation)
     }
+
+    fn validate_endpoint(
+        &self,
+        endpoint_id: RealtimeMediaEndpointId,
+        realtime_id: &str,
+        peer_id: &str,
+        generation: u64,
+        direction: RealtimeMediaDirection,
+    ) -> Result<(), RealtimeMediaError> {
+        let endpoint = self
+            .endpoints
+            .get(&endpoint_id)
+            .ok_or(RealtimeMediaError::StaleEndpoint)?;
+        if endpoint.realtime_id != realtime_id || endpoint.peer_id != peer_id {
+            return Err(RealtimeMediaError::PeerMismatch);
+        }
+        if endpoint.session_generation != generation {
+            return Err(RealtimeMediaError::StaleGeneration);
+        }
+        if endpoint.direction != direction {
+            return Err(RealtimeMediaError::DirectionMismatch);
+        }
+        if endpoint.runtime_generation != self.runtime_generation {
+            return Err(RealtimeMediaError::StaleEndpoint);
+        }
+        Ok(())
+    }
 }
 
 pub(crate) async fn create_endpoint(
@@ -302,6 +329,21 @@ pub(crate) fn release_endpoint(
         .lock()
         .map_err(|_| RealtimeMediaError::Internal)?;
     registry.release(endpoint_id)
+}
+
+pub(crate) fn validate_endpoint(
+    state: &RuntimeState,
+    endpoint_id: RealtimeMediaEndpointId,
+    realtime_id: &str,
+    peer_id: &str,
+    generation: u64,
+    direction: RealtimeMediaDirection,
+) -> Result<(), RealtimeMediaError> {
+    let registry = state
+        .realtime_media
+        .lock()
+        .map_err(|_| RealtimeMediaError::Internal)?;
+    registry.validate_endpoint(endpoint_id, realtime_id, peer_id, generation, direction)
 }
 
 pub(crate) fn push_endpoint(

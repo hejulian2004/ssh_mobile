@@ -12,25 +12,30 @@ abstract interface class WindowsRealtimeMediaPlatform {
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
     required ScreenCaptureSource source,
+    RealtimeMediaNativeOwnerToken? ownerToken,
   });
 
   Future<RemoteVideoSurface> attachRemoteVideoSurface({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
   });
 
   Future<void> detach({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
   });
 
   Future<void> release({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
   });
 
   Future<RealtimeMediaStats> readStats({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
   });
 }

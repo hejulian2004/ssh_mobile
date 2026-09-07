@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:realtime_media/realtime_media.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -27,5 +28,27 @@ void main() {
     ]) {
       expect(source, isNot(contains(forbidden)), reason: forbidden);
     }
+  });
+
+  test('source metadata remains bounded and payload-free', () {
+    final source = ScreenCaptureSource(
+      id: ScreenCaptureSourceId('display:0'),
+      kind: ScreenCaptureSourceKind.display,
+      label: 'Display 1',
+      width: 1920,
+      height: 1080,
+    );
+
+    expect(source.label, 'Display 1');
+    expect(source.width, 1920);
+    expect(source.height, 1080);
+    expect(
+      () => ScreenCaptureSource(
+        id: ScreenCaptureSourceId('display:1'),
+        kind: ScreenCaptureSourceKind.display,
+        label: 'x' * 129,
+      ),
+      throwsA(isA<AssertionError>()),
+    );
   });
 }

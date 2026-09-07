@@ -9,8 +9,11 @@ have committed implementation evidence without separate screen-share PRs; their
 current baseline was accepted together with Phase 2 in PR #67. Phase 2 was
 merged at `352ef4dc9c602f648f0975809ce12553957b2a75` after final head
 `3d9a4a575f303a573371ce843867cf002f3b163d`. Phase 3 is in progress with its
-Dart/native boundary package only; its Windows capture/codec/render capability
-and Phase 4–7 remain unshipped and must not be described as delivered.
+Dart/native boundary package and runtime-owned opaque owner port; its Windows
+capture/codec/render capability and Phase 4–7 remain unshipped and must not be
+described as delivered. The current native plugin is fail-closed when the
+Graphics Capture/Media Foundation/Texture worker is unavailable; it is not
+evidence of a working capture-to-render pipeline.
 
 This is only the Screen Share slice of M8 (RTC) in
 [`NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md`](../NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md).
@@ -270,6 +273,13 @@ H.264 frames. Phase 2 defines the native-only
 `ssh_net_realtime_media_endpoint_*` C ABI for endpoint create/release and H.264
 push/pull. Its frame metadata and Rust-owned pull buffer are unavailable to the
 Dart FFI facade; platform-native capture and decoder owners use them directly.
+The additive native owner port exposes generation-validated start/stop/close
+and renderer attach/detach gates plus the same native-only push/pull path. Its
+opaque token retains the full endpoint identity; runtime stop and destroy
+invalidate the token registry before the runtime can be released, and every
+push/pull operation revalidates that identity before touching the bounded media
+queue. Dart only uses the low-frequency endpoint owner open/close adapter and
+never declares these frame or renderer functions.
 The boundary must obey these invariants:
 
 - Dart receives only a bounded opaque RealtimeMediaEndpointId, never a pointer,

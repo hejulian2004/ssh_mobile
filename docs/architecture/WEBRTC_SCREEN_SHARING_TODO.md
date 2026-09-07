@@ -51,6 +51,15 @@ ADR-034 或原始技术架构文档。
 - [x] Phase 3 Windows 边界冻结：`realtime_media_windows` 只传递源/端点身份、
   生命周期、opaque surface ID 和无载荷统计；capture buffer、H.264 数据、
   native pointer 与 GPU surface 不进入 Dart。
+- [x] Phase 3 native owner capability：现有 runtime 增加 generation-bound opaque
+  owner token；Windows platform channel 只传 token 和 bounded source metadata，
+  native owner start/stop/close、renderer attach/detach 与 push/pull 仍不进入
+  Dart；owner registry 保存完整 identity 并在 runtime destroy 前失效；每次
+  native push/pull 也会重新校验 endpoint identity，旧 generation 的 late
+  callback fail closed。
+- [ ] Phase 3 hardware pipeline gate：Windows Graphics Capture、Media Foundation
+  H.264 worker、GPU decoder/Texture 和 Windows 双端 E2E 尚未完成；当前 plugin
+  对缺失 capability 只返回 typed failure，不报告虚假的成功。
 
 当前状态：Phase 0、Phase 1、Phase 2 的实现、exact-head CI 证据和 PR #67
 接受记录已齐；Phase 3 当前已进入 Windows boundary implementation。Phase 3
@@ -126,10 +135,22 @@ ADR-034 或原始技术架构文档。
 
 - [x] 建立独立 `realtime_media_windows` workspace package、App Shell 注入和
   可替换的 Windows platform owner 接口；缺失 native plugin 时 fail closed。
+- [x] 增加 runtime-owned native owner token port；owner close 与 endpoint release
+  保持分离，generation/stale endpoint 校验仍由既有 native registry 负责。
 - [ ] Windows monitor/window capture。
 - [ ] Hardware H.264 encode/decode。
 - [ ] GPU surface 与 Flutter Texture 链路。
 - [ ] raw frames 不经过 Dart；完成 Windows 专属 analyze/test 和手工 E2E 记录。
+
+本轮 Phase 3 boundary 验证（2026-09-07）：`network-ffi` 23 tests passed；
+`network-core` realtime-media focused tests 7 passed；`realtime_media` 与
+`realtime_media_windows` focused tests 32 passed；`network_transport` focused
+tests 16 passed；`ssh_mobile_network_native` native-asset tests 22 passed。
+Dart analyzer 无 error，Rust format/clippy、module/resource/architecture checks
+和 Windows plugin C++17 syntax compile 均通过。Flutter wrapper test 在当前离线
+环境无法完成 native-asset/pub advisory 阶段，因此不作为 Phase 3 acceptance
+evidence。Windows Graphics Capture、Media Foundation worker、GPU decoder/
+Texture 和 Windows 双端 E2E 仍未通过，PR #68 继续保持 draft。
 
 ### Phase 4 — Android Capture / Codec / Render
 

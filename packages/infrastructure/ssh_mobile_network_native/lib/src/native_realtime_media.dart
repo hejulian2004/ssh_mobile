@@ -35,6 +35,26 @@ final class NativeRealtimeMediaEndpointCreateResult {
   bool get isSuccess => status.isSuccess && endpointId != null;
 }
 
+/// Opaque native capability that binds a platform owner to one endpoint
+/// identity. It is an identifier, never a Dart/native pointer. Native
+/// platform code uses the same token for start/stop, renderer lifecycle, and
+/// native-only H.264 push/pull; Dart only opens and closes the capability.
+final class NativeRealtimeMediaOwnerToken {
+  NativeRealtimeMediaOwnerToken(int value) : value = _validateEndpointId(value);
+
+  final int value;
+}
+
+/// Outcome of registering one endpoint with the native platform owner.
+final class NativeRealtimeMediaOwnerOpenResult {
+  const NativeRealtimeMediaOwnerOpenResult({required this.status, this.token});
+
+  final NativeOperationStatus status;
+  final NativeRealtimeMediaOwnerToken? token;
+
+  bool get isSuccess => status.isSuccess && token != null;
+}
+
 int _validateEndpointId(int value) {
   if (value <= 0) {
     throw ArgumentError.value(value, 'endpoint ID', 'must be positive');

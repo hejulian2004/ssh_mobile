@@ -86,6 +86,38 @@ void main() {
     },
   );
 
+  test('native platform owner port keeps typed lifecycle failures', () async {
+    final runtime = await native.createRuntime();
+    final endpoint = NativeRealtimeMediaEndpointId(1);
+
+    expect(
+      runtime
+          .openRealtimeMediaOwner(
+            endpointId: endpoint,
+            realtimeId: 'invalid',
+            peerId: 'peer-a',
+            generation: 1,
+            direction: NativeRealtimeMediaDirection.send,
+          )
+          .status,
+      NativeOperationStatus.invalidArgument,
+    );
+    expect(await runtime.stop(), NativeOperationStatus.success);
+    expect(
+      runtime
+          .openRealtimeMediaOwner(
+            endpointId: endpoint,
+            realtimeId: '00112233445566778899aabbccddeeff',
+            peerId: 'peer-a',
+            generation: 1,
+            direction: NativeRealtimeMediaDirection.send,
+          )
+          .status,
+      NativeOperationStatus.stopped,
+    );
+    await runtime.dispose();
+  });
+
   test('native runtime polls events on a helper isolate', () async {
     final runtime = await native.createRuntime();
     addTearDown(runtime.dispose);

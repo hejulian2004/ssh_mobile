@@ -1695,6 +1695,27 @@ impl NetworkRuntime {
         crate::realtime_media::release_endpoint(&state, endpoint_id)
     }
 
+    /// Validates a platform-owner capability against the existing endpoint
+    /// lease without changing queue or lifecycle state.
+    pub fn validate_realtime_media_endpoint(
+        &self,
+        endpoint_id: crate::realtime_media::RealtimeMediaEndpointId,
+        realtime_id: &str,
+        peer_id: &str,
+        generation: u64,
+        direction: crate::realtime_media::RealtimeMediaDirection,
+    ) -> Result<(), crate::realtime_media::RealtimeMediaError> {
+        let state = self.media_state()?;
+        crate::realtime_media::validate_endpoint(
+            &state,
+            endpoint_id,
+            realtime_id,
+            peer_id,
+            generation,
+            direction,
+        )
+    }
+
     /// Submits a native-resident encoded H.264 access unit to a send endpoint.
     pub fn push_realtime_media_h264(
         &self,

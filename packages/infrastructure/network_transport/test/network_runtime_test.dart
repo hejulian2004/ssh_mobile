@@ -390,6 +390,21 @@ final class _FakeNativeNetworkHandle implements NativeNetworkHandle {
       : NativeOperationStatus.staleEndpoint;
 
   @override
+  NativeRealtimeMediaOwnerOpenResult openMediaOwner({
+    required NativeRealtimeMediaEndpointId endpointId,
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  }) => const NativeRealtimeMediaOwnerOpenResult(
+    status: NativeOperationStatus.driverUnavailable,
+  );
+
+  @override
+  NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token) =>
+      NativeOperationStatus.success;
+
+  @override
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
