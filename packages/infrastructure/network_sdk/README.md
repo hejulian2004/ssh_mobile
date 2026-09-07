@@ -37,7 +37,8 @@ breaking refactor 不得把 native wire schema 升为 V3。
   unavailable/invalid-argument 边界；Feature text/clipboard 继续使用 authenticated
   HTTPS + application E2E，SDK 不增加临时 message 实现或明文 fallback。
 - `RealtimeClient` 只提供 Feature-facing `RealtimeSession`，包括
-  `start()`、`stop()`、`state`、`revision` 和 `audioState`；屏幕媒体端点与渲染
+  `start()`、`stop()`、`state`、`revision`、native-authoritative `generation`/
+  `mediaToken` 和 `audioState`；屏幕媒体端点与渲染
   capability 由独立 `realtime_media` 生命周期契约协调，PeerConnection、ICE、SDP、
   signaling、socket 和 native media resource 全部由 App/native Owner 持有；
 - 不创建 Socket、FFI handle、HTTP client 或 secure-storage 实现；
@@ -60,6 +61,12 @@ App Shell 注入的 backend 事件和生命周期；它不再提供合成视频�
 保持 unavailable，不把 SDP/ICE 事件泄漏给 Feature。`start()`/`stop()` 的 Future 等待 App Shell 关联到
 `NativeCommandResultEvent` 的命令完成；队列入列成功不会被当作操作完成，且 stop
 只有在 native `closed` 状态事件到达后才把 session 状态置为 `stopped`。
+
+Native state/snapshot events also carry the native-authoritative Realtime
+`generation`. `RealtimeSession.mediaToken` exposes `(realtimeId, peerId,
+generation)` only after that event arrives; media adapters must pass this token
+unchanged to the native endpoint ABI and must never derive it from signaling
+`revision`.
 
 Network V2 的命令边界按功能域提供 Connection、Identity、Transfer、Realtime 和
 Relay lifecycle ports；`NetworkV2FacadeImpl` 只编排这些 port，不拥有注入的

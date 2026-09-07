@@ -50,6 +50,8 @@ dependencies:
     path: ../../packages/infrastructure/ssh_mobile_network_native
   network_transport:
     path: ../../packages/infrastructure/network_transport
+  realtime_media:
+    path: ../../packages/infrastructure/realtime_media
   ssh_core:
     path: ../../packages/infrastructure/ssh_core
   flutter_background_service: ^5.1.0

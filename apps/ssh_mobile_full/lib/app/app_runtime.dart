@@ -12,6 +12,7 @@ import 'package:feature_rag/feature_rag.dart' as feature_rag;
 import 'package:feature_webview/feature_webview.dart' as feature_webview;
 import 'package:network_sdk/network_sdk.dart';
 import 'package:network_transport/network_transport.dart';
+import 'package:realtime_media/realtime_media.dart';
 import 'package:ssh_core/ssh_core.dart';
 
 import 'lan_share_feature_adapters.dart';
@@ -22,6 +23,7 @@ import 'playbook_feature_adapters.dart';
 import 'rag_feature_adapters.dart';
 import 'webview_feature_adapters.dart';
 import 'developer_feature_adapters.dart';
+import 'realtime_media_feature_adapters.dart';
 import '../services/app_bootstrap_coordinator.dart';
 import '../services/app_log_service.dart';
 import '../services/app_settings.dart';
@@ -53,6 +55,8 @@ final class AppRuntime implements Disposable {
     required this.networkRuntime,
     required this.networkFacade,
     required this.realtimeClient,
+    required this.realtimeMediaBackend,
+    required this.realtimeMediaSessionFactory,
     required this.bootstrapCoordinator,
     required this.shortcutCommandService,
     required this.terminalSessionMetadataStore,
@@ -132,6 +136,15 @@ final class AppRuntime implements Disposable {
 
   /// App Scope Realtime SDK owner; its backend borrows the NetworkRuntime handle.
   final RealtimeClient realtimeClient;
+
+  /// App Shell media adapter; it borrows the same Runtime and exposes only
+  /// opaque endpoint lifecycle to screen-share callers.
+  final RealtimeMediaBackend realtimeMediaBackend;
+
+  /// Creates a generation-bound media controller from a production
+  /// [RealtimeSession]. The factory never derives generation from signaling
+  /// revision and shares the App-owned media adapter above.
+  final AppRealtimeMediaSessionFactory realtimeMediaSessionFactory;
 
   /// App Scope 唯一业务网络门面；由组合根在 Feature 激活前装配。
   ///

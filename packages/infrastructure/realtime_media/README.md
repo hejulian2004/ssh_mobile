@@ -12,6 +12,10 @@ The public API contains only endpoint/session identity, lifecycle, capture-sourc
 
 Feature code may request an operation through its injected business port and release only its own operation/subscriptions. It never disposes the app-owned network runtime or native handle.
 
+The App Shell native adapter receives a `RealtimeSessionToken` from
+`network_sdk` and forwards its native-authoritative generation unchanged to
+the endpoint ABI. Signaling revisions are not accepted as a substitute.
+
 ## Validation
 
 ```sh

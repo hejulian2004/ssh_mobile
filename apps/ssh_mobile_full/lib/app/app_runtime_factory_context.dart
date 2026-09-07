@@ -54,6 +54,8 @@ final class _AppRuntimeFactoryContext {
   late final NetworkRuntime runtimeNetworkRuntime;
   late final TelemetryTraceRegistry traceRegistry;
   late final RealtimeClient runtimeRealtimeClient;
+  late final RealtimeMediaBackend runtimeRealtimeMediaBackend;
+  late final AppRealtimeMediaSessionFactory runtimeRealtimeMediaSessionFactory;
   late final JsonBootstrapClient bootstrapClient;
   late final AppSettings appSettings;
   late final feature_webview.ClientWebViewService webViewService;

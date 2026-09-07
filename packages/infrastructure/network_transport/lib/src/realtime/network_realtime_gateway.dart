@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:ssh_mobile_network_native/ssh_mobile_network_native.dart';
 
+import '../native/native_network_adapter.dart';
 import '../native/network_command_gateway.dart';
 import '../transport/transport_connection.dart';
 
@@ -29,6 +30,20 @@ abstract interface class NetworkRealtimeGateway {
   /// A successful command result still does not mean the native session is
   /// closed; `closed` is reported asynchronously through [events].
   NativeCommandTicket stop({required String realtimeId});
+
+  /// Creates one opaque native screen-media endpoint bound to the supplied
+  /// native-authoritative session generation.
+  NativeRealtimeMediaEndpointCreateResult createMediaEndpoint({
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  });
+
+  /// Releases one opaque native screen-media endpoint lease.
+  NativeOperationStatus releaseMediaEndpoint(
+    NativeRealtimeMediaEndpointId endpointId,
+  );
 }
 
 /// Identity and queue-level status for one native Realtime command.
@@ -50,9 +65,10 @@ final class NativeCommandTicket {
 
 /// Runtime-owned implementation backed by a borrowed command gateway.
 final class RuntimeNetworkRealtimeGateway implements NetworkRealtimeGateway {
-  RuntimeNetworkRealtimeGateway(this._gateway);
+  RuntimeNetworkRealtimeGateway(this._gateway, [this._media]);
 
   final NetworkCommandGateway _gateway;
+  final NativeRealtimeMediaPort? _media;
   final NativeCommandResultGuard _commandResultGuard =
       NativeCommandResultGuard();
   int _commandSequence = 0;
@@ -107,6 +123,30 @@ final class RuntimeNetworkRealtimeGateway implements NetworkRealtimeGateway {
       );
     }
   }
+
+  @override
+  NativeRealtimeMediaEndpointCreateResult createMediaEndpoint({
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  }) =>
+      _media?.createMediaEndpoint(
+        realtimeId: realtimeId,
+        peerId: peerId,
+        generation: generation,
+        direction: direction,
+      ) ??
+      const NativeRealtimeMediaEndpointCreateResult(
+        status: NativeOperationStatus.driverUnavailable,
+      );
+
+  @override
+  NativeOperationStatus releaseMediaEndpoint(
+    NativeRealtimeMediaEndpointId endpointId,
+  ) =>
+      _media?.releaseMediaEndpoint(endpointId) ??
+      NativeOperationStatus.driverUnavailable;
 
   NativeCommandTicket _send({
     required String commandId,

@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'package:network_transport/network_transport.dart';
+import 'package:realtime_media/realtime_media.dart';
 import 'package:ssh_mobile_network_native/ssh_mobile_network_native.dart';
 
 import 'package:ssh_mobile/app/realtime_feature_adapters.dart';
+import 'package:ssh_mobile/app/realtime_media_feature_adapters.dart';
 
 void main() {
   const realtimeId = '00112233445566778899aabbccddeeff';
@@ -473,8 +475,16 @@ void main() {
       await _pump();
       gateway.emitCommandResult(commandId: gateway.lastStartCommandId!);
       await firstStart;
-      gateway.emitState(NativeRealtimeSessionState.negotiating, revision: 1);
-      gateway.emitState(NativeRealtimeSessionState.connected, revision: 2);
+      gateway.emitState(
+        NativeRealtimeSessionState.negotiating,
+        revision: 1,
+        generation: 7,
+      );
+      gateway.emitState(
+        NativeRealtimeSessionState.connected,
+        revision: 2,
+        generation: 7,
+      );
       await _pump();
       expect(session.state, RealtimeSessionState.connected);
       expect(session.revision, 2);
@@ -484,7 +494,11 @@ void main() {
       await _pump();
       gateway.emitCommandResult(commandId: gateway.lastStopCommandId!);
       await stopFuture;
-      gateway.emitState(NativeRealtimeSessionState.closed, revision: 3);
+      gateway.emitState(
+        NativeRealtimeSessionState.closed,
+        revision: 3,
+        generation: 7,
+      );
       await _pump();
       expect(session.state, RealtimeSessionState.stopped);
       expect(session.revision, 3);
@@ -497,14 +511,184 @@ void main() {
       await _pump();
       gateway.emitCommandResult(commandId: gateway.lastStartCommandId!);
       await secondStart;
-      gateway.emitState(NativeRealtimeSessionState.negotiating, revision: 1);
+      gateway.emitState(
+        NativeRealtimeSessionState.negotiating,
+        revision: 1,
+        generation: 8,
+      );
       await _pump();
       expect(session.state, RealtimeSessionState.negotiating);
       expect(session.revision, 1);
-      gateway.emitState(NativeRealtimeSessionState.connected, revision: 2);
+      gateway.emitState(
+        NativeRealtimeSessionState.connected,
+        revision: 2,
+        generation: 8,
+      );
       await _pump();
       expect(session.state, RealtimeSessionState.connected);
       expect(session.revision, 2);
+      await client.dispose();
+    },
+  );
+
+  test(
+    'native generation becomes the media token and rejects stale events',
+    () async {
+      final gateway = _FakeRealtimeGateway();
+      final backend = AppRealtimeSessionBackend(
+        networkRuntime: _FakeNetworkRuntime(gateway),
+        commandResultTimeout: const Duration(seconds: 1),
+      );
+      final client = RealtimeClientImpl(backend: backend);
+      final session = client.createSession(
+        realtimeId: realtimeId,
+        peerId: 'peer-a',
+      );
+
+      final startFuture = session.start();
+      await _pump();
+      gateway.emitCommandResult(commandId: gateway.lastStartCommandId!);
+      await startFuture;
+      gateway.emitState(
+        NativeRealtimeSessionState.connected,
+        revision: 3,
+        generation: 7,
+      );
+      await _pump();
+
+      expect(session.generation, 7);
+      expect(
+        session.mediaToken,
+        const RealtimeSessionToken(
+          realtimeId: realtimeId,
+          peerId: 'peer-a',
+          generation: 7,
+        ),
+      );
+
+      gateway.emitState(
+        NativeRealtimeSessionState.failed,
+        revision: 99,
+        generation: 6,
+      );
+      await _pump();
+      expect(session.state, RealtimeSessionState.connected);
+      expect(session.generation, 7);
+      await client.dispose();
+    },
+  );
+
+  for (final status in <NativeOperationStatus>[
+    NativeOperationStatus.staleGeneration,
+    NativeOperationStatus.staleEndpoint,
+    NativeOperationStatus.duplicateEndpoint,
+    NativeOperationStatus.directionMismatch,
+    NativeOperationStatus.driverUnavailable,
+  ]) {
+    test('native media $status fails the controller closed', () async {
+      final gateway = _FakeRealtimeGateway(mediaCreateStatus: status);
+      final backend = AppRealtimeMediaBackend(
+        networkRuntime: _FakeNetworkRuntime(gateway),
+      );
+      final controller = RealtimeMediaSessionController(
+        backend: backend,
+        realtimeId: realtimeId,
+        peerId: 'peer-a',
+        generation: 7,
+      );
+
+      await expectLater(
+        controller.start(RealtimeMediaDirection.send),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            isNot(RealtimeMediaErrorCode.backendFailure),
+          ),
+        ),
+      );
+      expect(controller.state, RealtimeMediaSessionState.failed);
+      await controller.stop();
+    });
+  }
+
+  test(
+    'native release status remains typed through the media adapter',
+    () async {
+      final gateway = _FakeRealtimeGateway(
+        mediaReleaseStatus: NativeOperationStatus.staleEndpoint,
+      );
+      final controller = RealtimeMediaSessionController(
+        backend: AppRealtimeMediaBackend(
+          networkRuntime: _FakeNetworkRuntime(gateway),
+        ),
+        realtimeId: realtimeId,
+        peerId: 'peer-a',
+        generation: 7,
+      );
+      final endpoint = await controller.start(RealtimeMediaDirection.send);
+
+      await expectLater(
+        controller.release(endpoint),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.staleEndpoint,
+          ),
+        ),
+      );
+      expect(endpoint.state, RealtimeMediaEndpointState.released);
+      await controller.stop();
+    },
+  );
+
+  test(
+    'generation token survives native replacement and stale start fails',
+    () async {
+      final gateway = _FakeRealtimeGateway();
+      final sessionBackend = AppRealtimeSessionBackend(
+        networkRuntime: _FakeNetworkRuntime(gateway),
+        commandResultTimeout: const Duration(seconds: 1),
+      );
+      final client = RealtimeClientImpl(backend: sessionBackend);
+      final session = client.createSession(
+        realtimeId: realtimeId,
+        peerId: 'peer-a',
+      );
+      final startFuture = session.start();
+      await _pump();
+      gateway.emitCommandResult(commandId: gateway.lastStartCommandId!);
+      await startFuture;
+      gateway.emitState(
+        NativeRealtimeSessionState.connected,
+        revision: 1,
+        generation: 7,
+      );
+      await _pump();
+
+      // Native has replaced generation 7 with generation 8 before the delayed
+      // endpoint acquisition reaches the registry. The old token is immutable;
+      // native compares the expected generation and returns staleGeneration.
+      gateway.mediaCurrentGeneration = 8;
+      final controller = AppRealtimeMediaSessionFactory(
+        backend: AppRealtimeMediaBackend(
+          networkRuntime: _FakeNetworkRuntime(gateway),
+        ),
+      ).create(session);
+      await expectLater(
+        controller.start(RealtimeMediaDirection.receive),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.staleGeneration,
+          ),
+        ),
+      );
+      expect(gateway.lastMediaGeneration, 7);
+      expect(controller.state, RealtimeMediaSessionState.failed);
+      await controller.stop();
       await client.dispose();
     },
   );
@@ -551,14 +735,22 @@ final class _FakeNetworkRuntime implements NetworkRuntime {
 }
 
 final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
-  _FakeRealtimeGateway({this.startStatus = NativeOperationStatus.success});
+  _FakeRealtimeGateway({
+    this.startStatus = NativeOperationStatus.success,
+    this.mediaCreateStatus = NativeOperationStatus.success,
+    this.mediaReleaseStatus = NativeOperationStatus.success,
+  });
 
   final StreamController<NativeNetworkEvent> _events =
       StreamController<NativeNetworkEvent>.broadcast();
   final NativeOperationStatus startStatus;
+  final NativeOperationStatus mediaCreateStatus;
+  final NativeOperationStatus mediaReleaseStatus;
+  int? mediaCurrentGeneration;
   int _sequence = 0;
   String? lastStartCommandId;
   String? lastStopCommandId;
+  int? lastMediaGeneration;
 
   @override
   Stream<NativeNetworkEvent> get events => _events.stream;
@@ -583,6 +775,29 @@ final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
     );
   }
 
+  @override
+  NativeRealtimeMediaEndpointCreateResult createMediaEndpoint({
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  }) {
+    lastMediaGeneration = generation;
+    final status =
+        mediaCurrentGeneration != null && generation != mediaCurrentGeneration
+        ? NativeOperationStatus.staleGeneration
+        : mediaCreateStatus;
+    return NativeRealtimeMediaEndpointCreateResult(
+      status: status,
+      endpointId: status.isSuccess ? NativeRealtimeMediaEndpointId(77) : null,
+    );
+  }
+
+  @override
+  NativeOperationStatus releaseMediaEndpoint(
+    NativeRealtimeMediaEndpointId endpointId,
+  ) => mediaReleaseStatus;
+
   void emitCommandResult({
     required String commandId,
     bool accepted = true,
@@ -603,6 +818,7 @@ final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
   void emitState(
     NativeRealtimeSessionState state, {
     int? revision,
+    int generation = 1,
     NativeNetworkError? error,
   }) {
     _events.add(
@@ -614,6 +830,7 @@ final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
         peerId: 'peer-a',
         state: state,
         revision: revision ?? _sequence,
+        generation: generation,
         error: error,
       ),
     );
@@ -622,6 +839,7 @@ final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
   void emitSnapshot(
     NativeRealtimeSessionState state, {
     required int revision,
+    int generation = 1,
     NativeNetworkError? error,
   }) {
     _events.add(
@@ -633,6 +851,7 @@ final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
         peerId: 'peer-a',
         state: state,
         revision: revision,
+        generation: generation,
         error: error,
       ),
     );

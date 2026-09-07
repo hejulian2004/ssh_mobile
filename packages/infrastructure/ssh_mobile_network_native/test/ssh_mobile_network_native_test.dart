@@ -330,6 +330,8 @@ void main() {
       NativeRealtimeSessionState.connected.wireValue,
       0x20,
       0x07,
+      0x30,
+      0x01,
     ];
     final frame = Uint8List.fromList(<int>[
       0x0a,
@@ -352,6 +354,7 @@ void main() {
     expect(snapshot.peerId, equals('peer-a'));
     expect(snapshot.state, NativeRealtimeSessionState.connected);
     expect(snapshot.revision, 7);
+    expect(snapshot.generation, 1);
     expect(snapshot.error, isNull);
   });
 
@@ -378,6 +381,8 @@ void main() {
       NativeRealtimeSessionState.failed.wireValue,
       0x20,
       0x03,
+      0x30,
+      0x01,
       0x2a,
       errorNested.length,
       ...errorNested,
@@ -400,6 +405,7 @@ void main() {
     final snapshot = event! as NativeRealtimeSnapshotEvent;
     expect(snapshot.state, NativeRealtimeSessionState.failed);
     expect(snapshot.revision, 3);
+    expect(snapshot.generation, 1);
     expect(snapshot.error, isNotNull);
     expect(snapshot.error!.code, 12);
     expect(

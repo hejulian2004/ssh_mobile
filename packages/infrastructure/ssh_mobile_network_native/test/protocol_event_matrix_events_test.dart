@@ -82,6 +82,7 @@ void main() {
         _varintField(3, NativeRealtimeSessionState.connected.wireValue),
         _varintField(4, 3),
         _bytesField(5, error),
+        _varintField(6, 1),
       ]),
       22: _message(<List<int>>[
         _stringField(1, realtimeId),
@@ -96,6 +97,7 @@ void main() {
         _varintField(3, NativeRealtimeSessionState.negotiating.wireValue),
         _varintField(4, 5),
         _bytesField(5, error),
+        _varintField(6, 1),
       ]),
       24: _message(<List<int>>[
         _stringField(1, 'peer-a'),
@@ -200,6 +202,10 @@ void main() {
     expect(diagnostics.lastError?.retryAfterSeconds, 5);
     final signal = decoded[22]! as NativeRealtimeSignalEvent;
     expect(signal.payload, orderedEquals(<int>[6, 7]));
+    final realtimeState = decoded[21]! as NativeRealtimeStateChangedEvent;
+    expect(realtimeState.generation, 1);
+    final realtimeSnapshot = decoded[23]! as NativeRealtimeSnapshotEvent;
+    expect(realtimeSnapshot.generation, 1);
     final presenceSnapshot = decoded[25]! as NativePeerPresenceSnapshotEvent;
     expect(presenceSnapshot.peers.single.generation, 4);
   });

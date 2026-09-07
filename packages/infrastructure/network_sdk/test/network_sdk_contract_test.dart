@@ -911,6 +911,12 @@ final class _FakeRealtimeSession implements RealtimeSession {
   int get revision => 0;
 
   @override
+  int? get generation => null;
+
+  @override
+  RealtimeSessionToken? get mediaToken => null;
+
+  @override
   RealtimeAudioState get audioState => RealtimeAudioState.unavailable;
 
   @override

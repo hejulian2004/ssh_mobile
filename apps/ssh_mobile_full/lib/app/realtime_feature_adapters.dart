@@ -140,6 +140,7 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
         :final peerId,
         :final state,
         :final revision,
+        :final generation,
         :final error,
       ):
         _events.add(
@@ -148,6 +149,7 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
             peerId: peerId,
             state: _mapState(state),
             revision: revision,
+            generation: generation,
             error: error == null ? null : _mapError(error),
           ),
         );
@@ -156,6 +158,7 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
         :final peerId,
         :final state,
         :final revision,
+        :final generation,
         :final error,
       ):
         // 快照在 session 存在前到达时由 SDK coordinator 忽略；这里只做类型映射。
@@ -166,6 +169,7 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
               peerId: peerId,
               state: _mapState(state),
               revision: revision,
+              generation: generation,
               error: error == null ? null : _mapError(error),
             ),
           ),

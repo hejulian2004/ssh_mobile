@@ -10,6 +10,22 @@ import 'package:ssh_mobile_network_native/ssh_mobile_network_native.dart';
 
 import '../transport/transport_connection.dart';
 
+/// Borrowed native-only media lifecycle operations. The App Shell uses this
+/// boundary to create/release opaque screen endpoints; encoded frames never
+/// cross into Dart.
+abstract interface class NativeRealtimeMediaPort {
+  NativeRealtimeMediaEndpointCreateResult createMediaEndpoint({
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  });
+
+  NativeOperationStatus releaseMediaEndpoint(
+    NativeRealtimeMediaEndpointId endpointId,
+  );
+}
+
 /// 创建一个已启动的 native 网络 handle。
 abstract interface class NativeNetworkAdapter {
   /// 创建并启动一个 native 网络运行时。
@@ -17,7 +33,8 @@ abstract interface class NativeNetworkAdapter {
 }
 
 /// 已启动 native 网络运行时的最小可测试合约。
-abstract interface class NativeNetworkHandle implements Disposable {
+abstract interface class NativeNetworkHandle
+    implements Disposable, NativeRealtimeMediaPort {
   /// helper isolate 发布的原始事件流。
   Stream<Uint8List> get rawEvents;
 
@@ -80,6 +97,30 @@ final class _SshMobileNativeNetworkHandle implements NativeNetworkHandle {
       NativeOperationStatus.frameRejected => TransportOperationStatus.failure,
     };
   }
+
+  @override
+  NativeRealtimeMediaEndpointCreateResult createMediaEndpoint({
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  }) => _closed
+      ? const NativeRealtimeMediaEndpointCreateResult(
+          status: NativeOperationStatus.stopped,
+        )
+      : _runtime.createRealtimeMediaEndpoint(
+          realtimeId: realtimeId,
+          peerId: peerId,
+          generation: generation,
+          direction: direction,
+        );
+
+  @override
+  NativeOperationStatus releaseMediaEndpoint(
+    NativeRealtimeMediaEndpointId endpointId,
+  ) => _closed
+      ? NativeOperationStatus.success
+      : _runtime.releaseRealtimeMediaEndpoint(endpointId);
 
   @override
   Future<void> close() async {

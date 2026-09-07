@@ -865,6 +865,7 @@ fn ice_restart_emits_a_new_offer_and_close_rejects_stale_revisions() {
     let restart_offer = restart.outbound.expect("restart offer");
     assert_eq!(restart_offer.kind, RealtimeSignalKind::WebRtcOffer);
     assert!(restart_offer.revision > answer.revision);
+    assert!(manager.session_generations.contains_key(realtime_id));
 
     assert!(apply_signal(
         &mut manager,
@@ -876,6 +877,7 @@ fn ice_restart_emits_a_new_offer_and_close_rejects_stale_revisions() {
     )
     .is_err());
     assert!(manager.sessions.contains_key(realtime_id));
+    assert!(manager.session_generations.contains_key(realtime_id));
     let closed = apply_signal(
         &mut manager,
         realtime_id,
@@ -1737,6 +1739,7 @@ async fn realtime_manager_close_all_and_connection_close_are_owner_scoped() {
             "00112233445566778899aabbccddeeff".into(),
             "peer-a".into(),
             2,
+            0,
         )]
     );
     assert_eq!(manager.sessions.len(), 2);

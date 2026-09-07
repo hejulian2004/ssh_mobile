@@ -15,6 +15,7 @@ final class _NativeRealtimeEventDecoder {
     var peerId = '';
     var state = 0;
     var revision = 0;
+    var generation = 0;
     NativeNetworkError? error;
     while (!reader.isDone) {
       final field = reader.field();
@@ -29,12 +30,19 @@ final class _NativeRealtimeEventDecoder {
           revision = reader.varint(field.wireType);
         case 5:
           error = _values.decodeError(reader.bytes(field.wireType));
+        case 6:
+          generation = reader.varint(field.wireType);
         default:
           reader.skip(field.wireType);
       }
     }
     _values.validateDecodedRealtimeId(realtimeId);
     _values.validateDecodedPeerId(peerId);
+    if (generation <= 0) {
+      throw const FormatException(
+        'Realtime session generation must be positive.',
+      );
+    }
     return NativeRealtimeStateChangedEvent(
       eventId: eventId,
       timestampMs: timestampMs,
@@ -43,6 +51,7 @@ final class _NativeRealtimeEventDecoder {
       peerId: peerId,
       state: NativeRealtimeSessionState.fromWire(state),
       revision: revision,
+      generation: generation,
       error: error,
     );
   }
@@ -112,6 +121,7 @@ final class _NativeRealtimeEventDecoder {
     var peerId = '';
     var state = 0;
     var revision = 0;
+    var generation = 0;
     NativeNetworkError? error;
     while (!reader.isDone) {
       final field = reader.field();
@@ -126,12 +136,19 @@ final class _NativeRealtimeEventDecoder {
           revision = reader.varint(field.wireType);
         case 5:
           error = _values.decodeError(reader.bytes(field.wireType));
+        case 6:
+          generation = reader.varint(field.wireType);
         default:
           reader.skip(field.wireType);
       }
     }
     _values.validateDecodedRealtimeId(realtimeId);
     _values.validateDecodedPeerId(peerId);
+    if (generation <= 0) {
+      throw const FormatException(
+        'Realtime session generation must be positive.',
+      );
+    }
     return NativeRealtimeSnapshotEvent(
       eventId: eventId,
       timestampMs: timestampMs,
@@ -140,6 +157,7 @@ final class _NativeRealtimeEventDecoder {
       peerId: peerId,
       state: NativeRealtimeSessionState.fromWire(state),
       revision: revision,
+      generation: generation,
       error: error,
     );
   }

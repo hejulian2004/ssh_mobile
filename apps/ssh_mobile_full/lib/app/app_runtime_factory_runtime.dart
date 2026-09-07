@@ -14,6 +14,8 @@ extension _AppRuntimeFactoryRuntime on _AppRuntimeFactoryContext {
       networkRuntime: runtimeNetworkRuntime,
       networkFacade: networkFacade,
       realtimeClient: runtimeRealtimeClient,
+      realtimeMediaBackend: runtimeRealtimeMediaBackend,
+      realtimeMediaSessionFactory: runtimeRealtimeMediaSessionFactory,
       bootstrapCoordinator: bootstrapCoordinator,
       shortcutCommandService: shortcutCommandService,
       terminalSessionMetadataStore: terminalMetadataStore,

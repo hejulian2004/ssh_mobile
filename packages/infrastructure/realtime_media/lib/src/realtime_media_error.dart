@@ -1,8 +1,14 @@
 /// Typed failures surfaced by the media lifecycle boundary.
 enum RealtimeMediaErrorCode {
   invalidArgument,
+  unknownSession,
   duplicateAttach,
   invalidDirection,
+  directionMismatch,
+  duplicateEndpoint,
+  driverUnavailable,
+  peerMismatch,
+  frameRejected,
   staleGeneration,
   staleEndpoint,
   useAfterRelease,

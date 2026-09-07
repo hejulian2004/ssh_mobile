@@ -34,19 +34,23 @@ ADR-034 或原始技术架构文档。
   `(realtimeId, peerId, driver)` generation，不会误删 replacement session。
 - [x] Phase 2 endpoint release 清空 native queue/order；connection-session loss
   在 peer close 前撤销 endpoint，并有回归测试。
-- [x] Phase 2 typed native lifecycle failures fail closed：controller/fake backend
-  不会在异常后回到 ready；native media ABI 也保留 stale generation/endpoint、
-  direction、duplicate、driver 和 frame rejection 的独立状态码。
-- [ ] Phase 2 real Dart→native adapter parity：同一组 lifecycle failure-state
-  断言仍需接入真实 adapter，而不能只引用 fake backend 证据。
+- [x] Phase 2 typed native lifecycle failures fail closed：controller、App Shell
+  native adapter 和 fake backend 不会在异常后回到 ready；native media ABI 也
+  保留 stale generation/endpoint、direction、duplicate、driver 和 frame
+  rejection 的独立状态码。
+- [x] Phase 2 real Dart→native adapter parity：native state/snapshot 携带独立
+  generation，`RealtimeSession.mediaToken` 原样传给 App Shell 的
+  `AppRealtimeMediaBackend`/`RealtimeMediaSessionController`；真实 adapter
+  status mapping、generation replacement race 和 controller failure-state
+  断言已覆盖，不能从 signaling revision 推导 generation。
 - [ ] Phase 0 PR 接受。
 - [ ] Phase 1 PR 接受。
 - [ ] Phase 2 PR 接受。
 - [x] 获得授权后提交、推送并创建 Phase 2 PR（GitHub PR #67）。
 
-当前阻塞：Phase 0、Phase 1、Phase 2 的本地实现证据和 amended head 的 GitHub
-Actions 已齐，但 Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，按架构规则
-不能实现 Phase 3–7。
+当前阻塞：Phase 0、Phase 1、Phase 2 的本地实现证据已齐；当前 corrective
+head 的 GitHub Actions 需在推送后重新通过，Phase 2 PR #67 仍需独立 PR
+接受。在 PR 接受前，按架构规则不能实现 Phase 3–7。
 
 ## PR #67 评审修正清单
 
@@ -155,9 +159,11 @@ Actions 已齐，但 Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，
 - [x] ignored coturn relay-only video test：显式运行并通过（1 passed）。
 - [x] live C-ABI endpoint test：create/send/receive/pull/release 全链路通过，
   并验证 malformed Annex-B、duplicate endpoint、stale generation 和 released ID。
-- [x] GitHub Actions：amended head `bd3ae683` 的 run
+- [x] GitHub Actions：上一轮 amended head `bd3ae683` 的 run
   [34075485885](https://github.com/hejulian2004/ssh_mobile/actions/runs/34075485885)
   已完成，全部 jobs success；旧 head 的失败 run 不作为 merge evidence。
+- [ ] 当前 corrective head 的 exact-commit GitHub Actions run：代码推送后补记，
+  在所有 jobs success 前不能作为 merge evidence。
 - [x] native binding 的 Flutter FFI 测试从其 package 根目录运行，以便解析
   package native asset；从仓库根目录调用会缺少该 asset。
 - [x] surface generation 不匹配时的 detach/release/fail-closed 回归测试通过。
@@ -170,6 +176,10 @@ Actions 已齐，但 Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，
   lease 不继承旧接收序列。
 - [x] typed start/attach failure lifecycle 回归测试通过，失败状态不会被 finally
   误置为 ready。
+- [x] production Dart→native generation path：Rust protobuf state/snapshot →
+  native Dart decoder → `RealtimeSession.mediaToken` → App Shell media gateway
+  → native endpoint create(expected generation)；旧 token 在 native replacement
+  后得到 `staleGeneration`，controller fail closed。
 - [x] screen-media production boundary forbidden-pattern audit 通过：没有第二套
   PeerConnection、Dart 帧流、RelayDataFrame 或无界 native queue。
 

@@ -119,7 +119,6 @@ impl RealtimeManager {
         removed
     }
 
-    #[cfg(test)]
     fn session_generation(&self, realtime_id: &str) -> Option<u64> {
         self.session_generations.get(realtime_id).copied()
     }
@@ -163,14 +162,15 @@ impl RealtimeManager {
     }
 
     /// §22：ConnectionSession 销毁（transport 丢失）时关闭绑定在该 ConnectionSession
-    /// 上的所有 RealtimeSession——移除注册、销毁 WebRTC peer。返回 `(realtime_id,
-    /// peer_id, close_revision)`，供调用方取消 supervised I/O 任务并发出 Closed 事件。
+    /// 上的所有 RealtimeSession——移除注册、销毁 WebRTC peer。返回
+    /// `(realtime_id, peer_id, close_revision, generation)`，供调用方取消
+    /// supervised I/O 任务并发出 Closed 事件。
     #[cfg(test)]
     fn close_for_connection_session(
         &mut self,
         peer_id: &str,
         session_id: SessionId,
-    ) -> Vec<(String, String, u64)> {
+    ) -> Vec<(String, String, u64, u64)> {
         self.close_for_connection_session_with_hook(peer_id, session_id, |_| {})
     }
 
@@ -181,7 +181,7 @@ impl RealtimeManager {
         peer_id: &str,
         session_id: SessionId,
         mut before_peer_close: impl FnMut(&str),
-    ) -> Vec<(String, String, u64)> {
+    ) -> Vec<(String, String, u64, u64)> {
         let mut closed = Vec::new();
         let matching = self
             .sessions
@@ -192,13 +192,14 @@ impl RealtimeManager {
             .map(|(realtime_id, _)| realtime_id.clone())
             .collect::<Vec<_>>();
         for realtime_id in matching {
+            let generation = self.session_generation(&realtime_id).unwrap_or_default();
             let Some(mut session) = self.remove_session(&realtime_id) else {
                 continue;
             };
             let close_revision = session.revision.saturating_add(1);
             before_peer_close(&realtime_id);
             let _ = with_session_peer(&mut session, WebRtcPeer::close);
-            closed.push((realtime_id, session.peer_id, close_revision));
+            closed.push((realtime_id, session.peer_id, close_revision, generation));
         }
         closed
     }
@@ -223,6 +224,7 @@ struct InboundSignal {
 struct SignalOutcome {
     peer_id: String,
     revision: u64,
+    generation: u64,
     state: RealtimeSessionState,
     outbound: Option<OutboundSignal>,
 }
@@ -324,6 +326,9 @@ async fn start_session_with_config(
             seen_candidates: HashSet::new(),
         },
     );
+    let generation = sessions
+        .session_generation(&realtime_id)
+        .expect("inserted realtime generation");
     drop(sessions);
 
     let outbound = OutboundSignal {
@@ -352,6 +357,7 @@ async fn start_session_with_config(
             &peer_id,
             RealtimeSessionState::Failed as i32,
             revision,
+            generation,
             Some(error.clone()),
         );
         return Err(error);
@@ -397,6 +403,7 @@ async fn start_session_with_config(
         &peer_id,
         RealtimeSessionState::Negotiating as i32,
         revision,
+        generation,
         None,
     );
     emit_realtime_signal(
@@ -417,13 +424,16 @@ pub(crate) async fn stop_session(
     validate_realtime_id(&command.realtime_id)?;
     let session = {
         let mut sessions = state.realtime.lock().await;
+        let generation = sessions
+            .session_generation(&command.realtime_id)
+            .unwrap_or_default();
         let session = sessions.remove_session(&command.realtime_id);
         if session.is_some() {
             crate::realtime_media::invalidate_realtime(state, &command.realtime_id);
         }
-        session
+        session.map(|session| (session, generation))
     };
-    let Some(mut session) = session else {
+    let Some((mut session, generation)) = session else {
         return Err(protocol_error(
             network_protocol::NetworkErrorCode::InvalidArgument,
             "realtime session does not exist",
@@ -451,6 +461,7 @@ pub(crate) async fn stop_session(
         &session.peer_id,
         RealtimeSessionState::Closed as i32,
         close_revision,
+        generation,
         None,
     );
     Ok(())
@@ -574,10 +585,10 @@ async fn handle_realtime_signal(
     validate_signal(kind, revision, &payload).map_err(boxed_protocol_error)?;
 
     if kind == RealtimeSignalKind::WebRtcClose {
-        {
+        let generation = {
             let mut manager = state.realtime.lock().await;
-            close_remote_realtime_session(state, &mut manager, realtime_id, peer_id, revision)?;
-        }
+            close_remote_realtime_session(state, &mut manager, realtime_id, peer_id, revision)?
+        };
         state
             .task_supervisor
             .cancel_session(&realtime_task_key(realtime_id))
@@ -596,6 +607,7 @@ async fn handle_realtime_signal(
             peer_id,
             RealtimeSessionState::Closed as i32,
             revision,
+            generation,
             None,
         );
         return Ok(());
@@ -704,6 +716,7 @@ async fn handle_realtime_signal(
         &outcome.peer_id,
         outcome.state as i32,
         outcome.revision,
+        outcome.generation,
         None,
     );
     if let Some(outbound) = outcome.outbound {
@@ -755,14 +768,16 @@ fn apply_signal(
 }
 
 /// Removes a remotely closed session only after its immutable signal binding
-/// has been checked. Callers own the returned session and must invalidate any
-/// borrowed media endpoints before closing its native peer.
+/// has been checked. The generation is captured before removal because the
+/// manager drops the generation map entry together with the session. Callers
+/// own the returned session and must invalidate any borrowed media endpoints
+/// before closing its native peer.
 fn take_remote_closed_session(
     manager: &mut RealtimeManager,
     realtime_id: &str,
     peer_id: &str,
     revision: u64,
-) -> Result<RealtimeSession, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(RealtimeSession, u64), Box<dyn std::error::Error + Send + Sync>> {
     let Some(session) = manager.sessions.get(realtime_id) else {
         return Err(boxed_message("realtime session does not exist"));
     };
@@ -772,9 +787,13 @@ fn take_remote_closed_session(
     if revision <= session.remote_revision {
         return Err(boxed_message("stale realtime signaling revision"));
     }
-    manager
+    let generation = manager
+        .session_generation(realtime_id)
+        .ok_or_else(|| boxed_message("realtime session generation missing"))?;
+    let session = manager
         .remove_session(realtime_id)
-        .ok_or_else(|| boxed_message("realtime session does not exist"))
+        .ok_or_else(|| boxed_message("realtime session does not exist"))?;
+    Ok((session, generation))
 }
 
 /// Applies a valid remote-close transition in one synchronous ownership scope.
@@ -786,11 +805,12 @@ fn close_remote_realtime_session(
     realtime_id: &str,
     peer_id: &str,
     revision: u64,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut session = take_remote_closed_session(manager, realtime_id, peer_id, revision)?;
+) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+    let (mut session, generation) =
+        take_remote_closed_session(manager, realtime_id, peer_id, revision)?;
     crate::realtime_media::invalidate_realtime(state, realtime_id);
     let _ = with_session_peer(&mut session, WebRtcPeer::close);
-    Ok(())
+    Ok(generation)
 }
 
 fn apply_signal_with_driver(
@@ -807,11 +827,13 @@ fn apply_signal_with_driver(
         payload,
     } = signal;
     if kind == RealtimeSignalKind::WebRtcClose {
-        let mut session = take_remote_closed_session(manager, realtime_id, peer_id, revision)?;
+        let (mut session, generation) =
+            take_remote_closed_session(manager, realtime_id, peer_id, revision)?;
         let _ = with_session_peer(&mut session, WebRtcPeer::close);
         return Ok(SignalOutcome {
             peer_id: peer_id.to_string(),
             revision,
+            generation,
             state: RealtimeSessionState::Closed,
             outbound: None,
         });
@@ -916,9 +938,13 @@ fn apply_signal_with_driver(
             } else {
                 manager.insert_new_session(realtime_id.to_string(), session);
             }
+            let generation = manager
+                .session_generation(realtime_id)
+                .ok_or_else(|| boxed_message("realtime session generation missing"))?;
             Ok(SignalOutcome {
                 peer_id: peer_id.clone(),
                 revision: answer_revision,
+                generation,
                 state: RealtimeSessionState::Negotiating,
                 outbound: Some(OutboundSignal {
                     realtime_id: realtime_id.to_string(),
@@ -930,6 +956,7 @@ fn apply_signal_with_driver(
             })
         }
         RealtimeSignalKind::WebRtcAnswer => {
+            let generation = manager.session_generation(realtime_id).unwrap_or_default();
             let session = manager
                 .sessions
                 .get_mut(realtime_id)
@@ -945,11 +972,13 @@ fn apply_signal_with_driver(
             Ok(SignalOutcome {
                 peer_id: session.peer_id.clone(),
                 revision: session.revision,
+                generation,
                 state: RealtimeSessionState::Connected,
                 outbound: None,
             })
         }
         RealtimeSignalKind::IceCandidate => {
+            let generation = manager.session_generation(realtime_id).unwrap_or_default();
             let session = manager
                 .sessions
                 .get_mut(realtime_id)
@@ -963,11 +992,13 @@ fn apply_signal_with_driver(
             Ok(SignalOutcome {
                 peer_id: session.peer_id.clone(),
                 revision: session.revision,
+                generation,
                 state: RealtimeSessionState::Negotiating,
                 outbound: None,
             })
         }
         RealtimeSignalKind::IceRestart => {
+            let generation = manager.session_generation(realtime_id).unwrap_or_default();
             let session = manager
                 .sessions
                 .get_mut(realtime_id)
@@ -984,6 +1015,7 @@ fn apply_signal_with_driver(
             Ok(SignalOutcome {
                 peer_id: session.peer_id.clone(),
                 revision: session.revision,
+                generation,
                 state: RealtimeSessionState::Restarting,
                 outbound: Some(OutboundSignal {
                     realtime_id: realtime_id.to_string(),
@@ -1095,12 +1127,14 @@ async fn run_realtime_session_io(
             result = &mut io => {
                 if let Err(error) = result {
                     let revision = session_revision(&state, &realtime_id).await;
+                    let generation = session_generation(&state, &realtime_id).await;
                     emit_realtime_state(
                         &state.event_tx,
                         &realtime_id,
                         &peer_id,
                         RealtimeSessionState::Failed as i32,
                         revision,
+                        generation,
                         Some(realtime_error(
                             network_protocol::NetworkErrorCode::IoError,
                             error.to_string(),
@@ -1148,12 +1182,14 @@ async fn handle_io_event(
         }
         RealtimeIoEvent::PeerConnected => {
             let revision = session_revision(state, realtime_id).await;
+            let generation = session_generation(state, realtime_id).await;
             emit_realtime_state(
                 &state.event_tx,
                 realtime_id,
                 peer_id,
                 RealtimeSessionState::Connected as i32,
                 revision,
+                generation,
                 None,
             );
             // Session 稳定后发布完整快照；订阅方在 delta 状态之后看到一致快照。
@@ -1163,6 +1199,7 @@ async fn handle_io_event(
                 peer_id,
                 RealtimeSessionState::Connected as i32,
                 revision,
+                generation,
                 None,
             );
             false
@@ -1170,12 +1207,14 @@ async fn handle_io_event(
         RealtimeIoEvent::PeerDisconnected
         | RealtimeIoEvent::PeerFailed
         | RealtimeIoEvent::IceFailed => {
+            let generation = session_generation(state, realtime_id).await;
             emit_realtime_state(
                 &state.event_tx,
                 realtime_id,
                 peer_id,
                 RealtimeSessionState::Failed as i32,
                 session_revision(state, realtime_id).await,
+                generation,
                 Some(realtime_error(
                     network_protocol::NetworkErrorCode::IoError,
                     "WebRTC peer connection terminated",
@@ -1288,7 +1327,7 @@ pub(crate) async fn close_realtime_sessions_for_session(
             crate::realtime_media::invalidate_realtime(state, realtime_id);
         })
     };
-    for (realtime_id, session_peer_id, close_revision) in closed {
+    for (realtime_id, session_peer_id, close_revision, generation) in closed {
         state
             .task_supervisor
             .cancel_session(&realtime_task_key(&realtime_id))
@@ -1299,6 +1338,7 @@ pub(crate) async fn close_realtime_sessions_for_session(
             &session_peer_id,
             RealtimeSessionState::Closed as i32,
             close_revision,
+            generation,
             None,
         );
     }
@@ -1328,6 +1368,15 @@ async fn session_revision(state: &RuntimeState, realtime_id: &str) -> u64 {
         .sessions
         .get(realtime_id)
         .map(|session| session.revision)
+        .unwrap_or_default()
+}
+
+async fn session_generation(state: &RuntimeState, realtime_id: &str) -> u64 {
+    state
+        .realtime
+        .lock()
+        .await
+        .session_generation(realtime_id)
         .unwrap_or_default()
 }
 

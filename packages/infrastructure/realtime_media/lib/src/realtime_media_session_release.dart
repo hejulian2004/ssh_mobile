@@ -102,6 +102,8 @@ extension RealtimeMediaSessionRelease on RealtimeMediaSessionController {
             endpointId: endpoint.id,
             identity: endpoint.identity,
           );
+        } on RealtimeMediaException catch (error) {
+          failure = error;
         } catch (_) {
           failure = const RealtimeMediaException(
             RealtimeMediaErrorCode.backendFailure,
@@ -120,6 +122,8 @@ extension RealtimeMediaSessionRelease on RealtimeMediaSessionController {
           endpointId: endpoint.id,
           identity: endpoint.identity,
         );
+      } on RealtimeMediaException catch (error) {
+        failure ??= error;
       } catch (_) {
         failure ??= const RealtimeMediaException(
           RealtimeMediaErrorCode.backendFailure,
@@ -169,6 +173,11 @@ extension RealtimeMediaSessionRelease on RealtimeMediaSessionController {
   ) async {
     try {
       await backend.release(endpointId: endpointId, identity: identity);
+    } on RealtimeMediaException catch (error) {
+      if (_terminalRelease != null) {
+        _lateStartCleanupFailure ??= error;
+      }
+      rethrow;
     } catch (_) {
       const failure = RealtimeMediaException(
         RealtimeMediaErrorCode.backendFailure,

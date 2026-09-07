@@ -491,6 +491,9 @@ message RealtimeStateChangedEvent {
   RealtimeSessionState state = 3;
   uint64 revision = 4;
   NetworkError error = 5;
+  // Native-owned media/session generation. This is independent from the
+  // signaling revision and binds endpoint operations to one PeerConnection.
+  uint64 generation = 6;
 }
 
 message RealtimeSignalEvent {
@@ -508,6 +511,8 @@ message RealtimeSnapshotEvent {
   RealtimeSessionState state = 3;
   uint64 revision = 4;
   NetworkError error = 5;
+  // Native-owned media/session generation; never derive this from revision.
+  uint64 generation = 6;
 }
 
 message ChannelMessageEvent {

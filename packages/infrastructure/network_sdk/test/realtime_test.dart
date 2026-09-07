@@ -436,6 +436,42 @@ void main() {
       expect(session.state, RealtimeSessionState.connected);
     },
   );
+
+  test(
+    'session exposes native generation without using signaling revision',
+    () async {
+      final backend = _FakeRealtimeBackend();
+      final client = RealtimeClientImpl(backend: backend);
+      final session = client.createSession(
+        realtimeId: '00112233445566778899aabbccddeeff',
+        peerId: 'peer-a',
+      );
+      addTearDown(client.dispose);
+
+      await session.start();
+      backend.emit(
+        const RealtimeSessionStateChangedEvent(
+          realtimeId: '00112233445566778899aabbccddeeff',
+          peerId: 'peer-a',
+          state: RealtimeSessionState.connected,
+          revision: 99,
+          generation: 7,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(session.revision, 99);
+      expect(session.generation, 7);
+      expect(
+        session.mediaToken,
+        const RealtimeSessionToken(
+          realtimeId: '00112233445566778899aabbccddeeff',
+          peerId: 'peer-a',
+          generation: 7,
+        ),
+      );
+    },
+  );
 }
 
 /// Facade 测试使用的空 SessionClient 替身；Facade 仅把 Realtime 委托给注入的

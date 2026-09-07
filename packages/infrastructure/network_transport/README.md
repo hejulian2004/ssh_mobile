@@ -1,4 +1,4 @@
-最新更新时间：2026-08-25
+最新更新时间：2026-09-07
 
 # network_transport
 
@@ -30,7 +30,8 @@
 - `openRealtimeGateway()` 返回同一 Runtime-owned native handle 上的非拥有型 typed
   Realtime gateway；start/stop 返回带 `commandId` 和 queue status 的
   `NativeCommandTicket`，App Shell 负责关联 `NativeCommandResultEvent` 和映射状态，
-  Feature 不得直接消费该 gateway。
+  Feature 不得直接消费该 gateway。其 media endpoint create/release 还必须接收
+  native-authoritative generation，并只返回 opaque endpoint/status。
 - LAN Share 通过公共合约消费注入的 Runtime/Gateway；配对、传输和 Feature
   生命周期仍由 `feature_lan_share` 拥有，本 Facade 不复制其业务协议。
 

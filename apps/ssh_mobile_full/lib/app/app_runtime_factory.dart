@@ -14,6 +14,7 @@ import 'package:feature_rag/feature_rag.dart' as feature_rag;
 import 'package:feature_webview/feature_webview.dart' as feature_webview;
 import 'package:network_sdk/network_sdk.dart';
 import 'package:network_transport/network_transport.dart';
+import 'package:realtime_media/realtime_media.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../core/services/data_protection_service.dart';
@@ -49,6 +50,7 @@ import 'playbook_feature_adapters.dart';
 import 'ssh_native_stream_adapters.dart';
 import 'rag_feature_adapters.dart';
 import 'realtime_feature_adapters.dart';
+import 'realtime_media_feature_adapters.dart';
 import 'terminal_ssh_capability_adapter.dart';
 import 'webview_feature_adapters.dart';
 

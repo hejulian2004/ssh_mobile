@@ -67,6 +67,7 @@ fn realtime_snapshot_event_round_trips_state_and_revision() {
         peer_id: "peer-a".into(),
         state: RealtimeSessionState::Connected as i32,
         revision: 7,
+        generation: 11,
         error: Some(NetworkError {
             code: NetworkErrorCode::IdentityConflict as i32,
             message: "identity conflict".into(),
@@ -82,6 +83,7 @@ fn realtime_snapshot_event_round_trips_state_and_revision() {
     assert_eq!(decoded.peer_id, "peer-a");
     assert_eq!(decoded.state, RealtimeSessionState::Connected as i32);
     assert_eq!(decoded.revision, 7);
+    assert_eq!(decoded.generation, 11);
     let error = decoded.error.expect("snapshot error");
     assert_eq!(error.code, NetworkErrorCode::IdentityConflict as i32);
     assert_eq!(error.retry_disposition, RetryDisposition::NoRetry as i32);

@@ -41,7 +41,9 @@ business state is retained above that boundary and resumes on a later connection
   `stopRealtimeSession`, and `sendRealtimeSignal` expose only stable IDs,
   revisions, enum values, and bounded byte payloads. `events` decodes command
   results and Realtime state/signaling events without exposing Rust pointers,
-  Quinn connections, UDP sockets, or WebRTC raw objects.
+  Quinn connections, UDP sockets, or WebRTC raw objects. Realtime state and
+  snapshot events also carry the native-authoritative session generation;
+  signaling revision is never used as its substitute.
 - `NativeNetworkRuntime.createRealtimeMediaEndpoint` and
   `releaseRealtimeMediaEndpoint` are additive lifecycle controls for an opaque
   native screen-media endpoint. Create carries the caller's expected Realtime
