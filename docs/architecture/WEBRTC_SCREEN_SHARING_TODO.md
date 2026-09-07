@@ -155,15 +155,15 @@ Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，按架构规则不能
 - [x] 本轮 `network-core` 全量 lib 测试：579 passed；`network-webrtc` 普通测试：
   46 passed、2 ignored；`network-ffi`：22 passed（含 live C-ABI success path）。
 - [x] Rust workspace clippy（`--workspace --all-targets --locked -D warnings`）通过。
-- [x] `realtime_media` analyzer/test：analyzer 无问题、21 项通过；
+- [x] `realtime_media` analyzer/test：analyzer 无问题、23 项通过；
   `ssh_mobile_network_native` analyzer 无问题、28 项通过；`network_sdk`
   analyzer 无问题、88 项通过。
 - [x] ignored coturn relay-only video test：显式运行并通过（1 passed）。
 - [x] live C-ABI endpoint test：create/send/receive/pull/release 全链路通过，
   并验证 malformed Annex-B、duplicate endpoint、stale generation 和 released ID。
-- [x] GitHub Actions：corrective exact head
-  `d96116047a5ebad50c5a13563d61357bbab22ce3` 的 run
-  [34090393793](https://github.com/hejulian2004/ssh_mobile/actions/runs/34090393793)
+- [x] GitHub Actions：release-retry corrective exact head
+  `10878406f7732d785e3a0d1aa0147574e91605cb` 的 run
+  [34100231240](https://github.com/hejulian2004/ssh_mobile/actions/runs/34100231240)
   已完成，全部 jobs success（含 architecture、native/sdk Dart quality、平台
   build、app tests 和 90% coverage gate）。
 - [x] native binding 的 Flutter FFI 测试从其 package 根目录运行，以便解析
