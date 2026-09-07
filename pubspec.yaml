@@ -25,6 +25,7 @@ workspace:
   - packages/infrastructure/network_transport
   - packages/infrastructure/network_sdk
   - packages/infrastructure/realtime_media
+  - packages/infrastructure/realtime_media_windows
   - packages/infrastructure/ssh_core
   - packages/infrastructure/ssh_mobile_network_native
 

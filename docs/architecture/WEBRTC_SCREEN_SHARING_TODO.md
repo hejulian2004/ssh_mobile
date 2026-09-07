@@ -48,9 +48,13 @@ ADR-034 或原始技术架构文档。
   `3d9a4a575f303a573371ce843867cf002f3b163d`，merge commit
   `352ef4dc9c602f648f0975809ce12553957b2a75`。
 - [x] 获得授权后提交、推送并创建 Phase 2 PR（GitHub PR #67）。
+- [x] Phase 3 Windows 边界冻结：`realtime_media_windows` 只传递源/端点身份、
+  生命周期、opaque surface ID 和无载荷统计；capture buffer、H.264 数据、
+  native pointer 与 GPU surface 不进入 Dart。
 
 当前状态：Phase 0、Phase 1、Phase 2 的实现、exact-head CI 证据和 PR #67
-接受记录已齐。Phase 3 可以开始；Phase 3–7 仍不得描述为已交付能力。
+接受记录已齐；Phase 3 当前已进入 Windows boundary implementation。Phase 3
+的 capture/codec/render 与 Phase 4–7 仍不得描述为已交付能力。
 
 ## PR #67 评审修正清单
 
@@ -118,8 +122,10 @@ ADR-034 或原始技术架构文档。
   checks 通过。
 - [x] PR #67 已接受并合并；Phase 2 证据见下方 exact-head CI 记录。
 
-### Phase 3 — Windows Capture / Codec / Render
+### Phase 3 — Windows Capture / Codec / Render（进行中）
 
+- [x] 建立独立 `realtime_media_windows` workspace package、App Shell 注入和
+  可替换的 Windows platform owner 接口；缺失 native plugin 时 fail closed。
 - [ ] Windows monitor/window capture。
 - [ ] Hardware H.264 encode/decode。
 - [ ] GPU surface 与 Flutter Texture 链路。
@@ -168,7 +174,7 @@ ADR-034 或原始技术架构文档。
 - [x] GitHub Actions：release-retry corrective exact head
   `10878406f7732d785e3a0d1aa0147574e91605cb` 的 run
   [34100231240](https://github.com/hejulian2004/ssh_mobile/actions/runs/34100231240)
-   已完成，全部 jobs success（含 architecture、native/sdk Dart quality、平台
+  已完成，全部 jobs success（含 architecture、native/sdk Dart quality、平台
    build、app tests 和 90% coverage gate）。
 - [x] GitHub Actions：PR #67 final exact head
   `3d9a4a575f303a573371ce843867cf002f3b163d` 的 run
@@ -199,5 +205,6 @@ ADR-034 或原始技术架构文档。
 1. 保留当前工作树和用户提供的中文架构原文，不混入无关文件。
 2. 保留已完成的 real Dart→native adapter parity 和 PR #67 接受证据，不再扩展
    Phase 2 scope。
-3. 在独立 Phase 3 分支实现 Windows capture/codec/render，并按 Windows owner、
-   工具链和手工 E2E 入口记录验收证据。
+3. 在当前独立 Phase 3 分支继续实现 Windows capture/codec/render，并按 Windows
+   owner、工具链和手工 E2E 入口记录验收证据；当前 boundary package 不等于
+   平台能力已交付。

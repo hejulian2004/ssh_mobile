@@ -3,7 +3,7 @@
 # 模块依赖审计
 
 本文件记录 Step 32 的最终依赖审计结果。审计对象是根 `pubspec.yaml` 明确列出的
-22 个 workspace 成员，依赖边只统计各 Package `dependencies` 中指向另一个
+23 个 workspace 成员，依赖边只统计各 Package `dependencies` 中指向另一个
 workspace 成员的直接生产依赖。
 
 ## 审计命令
@@ -44,7 +44,7 @@ Feature。Feature 之间默认禁止直接依赖，当前唯一登记的例外�
 
 | 层级 | Package | 内部生产依赖 | 边界说明 |
 | --- | --- | --- | --- |
-| App | `ssh_mobile` | `app_core`, `app_ui`, `connection_core`, `feature_ai`, `feature_connection`, `feature_developer`, `feature_lan_share`, `feature_mcp`, `feature_monitoring`, `feature_playbook`, `feature_rag`, `feature_sftp`, `feature_system_admin`, `feature_terminal`, `feature_webview`, `network_sdk`, `network_transport`, `ssh_core`, `ssh_mobile_network_native` | Full App 组合根，负责注入 App Scope 与 Feature Route |
+| App | `ssh_mobile` | `app_core`, `app_ui`, `connection_core`, `feature_ai`, `feature_connection`, `feature_developer`, `feature_lan_share`, `feature_mcp`, `feature_monitoring`, `feature_playbook`, `feature_rag`, `feature_sftp`, `feature_system_admin`, `feature_terminal`, `feature_webview`, `network_sdk`, `network_transport`, `realtime_media`, `realtime_media_windows`, `ssh_core`, `ssh_mobile_network_native` | Full App 组合根，负责注入 App Scope 与 Feature Route |
 | App | `ssh_mobile_terminal` | `app_core`, `app_ui`, `connection_core`, `feature_terminal`, `network_transport`, `ssh_core` | Terminal-only 组合根；不加载 Connection editor Feature |
 | Core | `app_core` | 无 | 生命周期、日志和公共能力契约 |
 | Core | `app_ui` | 无 | 共享主题、响应式指标和通用 UI |
@@ -64,6 +64,7 @@ Feature。Feature 之间默认禁止直接依赖，当前唯一登记的例外�
 | Infrastructure | `network_transport` | `app_core`, `ssh_mobile_network_native` | App Scope 网络门面和 Native handle 适配器 |
 | Infrastructure | `network_sdk` | 无 | Flutter 层 Bootstrap、鉴权 API、Session、事件流客户端及注入式 JSON 适配 |
 | Infrastructure | `realtime_media` | 无 | 不透明屏幕媒体端点的 Dart 生命周期契约；不拥有 Runtime、采集、编解码或渲染实现 |
+| Infrastructure | `realtime_media_windows` | `realtime_media` | Windows 采集/编解码/渲染的平台适配边界；native owner 实现仍由平台插件负责 |
 | Infrastructure | `ssh_core` | `app_core`, `connection_core` | SSH Session、Pool、Client 和 Host Key 契约 |
 | Infrastructure | `ssh_mobile_network_native` | 无 | Dart/FFI Native 网络绑定 |
 

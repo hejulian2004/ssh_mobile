@@ -8,8 +8,9 @@ Status: Accepted architecture for Phase 0 through Phase 7. Phase 0 and Phase 1
 have committed implementation evidence without separate screen-share PRs; their
 current baseline was accepted together with Phase 2 in PR #67. Phase 2 was
 merged at `352ef4dc9c602f648f0975809ce12553957b2a75` after final head
-`3d9a4a575f303a573371ce843867cf002f3b163d`. Phase 3–7 remain planned and
-must not be described as shipped capability.
+`3d9a4a575f303a573371ce843867cf002f3b163d`. Phase 3 is in progress with its
+Dart/native boundary package only; its Windows capture/codec/render capability
+and Phase 4–7 remain unshipped and must not be described as delivered.
 
 This is only the Screen Share slice of M8 (RTC) in
 [`NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md`](../NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md).
@@ -139,7 +140,8 @@ later phase succeeds.
 | 0 | Implementation evidence accepted with PR #67; no separate screen-share PR | Accepted architecture, ADR-034, memory routing, and documentation checks |
 | 1 | Implementation evidence accepted with PR #67; no separate screen-share PR | Native H.264-only RTP ingress/egress, exact three-frame queue, bounded frame validation, terminal media discard tests, local loopback, and relay-only coturn H.264 coverage |
 | 2 | Accepted in PR #67 and merged to `main` | Runtime/realtime-generation-bound opaque endpoint leases, native-only FFI create/release/H.264 push/pull controls, Dart lifecycle contract/fake tests, and no per-frame Dart API |
-| 3–7 | Not started | Remain subject to the planned acceptance matrix below |
+| 3 | In progress: boundary contract only | Windows native capture/codec/render and E2E remain subject to the planned acceptance matrix below |
+| 4–7 | Not started | Remain subject to the planned acceptance matrix below |
 
 ## Layer boundaries
 
@@ -181,10 +183,9 @@ The `realtime_media` infrastructure package currently owns the Dart
 endpoint-lifecycle contract, opaque source/surface descriptors, and payload-free
 statistics snapshots; its independent tests provide the fake backend. It does
 not own platform capture, hardware codecs, a renderer, or the NetworkRuntime.
-Future platform adapters
-under that package will own capture, H.264 encoder/decoder instances, GPU
-surfaces, and Flutter Texture or equivalent rendering while using the existing
-native bridge by endpoint lease.
+The separate `realtime_media_windows` and future Android adapter packages own
+capture, H.264 encoder/decoder instances, GPU surfaces, and Flutter Texture or
+equivalent rendering while using the existing native bridge by endpoint lease.
 
 ### Rust runtime
 
@@ -206,8 +207,8 @@ the session's native resources are released.
 | UDP socket, timer, and I/O task | RealtimeIoDriver | Realtime session | Driver task is cancelled and joined before socket release |
 | Realtime media endpoint | Native runtime/media bridge | Realtime session generation | Revoked on detach, close, replacement, or Runtime stop |
 | ScreenShareOperation | feature_screen_share | Business operation | Stop, reject, cancel, terminal failure, or route disposal |
-| Capture source and encoder | realtime_media platform adapter | Screen-share session | Stop production before encoder/capture release |
-| Decoder, GPU surface, and Texture | realtime_media renderer | Viewer session | Detach decoder, then release surface and texture |
+| Capture source and encoder | platform adapter (`realtime_media_windows` or Android equivalent) | Screen-share session | Stop production before encoder/capture release |
+| Decoder, GPU surface, and Texture | platform adapter renderer | Viewer session | Detach decoder, then release surface and texture |
 | Feature subscriptions and ViewModel | Feature Route scope | Route | Cancel and dispose without closing App resources |
 
 A Feature may stop its own operation through the injected App Shell capability,

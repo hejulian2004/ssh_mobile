@@ -36,9 +36,16 @@ extension _AppRuntimeFactoryCore on _AppRuntimeFactoryContext {
     runtimeRealtimeClient = RealtimeClientImpl(
       backend: AppRealtimeSessionBackend(networkRuntime: runtimeNetworkRuntime),
     );
-    runtimeRealtimeMediaBackend = AppRealtimeMediaBackend(
+    final endpointBackend = AppRealtimeMediaBackend(
       networkRuntime: runtimeNetworkRuntime,
     );
+    runtimeRealtimeMediaBackend = switch (defaultTargetPlatform) {
+      TargetPlatform.windows => WindowsRealtimeMediaBackend(
+        endpointBackend: endpointBackend,
+        platform: const MethodChannelWindowsRealtimeMediaPlatform(),
+      ),
+      _ => endpointBackend,
+    };
     runtimeRealtimeMediaSessionFactory = AppRealtimeMediaSessionFactory(
       backend: runtimeRealtimeMediaBackend,
     );
