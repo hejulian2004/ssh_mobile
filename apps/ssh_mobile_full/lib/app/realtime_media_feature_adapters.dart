@@ -178,3 +178,14 @@ final class AppRealtimeMediaSessionFactory {
     );
   }
 }
+
+/// App-runtime-owned media adapters that share the NetworkRuntime borrow.
+final class AppRealtimeMediaResources {
+  const AppRealtimeMediaResources({
+    required this.backend,
+    required this.sessionFactory,
+  });
+
+  final RealtimeMediaBackend backend;
+  final AppRealtimeMediaSessionFactory sessionFactory;
+}

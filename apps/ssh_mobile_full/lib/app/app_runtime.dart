@@ -12,7 +12,6 @@ import 'package:feature_rag/feature_rag.dart' as feature_rag;
 import 'package:feature_webview/feature_webview.dart' as feature_webview;
 import 'package:network_sdk/network_sdk.dart';
 import 'package:network_transport/network_transport.dart';
-import 'package:realtime_media/realtime_media.dart';
 import 'package:ssh_core/ssh_core.dart';
 
 import 'lan_share_feature_adapters.dart';
@@ -37,11 +36,7 @@ import '../services/telemetry/network_telemetry_connectivity.dart';
 import '../services/telemetry/app_crash_telemetry_bridge.dart';
 import '../services/telemetry/telemetry_span.dart';
 
-/// 应用生命周期运行时，持有 App Scope 的基础设施和长期服务。
-///
-/// Runtime 只持有 App Scope 的基础设施与 Feature Module，不持有跨模块的
-/// 统一数据库门面。UI 只能通过构造注入或 Provider 读取这些实例，不能
-/// 自行创建同类全局对象。
+/// 应用生命周期运行时，持有 App Scope 基础设施与 Feature Module。
 final class AppRuntime implements Disposable {
   /// 创建由 AppRuntime 独占的应用级资源集合。
   AppRuntime({
@@ -55,8 +50,7 @@ final class AppRuntime implements Disposable {
     required this.networkRuntime,
     required this.networkFacade,
     required this.realtimeClient,
-    required this.realtimeMediaBackend,
-    required this.realtimeMediaSessionFactory,
+    required this.realtimeMediaResources,
     required this.bootstrapCoordinator,
     required this.shortcutCommandService,
     required this.terminalSessionMetadataStore,
@@ -112,39 +106,45 @@ final class AppRuntime implements Disposable {
 
   // TODO(refactor-step-06): 替换为配置模块的公共设置契约。
   final AppSettings appSettings;
+
   /// Connection 模块独立数据库，由 Runtime 创建并在数据库阶段关闭。
   final connection_core.ConnectionDatabase connectionDatabase;
+
   /// Connection 结构 Repository 的 App Scope 唯一实例。
   final connection_core.ConnectionRepository connectionRepository;
+
   /// Connection 凭据 Repository 的 App Scope 唯一实例。
   final connection_core.CredentialRepository credentialRepository;
+
   /// Host Key 信任 Repository 的 App Scope 唯一实例。
   final connection_core.HostKeyRepository hostKeyRepository;
+
   /// App Scope 唯一的网络运行时；其 native handle 只按 Capability 延迟创建。
   final NetworkRuntime networkRuntime;
+
   /// App Scope 唯一的 Network V2 身份 Owner。
   ///
   /// Ed25519（native transport）和 X25519（E2E）材料由同一个服务加载并
   /// 缓存；Feature 通过 Port 借用它，不自行生成或持久化本机身份。
   final NetworkIdentityService networkIdentityService;
+
   /// App Scope Realtime SDK owner; its backend borrows the NetworkRuntime handle.
   final RealtimeClient realtimeClient;
-  /// App Shell media adapter; it borrows the same Runtime and exposes only
-  /// opaque endpoint lifecycle to screen-share callers.
-  final RealtimeMediaBackend realtimeMediaBackend;
-  /// Creates a generation-bound media controller from a production
-  /// [RealtimeSession]. The factory never derives generation from signaling
-  /// revision and shares the App-owned media adapter above.
-  final AppRealtimeMediaSessionFactory realtimeMediaSessionFactory;
+
+  /// App Shell media adapters borrowing the same NetworkRuntime owner.
+  final AppRealtimeMediaResources realtimeMediaResources;
+
   /// App Scope 唯一业务网络门面；由组合根在 Feature 激活前装配。
   ///
   /// LAN、SSH、Realtime 和 Relay 只借用该门面/底层 Runtime，不能重新
   /// configure、stop 或 dispose native runtime。
   final NetworkFacade networkFacade;
+
   /// 启动协调器属于 App Shell，负责首帧前后的核心初始化状态。
   final AppBootstrapCoordinator bootstrapCoordinator;
   // TODO(refactor-step-18): 将快捷键配置迁移到 settings 模块。
   final ShortcutCommandService shortcutCommandService;
+
   /// SSH 关闭后排空并释放的 App Scope 偏好/终端元数据 Owner。
   final TerminalSessionMetadataStore terminalSessionMetadataStore;
   // 旧 API 兼容视图；实际 App Scope Owner 由下方的 SshSessionManager 字段表达。
