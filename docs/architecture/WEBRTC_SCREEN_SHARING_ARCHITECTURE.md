@@ -5,10 +5,11 @@ Last updated: 2026-09-07
 ## Status and authority
 
 Status: Accepted architecture for Phase 0 through Phase 7. Phase 0 and Phase 1
-have committed implementation evidence but no separate PR acceptance in the
-current repository state; Phase 2 has implementation evidence on its dedicated
-branch and also awaits its separate PR acceptance. Phase 3–7 remain planned
-and must not be described as shipped capability.
+have committed implementation evidence without separate screen-share PRs; their
+current baseline was accepted together with Phase 2 in PR #67. Phase 2 was
+merged at `352ef4dc9c602f648f0975809ce12553957b2a75` after final head
+`3d9a4a575f303a573371ce843867cf002f3b163d`. Phase 3–7 remain planned and
+must not be described as shipped capability.
 
 This is only the Screen Share slice of M8 (RTC) in
 [`NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md`](../NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md).
@@ -135,9 +136,9 @@ later phase succeeds.
 
 | Phase | Current status | Evidence boundary |
 | --- | --- | --- |
-| 0 | Implementation evidence ready; PR acceptance pending | Accepted architecture, ADR-034, memory routing, and documentation checks |
-| 1 | Implementation evidence ready; PR acceptance pending | Native H.264-only RTP ingress/egress, exact three-frame queue, bounded frame validation, terminal media discard tests, local loopback, and relay-only coturn H.264 coverage |
-| 2 | Implementation ready; PR acceptance pending | Runtime/realtime-generation-bound opaque endpoint leases, native-only FFI create/release/H.264 push/pull controls, Dart lifecycle contract/fake tests, and no per-frame Dart API |
+| 0 | Implementation evidence accepted with PR #67; no separate screen-share PR | Accepted architecture, ADR-034, memory routing, and documentation checks |
+| 1 | Implementation evidence accepted with PR #67; no separate screen-share PR | Native H.264-only RTP ingress/egress, exact three-frame queue, bounded frame validation, terminal media discard tests, local loopback, and relay-only coturn H.264 coverage |
+| 2 | Accepted in PR #67 and merged to `main` | Runtime/realtime-generation-bound opaque endpoint leases, native-only FFI create/release/H.264 push/pull controls, Dart lifecycle contract/fake tests, and no per-frame Dart API |
 | 3–7 | Not started | Remain subject to the planned acceptance matrix below |
 
 ## Layer boundaries
