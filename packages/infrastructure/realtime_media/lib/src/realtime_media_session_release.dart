@@ -75,9 +75,7 @@ extension RealtimeMediaSessionRelease on RealtimeMediaSessionController {
     }
   }
 
-  Future<void> _releaseAcquiredEndpoint(
-    RealtimeMediaEndpoint endpoint,
-  ) async {
+  Future<void> _releaseAcquiredEndpoint(RealtimeMediaEndpoint endpoint) async {
     try {
       await _releaseEndpoint(endpoint);
     } on RealtimeMediaException catch (error) {
@@ -210,5 +208,4 @@ extension RealtimeMediaSessionRelease on RealtimeMediaSessionController {
       await _pendingStartsSettled!.future;
     }
   }
-
 }
