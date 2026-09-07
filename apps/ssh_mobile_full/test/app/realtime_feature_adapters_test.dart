@@ -692,6 +692,20 @@ void main() {
       await client.dispose();
     },
   );
+
+  test('AppRuntime media resources preserve the shared adapter pair', () {
+    final backend = AppRealtimeMediaBackend(
+      networkRuntime: _FakeNetworkRuntime(_FakeRealtimeGateway()),
+    );
+    final factory = AppRealtimeMediaSessionFactory(backend: backend);
+    final resources = AppRealtimeMediaResources(
+      backend: backend,
+      sessionFactory: factory,
+    );
+
+    expect(resources.backend, same(backend));
+    expect(resources.sessionFactory, same(factory));
+  });
 }
 
 Future<void> _pump() => Future<void>.delayed(Duration.zero);
