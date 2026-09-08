@@ -25,13 +25,14 @@ final class AppScreenShareConsentPort implements ScreenShareConsentPort {
 /// WebRTC API of its own, keeping the Feature boundary testable.
 final class AppScreenShareMediaPort implements ScreenShareMediaPort {
   AppScreenShareMediaPort({
-    required this._events,
+    required this.events,
     required this.onStartCapture,
     required this.onStartViewer,
     required this.onStop,
   });
 
-  final Stream<ScreenShareMediaEvent> _events;
+  @override
+  final Stream<ScreenShareMediaEvent> events;
   final Future<void> Function({
     required String operationId,
     required String realtimeId,
@@ -50,9 +51,6 @@ final class AppScreenShareMediaPort implements ScreenShareMediaPort {
     required int generation,
   })
   onStop;
-
-  @override
-  Stream<ScreenShareMediaEvent> get events => _events;
 
   @override
   Future<void> startCapture({

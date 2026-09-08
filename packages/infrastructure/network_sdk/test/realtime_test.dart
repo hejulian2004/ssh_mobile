@@ -495,7 +495,10 @@ void main() {
       final received = <RealtimeConsent>[];
       final subscription = session.consentEvents.listen(received.add);
       addTearDown(subscription.cancel);
-      final issued = DateTime.utc(2026, 1, 1, 12);
+      // Keep the fixed fixture in the future so the validity assertion is
+      // stable when the test suite runs after the original implementation
+      // date. Expiry is covered independently by the validation tests.
+      final issued = DateTime.utc(2030, 1, 1, 12);
       final valid = RealtimeConsent(
         operationId: 'operation-a',
         realtimeId: '00112233445566778899aabbccddeeff',

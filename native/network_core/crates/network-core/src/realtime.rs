@@ -608,8 +608,7 @@ async fn handle_realtime_signal(
     // avoiding any PeerConnection mutation or state transition. The payload
     // carries the independent generation guard used by the business layer.
     if kind == RealtimeSignalKind::ScreenShareConsent {
-        let consent = validate_screen_share_consent(&payload, realtime_id, Some(peer_id))
-            .map_err(|error| error)?;
+        let consent = validate_screen_share_consent(&payload, realtime_id, Some(peer_id))?;
         let generation = {
             let manager = state.realtime.lock().await;
             manager
