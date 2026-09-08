@@ -1,5 +1,37 @@
 part of 'native_realtime_protocol.dart';
 
+/// Typed, versioned screen-share consent metadata carried by the dedicated
+/// realtime signal. The payload never contains media, SDP, ICE or secrets.
+final class NativeScreenShareConsent {
+  const NativeScreenShareConsent({
+    required this.schemaVersion,
+    required this.operationId,
+    required this.realtimeId,
+    required this.generation,
+    required this.issuedAtMs,
+    required this.expiresAtMs,
+    required this.decision,
+    required this.senderPeerId,
+    required this.purpose,
+    required this.media,
+    required this.requiresAcceptance,
+    required this.actionRevision,
+  });
+
+  final int schemaVersion;
+  final String operationId;
+  final String realtimeId;
+  final int generation;
+  final int issuedAtMs;
+  final int expiresAtMs;
+  final NativeScreenShareConsentDecision decision;
+  final String senderPeerId;
+  final NativeScreenShareConsentPurpose purpose;
+  final NativeScreenShareMediaKind media;
+  final bool requiresAcceptance;
+  final int actionRevision;
+}
+
 /// Realtime session state event.
 final class NativeRealtimeStateChangedEvent extends NativeNetworkEvent {
   /// Creates a realtime state event.
@@ -82,6 +114,7 @@ final class NativeRealtimeSignalEvent extends NativeNetworkEvent {
     required this.kind,
     required this.revision,
     required Uint8List payload,
+    this.consent,
   }) : payload = Uint8List.fromList(payload);
 
   /// Stable 16-byte lowercase hexadecimal realtime session identifier.
@@ -95,6 +128,11 @@ final class NativeRealtimeSignalEvent extends NativeNetworkEvent {
 
   /// Signaling revision associated with the message.
   final int revision;
+
+  /// Decoded consent metadata when [kind] is
+  /// [NativeRealtimeSignalKind.screenShareConsent]. Other signal kinds leave
+  /// this null and retain their opaque payload semantics.
+  final NativeScreenShareConsent? consent;
 
   /// SDP, ICE, or close control bytes. Never a media/file data frame.
   final Uint8List payload;

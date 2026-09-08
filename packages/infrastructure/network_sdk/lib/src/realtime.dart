@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'network_models.dart';
+import 'realtime_consent.dart';
 
 /// High-level Realtime session state exposed to Flutter features.
 ///
@@ -104,6 +105,24 @@ final class RealtimeSnapshotBackendEvent extends RealtimeBackendEvent {
   final RealtimeSnapshot snapshot;
 }
 
+/// A typed screen-share consent event emitted by the native control adapter.
+final class RealtimeConsentBackendEvent extends RealtimeBackendEvent {
+  const RealtimeConsentBackendEvent(this.consent);
+
+  final RealtimeConsent consent;
+}
+
+/// Optional capability implemented by a native Realtime backend that can
+/// transport typed screen-share consent over authenticated control signaling.
+/// Keeping this separate preserves compatibility with synthetic/fake backends
+/// that only exercise session lifecycle behavior.
+abstract interface class RealtimeConsentBackend {
+  Future<SdkResult<void>> sendConsent({
+    required String peerId,
+    required RealtimeConsent consent,
+  });
+}
+
 /// A backend audio state event consumed by the SDK session coordinator.
 final class RealtimeAudioStateChangedEvent extends RealtimeBackendEvent {
   const RealtimeAudioStateChangedEvent({
@@ -154,6 +173,14 @@ abstract interface class RealtimeSession {
   RealtimeSessionToken? get mediaToken;
 
   RealtimeAudioState get audioState;
+
+  /// Low-frequency typed consent events for this session. The stream carries
+  /// metadata only and is generation-filtered by the SDK coordinator.
+  Stream<RealtimeConsent> get consentEvents;
+
+  /// Sends a typed request/decision through the authenticated native control
+  /// route. It never starts capture or touches WebRTC resources directly.
+  Future<SdkResult<void>> sendConsent(RealtimeConsent consent);
 
   Future<SdkResult<void>> start();
 
@@ -244,6 +271,10 @@ final class RealtimeClientImpl implements RealtimeClient {
         final session = _sessions[realtimeId];
         if (session == null || session.peerId != peerId) return;
         session._applyAudioState(event.state);
+      case RealtimeConsentBackendEvent(:final consent):
+        final session = _sessions[consent.realtimeId];
+        if (session == null || session.peerId != consent.senderPeerId) return;
+        session._applyConsent(consent);
     }
   }
 
@@ -261,6 +292,40 @@ final class RealtimeClientImpl implements RealtimeClient {
   }) async {
     if (!allowDisposed) _ensureUsable();
     return _backend.stop(realtimeId: session.realtimeId);
+  }
+
+  Future<SdkResult<void>> _sendConsent(
+    _RealtimeSession session,
+    RealtimeConsent consent,
+  ) async {
+    _ensureUsable();
+    if (consent.realtimeId != session.realtimeId ||
+        consent.generation <= 0 ||
+        session.generation != consent.generation) {
+      return SdkFailure(
+        NetworkError(
+          code: NetworkErrorCode.staleOperation,
+          message: 'Consent does not match the active Realtime generation.',
+          operation: NetworkOperation.send,
+          peerId: session.peerId,
+        ),
+      );
+    }
+    final backend = _backend;
+    if (backend is! RealtimeConsentBackend) {
+      return SdkFailure(
+        NetworkError(
+          code: NetworkErrorCode.invalidArgument,
+          message: 'Realtime consent is unavailable on this backend.',
+          operation: NetworkOperation.send,
+          peerId: session.peerId,
+        ),
+      );
+    }
+    return (backend as RealtimeConsentBackend).sendConsent(
+      peerId: session.peerId,
+      consent: consent,
+    );
   }
 
   void _remove(_RealtimeSession session) {
@@ -291,6 +356,8 @@ final class _RealtimeSession implements RealtimeSession {
   Future<SdkResult<void>>? _stopFuture;
   bool _stopCommandCompleted = false;
   bool _disposed = false;
+  final StreamController<RealtimeConsent> _consents =
+      StreamController<RealtimeConsent>.broadcast();
 
   @override
   final String realtimeId;
@@ -320,6 +387,15 @@ final class _RealtimeSession implements RealtimeSession {
 
   @override
   RealtimeAudioState get audioState => _audioState;
+
+  @override
+  Stream<RealtimeConsent> get consentEvents => _consents.stream;
+
+  @override
+  Future<SdkResult<void>> sendConsent(RealtimeConsent consent) {
+    _ensureUsable();
+    return _client._sendConsent(this, consent);
+  }
 
   @override
   Future<SdkResult<void>> start() {
@@ -453,6 +529,13 @@ final class _RealtimeSession implements RealtimeSession {
     _audioState = state;
   }
 
+  void _applyConsent(RealtimeConsent consent) {
+    if (_disposed || consent.isExpired()) return;
+    final generation = _generation;
+    if (generation == null || generation != consent.generation) return;
+    _consents.add(consent);
+  }
+
   Future<void> _dispose() async {
     if (_disposed) return;
     final shouldStop =
@@ -470,6 +553,7 @@ final class _RealtimeSession implements RealtimeSession {
       );
     }
     _state = RealtimeSessionState.stopped;
+    await _consents.close();
   }
 
   void _ensureUsable() {

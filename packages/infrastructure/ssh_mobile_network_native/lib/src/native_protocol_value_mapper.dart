@@ -117,6 +117,14 @@ final class _NativeProtocolValueMapper {
         'ICE candidate payload is too large.',
       );
     }
+    if (kind == NativeRealtimeSignalKind.screenShareConsent &&
+        payload.length > _maxScreenShareConsentPayloadBytes) {
+      throw ArgumentError.value(
+        payload.length,
+        'payload',
+        'Screen-share consent payload is too large.',
+      );
+    }
     if (kind != NativeRealtimeSignalKind.webRtcClose &&
         kind != NativeRealtimeSignalKind.iceRestart &&
         kind != NativeRealtimeSignalKind.iceCandidate &&

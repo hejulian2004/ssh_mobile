@@ -98,15 +98,130 @@ final class _NativeRealtimeEventDecoder {
     if (revision <= 0) {
       throw const FormatException('Realtime signal revision must be positive.');
     }
+    final signalKind = NativeRealtimeSignalKind.fromWire(kind);
+    final consent = signalKind == NativeRealtimeSignalKind.screenShareConsent
+        ? _decodeScreenShareConsent(payload, realtimeId)
+        : null;
     return NativeRealtimeSignalEvent(
       eventId: eventId,
       timestampMs: timestampMs,
       protocolVersion: protocolVersion,
       realtimeId: realtimeId,
       peerId: peerId,
-      kind: NativeRealtimeSignalKind.fromWire(kind),
+      kind: signalKind,
       revision: revision,
       payload: payload,
+      consent: consent,
+    );
+  }
+
+  static NativeScreenShareConsent _decodeScreenShareConsent(
+    Uint8List bytes,
+    String expectedRealtimeId,
+  ) {
+    if (bytes.isEmpty || bytes.length > _maxScreenShareConsentPayloadBytes) {
+      throw const FormatException(
+        'Screen-share consent payload is outside bounds.',
+      );
+    }
+    final reader = _ProtoReader(bytes);
+    var schemaVersion = 0;
+    var operationId = '';
+    var realtimeId = '';
+    var generation = 0;
+    var issuedAtMs = 0;
+    var expiresAtMs = 0;
+    var decision = 0;
+    var senderPeerId = '';
+    var purpose = 0;
+    var media = 0;
+    var requiresAcceptance = false;
+    var actionRevision = 0;
+    while (!reader.isDone) {
+      final field = reader.field();
+      switch (field.number) {
+        case 1:
+          schemaVersion = reader.varint(field.wireType);
+        case 2:
+          operationId = reader.string(
+            field.wireType,
+            _maxScreenShareOperationIdBytes,
+          );
+        case 3:
+          realtimeId = reader.string(field.wireType, _realtimeIdBytes);
+        case 4:
+          generation = reader.varint(field.wireType);
+        case 5:
+          issuedAtMs = reader.varint(field.wireType);
+        case 6:
+          expiresAtMs = reader.varint(field.wireType);
+        case 7:
+          decision = reader.varint(field.wireType);
+        case 8:
+          senderPeerId = reader.string(field.wireType, _maxPeerIdBytes);
+        case 9:
+          purpose = reader.varint(field.wireType);
+        case 10:
+          media = reader.varint(field.wireType);
+        case 11:
+          requiresAcceptance = reader.varint(field.wireType) != 0;
+        case 12:
+          actionRevision = reader.varint(field.wireType);
+        default:
+          reader.skip(field.wireType);
+      }
+    }
+    if (schemaVersion != 1) {
+      throw const FormatException(
+        'Unsupported screen-share consent schema version.',
+      );
+    }
+    if (operationId.isEmpty) {
+      throw const FormatException(
+        'Screen-share consent operation is required.',
+      );
+    }
+    if (realtimeId != expectedRealtimeId) {
+      throw const FormatException(
+        'Screen-share consent realtime ID does not match signal.',
+      );
+    }
+    if (generation <= 0) {
+      throw const FormatException(
+        'Screen-share consent generation is invalid.',
+      );
+    }
+    if (issuedAtMs <= 0 ||
+        expiresAtMs <= issuedAtMs ||
+        expiresAtMs - issuedAtMs > const Duration(minutes: 2).inMilliseconds) {
+      throw const FormatException(
+        'Screen-share consent expiration is invalid.',
+      );
+    }
+    if (senderPeerId.isEmpty ||
+        NativeScreenShareConsentDecision.fromWire(decision) ==
+            NativeScreenShareConsentDecision.unspecified ||
+        NativeScreenShareConsentPurpose.fromWire(purpose) !=
+            NativeScreenShareConsentPurpose.screenShare ||
+        NativeScreenShareMediaKind.fromWire(media) !=
+            NativeScreenShareMediaKind.screenVideo ||
+        !requiresAcceptance ||
+        actionRevision <= 0) {
+      throw const FormatException('Screen-share consent fields are invalid.');
+    }
+    return NativeScreenShareConsent(
+      schemaVersion: schemaVersion,
+      operationId: operationId,
+      realtimeId: realtimeId,
+      generation: generation,
+      issuedAtMs: issuedAtMs,
+      expiresAtMs: expiresAtMs,
+      decision: NativeScreenShareConsentDecision.fromWire(decision),
+      senderPeerId: senderPeerId,
+      purpose: NativeScreenShareConsentPurpose.fromWire(purpose),
+      media: NativeScreenShareMediaKind.fromWire(media),
+      requiresAcceptance: requiresAcceptance,
+      actionRevision: actionRevision,
     );
   }
 

@@ -920,6 +920,14 @@ final class _FakeRealtimeSession implements RealtimeSession {
   RealtimeAudioState get audioState => RealtimeAudioState.unavailable;
 
   @override
+  Stream<RealtimeConsent> get consentEvents =>
+      const Stream<RealtimeConsent>.empty();
+
+  @override
+  Future<SdkResult<void>> sendConsent(RealtimeConsent consent) async =>
+      const SdkSuccess<void>(null);
+
+  @override
   Future<SdkResult<void>> start() async => const SdkSuccess<void>(null);
 
   @override

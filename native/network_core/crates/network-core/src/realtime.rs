@@ -6,8 +6,9 @@
 //! QUIC/Relay paths.
 
 use network_protocol::{
-    RealtimeSessionState, RealtimeSignalKind, SendRealtimeSignalCommand,
-    StartRealtimeSessionCommand, StopRealtimeSessionCommand,
+    RealtimeSessionState, RealtimeSignalKind, ScreenShareConsentDecision,
+    ScreenShareConsentPurpose, ScreenShareConsentV1, ScreenShareMediaKind,
+    SendRealtimeSignalCommand, StartRealtimeSessionCommand, StopRealtimeSessionCommand,
 };
 use network_relay::v2::{
     RealtimeSignal as V2RealtimeSignal, RealtimeSignalKind as V2RealtimeSignalKind,
@@ -17,6 +18,7 @@ use network_webrtc::{
     RealtimeIoDriverHandle, RealtimeIoEvent, SessionDescription, WebRtcConfig, WebRtcError,
     WebRtcPeer, MAX_ICE_CANDIDATE_BYTES, MAX_SDP_BYTES,
 };
+use prost::Message;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -482,6 +484,18 @@ pub(crate) async fn send_signal_command(
         )
     })?;
     validate_signal(kind, command.revision, &command.payload)?;
+    if kind == RealtimeSignalKind::ScreenShareConsent {
+        validate_screen_share_consent(&command.payload, &command.realtime_id, None).map_err(
+            |error| {
+                realtime_error(
+                    network_protocol::NetworkErrorCode::InvalidArgument,
+                    error.to_string(),
+                    "send_realtime_signal",
+                    &command.peer_id,
+                )
+            },
+        )?;
+    }
     let (session_peer_id, session_revision, ice_revision) = {
         let sessions = state.realtime.lock().await;
         let Some(session) = sessions.sessions.get(&command.realtime_id) else {
@@ -498,7 +512,12 @@ pub(crate) async fn send_signal_command(
             session.ice_revision,
         )
     };
-    let revision_is_valid = if kind == RealtimeSignalKind::IceCandidate {
+    let revision_is_valid = if kind == RealtimeSignalKind::ScreenShareConsent {
+        // Consent has its own action_revision and generation guards. The
+        // outer realtime revision is only a positive relay correlation value
+        // and must not be confused with signaling ordering.
+        command.revision > 0
+    } else if kind == RealtimeSignalKind::IceCandidate {
         command.revision == ice_revision
     } else {
         command.revision > session_revision
@@ -583,6 +602,33 @@ async fn handle_realtime_signal(
         .await
         .map_err(boxed_protocol_error)?;
     validate_signal(kind, revision, &payload).map_err(boxed_protocol_error)?;
+
+    // Screen-share consent is authenticated control metadata, not a WebRTC
+    // description. Keep it on the existing Realtime control route while
+    // avoiding any PeerConnection mutation or state transition. The payload
+    // carries the independent generation guard used by the business layer.
+    if kind == RealtimeSignalKind::ScreenShareConsent {
+        let consent = validate_screen_share_consent(&payload, realtime_id, Some(peer_id))
+            .map_err(|error| error)?;
+        let generation = {
+            let manager = state.realtime.lock().await;
+            manager
+                .session_generation(realtime_id)
+                .ok_or_else(|| boxed_message("realtime session does not exist"))?
+        };
+        if consent.generation != generation {
+            return Err(boxed_message("stale screen-share consent generation"));
+        }
+        emit_realtime_signal(
+            &state.event_tx,
+            realtime_id,
+            peer_id,
+            kind as i32,
+            revision,
+            payload,
+        );
+        return Ok(());
+    }
 
     if kind == RealtimeSignalKind::WebRtcClose {
         let generation = {
@@ -1026,6 +1072,9 @@ fn apply_signal_with_driver(
                 }),
             })
         }
+        RealtimeSignalKind::ScreenShareConsent => Err(boxed_message(
+            "screen-share consent must be handled before WebRTC state transitions",
+        )),
         RealtimeSignalKind::Unspecified | RealtimeSignalKind::WebRtcClose => {
             Err(boxed_message("unsupported WebRTC signal kind"))
         }
@@ -1476,7 +1525,95 @@ fn validate_signal(
             "WebRTC signal payload must not be empty",
         ));
     }
+    if kind == RealtimeSignalKind::ScreenShareConsent && payload.len() > 4096 {
+        return Err(protocol_error(
+            network_protocol::NetworkErrorCode::InvalidArgument,
+            "screen-share consent payload is outside bounds",
+        ));
+    }
     Ok(())
+}
+
+/// Validates the typed ScreenShareConsentV1 payload at the native control
+/// boundary. `expected_sender_peer_id` is supplied for inbound signals where
+/// the authenticated realtime binding is authoritative; local outgoing
+/// commands perform the structural checks without guessing the sender ID.
+fn validate_screen_share_consent(
+    payload: &[u8],
+    expected_realtime_id: &str,
+    expected_sender_peer_id: Option<&str>,
+) -> Result<ScreenShareConsentV1, Box<dyn std::error::Error + Send + Sync>> {
+    if payload.is_empty() || payload.len() > 4096 {
+        return Err(boxed_message(
+            "screen-share consent payload is outside bounds",
+        ));
+    }
+    let consent = ScreenShareConsentV1::decode(payload)
+        .map_err(|error| boxed_message(format!("malformed screen-share consent: {error}")))?;
+    if consent.schema_version != 1 {
+        return Err(boxed_message(
+            "unsupported screen-share consent schema version",
+        ));
+    }
+    if consent.operation_id.is_empty() || consent.operation_id.len() > 128 {
+        return Err(boxed_message(
+            "screen-share consent operation_id is outside bounds",
+        ));
+    }
+    if consent.realtime_id != expected_realtime_id {
+        return Err(boxed_message(
+            "screen-share consent realtime_id does not match signal",
+        ));
+    }
+    if consent.generation == 0 {
+        return Err(boxed_message(
+            "screen-share consent generation must be positive",
+        ));
+    }
+    if consent.issued_at_ms == 0
+        || consent.expires_at_ms <= consent.issued_at_ms
+        || consent.expires_at_ms.saturating_sub(consent.issued_at_ms) > 120_000
+    {
+        return Err(boxed_message("screen-share consent expiration is invalid"));
+    }
+    if consent.sender_peer_id.is_empty() || consent.sender_peer_id.len() > 128 {
+        return Err(boxed_message(
+            "screen-share consent sender_peer_id is outside bounds",
+        ));
+    }
+    if let Some(expected) = expected_sender_peer_id {
+        if consent.sender_peer_id != expected {
+            return Err(boxed_message(
+                "screen-share consent sender does not match peer binding",
+            ));
+        }
+    }
+    if ScreenShareConsentDecision::try_from(consent.decision)
+        .map_err(|_| boxed_message("unknown screen-share consent decision"))?
+        == ScreenShareConsentDecision::Unspecified
+    {
+        return Err(boxed_message(
+            "screen-share consent decision is unspecified",
+        ));
+    }
+    if ScreenShareConsentPurpose::try_from(consent.purpose)
+        .map_err(|_| boxed_message("unknown screen-share consent purpose"))?
+        != ScreenShareConsentPurpose::ScreenShare
+    {
+        return Err(boxed_message("screen-share consent purpose is unsupported"));
+    }
+    if ScreenShareMediaKind::try_from(consent.media)
+        .map_err(|_| boxed_message("unknown screen-share media kind"))?
+        != ScreenShareMediaKind::ScreenVideo
+    {
+        return Err(boxed_message("screen-share media kind is unsupported"));
+    }
+    if !consent.requires_acceptance || consent.action_revision == 0 {
+        return Err(boxed_message(
+            "screen-share consent acceptance/revision is invalid",
+        ));
+    }
+    Ok(consent)
 }
 
 /// §22：WebRTC 信令经 v2 Relay Control Plane 路由（`signal_webrtc`），与媒体面
@@ -1525,6 +1662,7 @@ fn to_v2_signal_kind(kind: RealtimeSignalKind) -> V2RealtimeSignalKind {
         RealtimeSignalKind::IceCandidate => V2RealtimeSignalKind::IceCandidate,
         RealtimeSignalKind::IceRestart => V2RealtimeSignalKind::IceRestart,
         RealtimeSignalKind::WebRtcClose => V2RealtimeSignalKind::Close,
+        RealtimeSignalKind::ScreenShareConsent => V2RealtimeSignalKind::ScreenShareConsent,
         RealtimeSignalKind::Unspecified => V2RealtimeSignalKind::Unspecified,
     }
 }

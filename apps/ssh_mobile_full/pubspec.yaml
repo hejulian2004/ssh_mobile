@@ -35,6 +35,8 @@ dependencies:
     path: ../../packages/features/feature_terminal
   feature_lan_share:
     path: ../../packages/features/feature_lan_share
+  feature_screen_share:
+    path: ../../packages/features/feature_screen_share
   feature_mcp:
     path: ../../packages/features/feature_mcp
   feature_ai:

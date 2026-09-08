@@ -193,17 +193,18 @@ func (ResolveStatus) EnumDescriptor() ([]byte, []int) {
 	return file_relay_v2_relay_v2_proto_rawDescGZIP(), []int{1}
 }
 
-// Real-time media signal kind. Values 1..5 intentionally mirror
-// network.v1.RealtimeSignalKind (a unit test asserts they stay in sync).
+// Real-time media/control signal kind. Values 1..5 mirror the existing WebRTC
+// kinds; value 6 carries typed screen-share consent metadata.
 type RealtimeSignalKind int32
 
 const (
-	RealtimeSignalKind_REALTIME_SIGNAL_KIND_UNSPECIFIED   RealtimeSignalKind = 0
-	RealtimeSignalKind_REALTIME_SIGNAL_KIND_OFFER         RealtimeSignalKind = 1
-	RealtimeSignalKind_REALTIME_SIGNAL_KIND_ANSWER        RealtimeSignalKind = 2
-	RealtimeSignalKind_REALTIME_SIGNAL_KIND_ICE_CANDIDATE RealtimeSignalKind = 3
-	RealtimeSignalKind_REALTIME_SIGNAL_KIND_ICE_RESTART   RealtimeSignalKind = 4
-	RealtimeSignalKind_REALTIME_SIGNAL_KIND_CLOSE         RealtimeSignalKind = 5
+	RealtimeSignalKind_REALTIME_SIGNAL_KIND_UNSPECIFIED          RealtimeSignalKind = 0
+	RealtimeSignalKind_REALTIME_SIGNAL_KIND_OFFER                RealtimeSignalKind = 1
+	RealtimeSignalKind_REALTIME_SIGNAL_KIND_ANSWER               RealtimeSignalKind = 2
+	RealtimeSignalKind_REALTIME_SIGNAL_KIND_ICE_CANDIDATE        RealtimeSignalKind = 3
+	RealtimeSignalKind_REALTIME_SIGNAL_KIND_ICE_RESTART          RealtimeSignalKind = 4
+	RealtimeSignalKind_REALTIME_SIGNAL_KIND_CLOSE                RealtimeSignalKind = 5
+	RealtimeSignalKind_REALTIME_SIGNAL_KIND_SCREEN_SHARE_CONSENT RealtimeSignalKind = 6
 )
 
 // Enum value maps for RealtimeSignalKind.
@@ -215,14 +216,16 @@ var (
 		3: "REALTIME_SIGNAL_KIND_ICE_CANDIDATE",
 		4: "REALTIME_SIGNAL_KIND_ICE_RESTART",
 		5: "REALTIME_SIGNAL_KIND_CLOSE",
+		6: "REALTIME_SIGNAL_KIND_SCREEN_SHARE_CONSENT",
 	}
 	RealtimeSignalKind_value = map[string]int32{
-		"REALTIME_SIGNAL_KIND_UNSPECIFIED":   0,
-		"REALTIME_SIGNAL_KIND_OFFER":         1,
-		"REALTIME_SIGNAL_KIND_ANSWER":        2,
-		"REALTIME_SIGNAL_KIND_ICE_CANDIDATE": 3,
-		"REALTIME_SIGNAL_KIND_ICE_RESTART":   4,
-		"REALTIME_SIGNAL_KIND_CLOSE":         5,
+		"REALTIME_SIGNAL_KIND_UNSPECIFIED":          0,
+		"REALTIME_SIGNAL_KIND_OFFER":                1,
+		"REALTIME_SIGNAL_KIND_ANSWER":               2,
+		"REALTIME_SIGNAL_KIND_ICE_CANDIDATE":        3,
+		"REALTIME_SIGNAL_KIND_ICE_RESTART":          4,
+		"REALTIME_SIGNAL_KIND_CLOSE":                5,
+		"REALTIME_SIGNAL_KIND_SCREEN_SHARE_CONSENT": 6,
 	}
 )
 
@@ -2563,14 +2566,15 @@ const file_relay_v2_relay_v2_proto_rawDesc = "" +
 	"\x14RESOLVE_STATUS_READY\x10\x01\x12\x1a\n" +
 	"\x16RESOLVE_STATUS_OFFLINE\x10\x02\x12\x1c\n" +
 	"\x18RESOLVE_STATUS_NOT_READY\x10\x03\x12\x1a\n" +
-	"\x16RESOLVE_STATUS_UNKNOWN\x10\x04*\xe9\x01\n" +
+	"\x16RESOLVE_STATUS_UNKNOWN\x10\x04*\x98\x02\n" +
 	"\x12RealtimeSignalKind\x12$\n" +
 	" REALTIME_SIGNAL_KIND_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aREALTIME_SIGNAL_KIND_OFFER\x10\x01\x12\x1f\n" +
 	"\x1bREALTIME_SIGNAL_KIND_ANSWER\x10\x02\x12&\n" +
 	"\"REALTIME_SIGNAL_KIND_ICE_CANDIDATE\x10\x03\x12$\n" +
 	" REALTIME_SIGNAL_KIND_ICE_RESTART\x10\x04\x12\x1e\n" +
-	"\x1aREALTIME_SIGNAL_KIND_CLOSE\x10\x05*\xea\x03\n" +
+	"\x1aREALTIME_SIGNAL_KIND_CLOSE\x10\x05\x12-\n)" +
+	"REALTIME_SIGNAL_KIND_SCREEN_SHARE_CONSENT\x10\x06*\xea\x03\n" +
 	"\tErrorCode\x12\x1a\n" +
 	"\x16ERROR_CODE_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eERROR_CODE_CONTROL_UNAVAILABLE\x10\x01\x12$\n" +

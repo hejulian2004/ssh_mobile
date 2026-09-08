@@ -78,8 +78,9 @@ enum ResolveStatus {
   RESOLVE_STATUS_UNKNOWN = 4;
 }
 
-// Real-time media signal kind. Values 1..5 intentionally mirror
-// network.v1.RealtimeSignalKind (a unit test asserts they stay in sync).
+// Real-time media/control signal kind. Values 1..5 mirror the existing WebRTC
+// kinds; value 6 carries the typed screen-share consent payload from Network
+// Protocol V2. Relay treats the payload as opaque authenticated control data.
 enum RealtimeSignalKind {
   REALTIME_SIGNAL_KIND_UNSPECIFIED = 0;
   REALTIME_SIGNAL_KIND_OFFER = 1;
@@ -87,6 +88,7 @@ enum RealtimeSignalKind {
   REALTIME_SIGNAL_KIND_ICE_CANDIDATE = 3;
   REALTIME_SIGNAL_KIND_ICE_RESTART = 4;
   REALTIME_SIGNAL_KIND_CLOSE = 5;
+  REALTIME_SIGNAL_KIND_SCREEN_SHARE_CONSENT = 6;
 }
 
 // Unified protocol error model (§33). No generic RelayError/IoError

@@ -164,7 +164,8 @@ enum NativeRealtimeSignalKind {
   webRtcAnswer(2),
   iceCandidate(3),
   iceRestart(4),
-  webRtcClose(5);
+  webRtcClose(5),
+  screenShareConsent(6);
 
   const NativeRealtimeSignalKind(this.wireValue);
 
@@ -176,6 +177,54 @@ enum NativeRealtimeSignalKind {
       NativeRealtimeSignalKind.values.firstWhere(
         (kind) => kind.wireValue == value,
         orElse: () => NativeRealtimeSignalKind.unspecified,
+      );
+}
+
+enum NativeScreenShareConsentDecision {
+  unspecified(0),
+  request(1),
+  accept(2),
+  reject(3),
+  cancel(4);
+
+  const NativeScreenShareConsentDecision(this.wireValue);
+
+  final int wireValue;
+
+  static NativeScreenShareConsentDecision fromWire(int value) =>
+      NativeScreenShareConsentDecision.values.firstWhere(
+        (decision) => decision.wireValue == value,
+        orElse: () => NativeScreenShareConsentDecision.unspecified,
+      );
+}
+
+enum NativeScreenShareConsentPurpose {
+  unspecified(0),
+  screenShare(1);
+
+  const NativeScreenShareConsentPurpose(this.wireValue);
+
+  final int wireValue;
+
+  static NativeScreenShareConsentPurpose fromWire(int value) =>
+      NativeScreenShareConsentPurpose.values.firstWhere(
+        (purpose) => purpose.wireValue == value,
+        orElse: () => NativeScreenShareConsentPurpose.unspecified,
+      );
+}
+
+enum NativeScreenShareMediaKind {
+  unspecified(0),
+  screenVideo(1);
+
+  const NativeScreenShareMediaKind(this.wireValue);
+
+  final int wireValue;
+
+  static NativeScreenShareMediaKind fromWire(int value) =>
+      NativeScreenShareMediaKind.values.firstWhere(
+        (media) => media.wireValue == value,
+        orElse: () => NativeScreenShareMediaKind.unspecified,
       );
 }
 

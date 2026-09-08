@@ -5,6 +5,7 @@ part of 'native_realtime_protocol.dart';
 final class NativeNetworkProtocol {
   /// Current native protocol version.
   static const int protocolVersion = _protocolVersion;
+  static const _values = _NativeProtocolValueMapper();
 
   const NativeNetworkProtocol._();
 
@@ -167,6 +168,46 @@ final class NativeNetworkProtocol {
     revision: revision,
     payload: payload,
   );
+
+  /// Encodes the versioned screen-share consent payload carried by the
+  /// dedicated realtime signal kind. This helper emits metadata only; it has
+  /// no API for frames, native pointers or credentials.
+  static Uint8List encodeScreenShareConsent(NativeScreenShareConsent consent) {
+    if (consent.schemaVersion != 1 ||
+        consent.operationId.isEmpty ||
+        _values.utf8ByteLength(consent.operationId) >
+            _maxScreenShareOperationIdBytes ||
+        consent.realtimeId.isEmpty ||
+        consent.generation <= 0 ||
+        consent.issuedAtMs <= 0 ||
+        consent.expiresAtMs <= consent.issuedAtMs ||
+        consent.expiresAtMs - consent.issuedAtMs >
+            const Duration(minutes: 2).inMilliseconds ||
+        consent.senderPeerId.isEmpty ||
+        _values.utf8ByteLength(consent.senderPeerId) > _maxPeerIdBytes ||
+        consent.decision == NativeScreenShareConsentDecision.unspecified ||
+        consent.purpose != NativeScreenShareConsentPurpose.screenShare ||
+        consent.media != NativeScreenShareMediaKind.screenVideo ||
+        !consent.requiresAcceptance ||
+        consent.actionRevision <= 0) {
+      throw ArgumentError.value(consent, 'consent', 'Invalid consent payload.');
+    }
+    _values.validateRealtimeId(consent.realtimeId);
+    return (_ProtoWriter()
+          ..varint(1, consent.schemaVersion)
+          ..string(2, consent.operationId)
+          ..string(3, consent.realtimeId)
+          ..varint(4, consent.generation)
+          ..varint(5, consent.issuedAtMs)
+          ..varint(6, consent.expiresAtMs)
+          ..varint(7, consent.decision.wireValue)
+          ..string(8, consent.senderPeerId)
+          ..varint(9, consent.purpose.wireValue)
+          ..varint(10, consent.media.wireValue)
+          ..varint(11, consent.requiresAcceptance ? 1 : 0)
+          ..varint(12, consent.actionRevision))
+        .takeBytes();
+  }
 
   static Uint8List sshStreamOpenCommand({
     required String commandId,

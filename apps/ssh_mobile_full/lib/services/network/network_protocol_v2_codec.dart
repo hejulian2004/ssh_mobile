@@ -15,6 +15,7 @@ part '../../app/network/network_protocol_v2_codec_envelope.dart';
 part '../../app/network/network_protocol_v2_codec_peer_events.dart';
 part '../../app/network/network_protocol_v2_codec_transfer_events.dart';
 part '../../app/network/network_protocol_v2_codec_stream_events.dart';
+part '../../app/network/network_protocol_v2_codec_screen_share.dart';
 part '../../app/network/network_protocol_v2_codec_wire.dart';
 
 /// Stable identity for a logical ReliableStream.
@@ -66,6 +67,7 @@ final class NetworkProtocolFrame {
     this.commandAccepted = false,
     this.commandError,
     this.event,
+    this.screenShareConsent,
     this.sshStreamData,
     this.sshStreamClosed,
   });
@@ -76,6 +78,9 @@ final class NetworkProtocolFrame {
   final bool commandAccepted;
   final NetworkError? commandError;
   final NetworkEvent? event;
+
+  /// Typed screen-share consent carried by realtime signal field 22.
+  final RealtimeConsent? screenShareConsent;
 
   /// native SSH 流数据事件（tag 26），不进入业务 [event] 流。
   final SshStreamDataReceivedEvent? sshStreamData;
@@ -214,6 +219,14 @@ final class NetworkProtocolV2Codec {
 
   /// 从 V2 命令信封读取命令标识。
   String commandId(Uint8List command) => _commands.commandId(command);
+
+  /// 编码 typed/versioned screen-share consent metadata.
+  Uint8List encodeScreenShareConsent(RealtimeConsent consent) =>
+      _encodeScreenShareConsent(consent);
+
+  /// 解码 typed/versioned screen-share consent metadata.
+  RealtimeConsent decodeScreenShareConsent(Uint8List bytes) =>
+      _decodeScreenShareConsent(bytes);
 
   /// 解码 V2 事件信封及可选的内部命令结果。
   NetworkProtocolFrame decodeEvent(Uint8List bytes) => _decodeEvent(bytes);

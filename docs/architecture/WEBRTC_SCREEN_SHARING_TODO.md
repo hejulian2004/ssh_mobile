@@ -10,7 +10,10 @@ ADR-034 或原始技术架构文档。
 ## 执行规则
 
 - 每个 Phase 使用独立分支和独立 PR。
-- 当前 Phase 未完成验收和 PR 接受前，不实现下一个 Phase。
+- 当前 Phase 未完成验收和 PR 接受前，不把下一个 Phase 标记为已交付；已授权的
+  后续契约/测试可以在独立分支并行准备，不能越过平台资源所有权或验收门禁。
+- 推送后的 PR/CI 观察在后台进行，不阻塞不依赖其结果的后续契约工作；失败仍须
+  记录并修复，不能把超时或缺失证据当作通过。
 - 提交、推送和创建 PR 需要明确授权；没有授权时只做本地实现、测试和审计。
 - 真实屏幕捕获、编码、解码、渲染、Consent、TURN 生产凭据和 QoS 只能在其
   对应 Phase 开始后实现。
@@ -76,11 +79,26 @@ ADR-034 或原始技术架构文档。
   H.264 send/receive 实机能力、GPU/Texture 双端 E2E 尚未完成；当前 plugin
   对缺失 codec/renderer capability 只返回 typed failure，不报告虚假的成功。
 
+- [x] Phase 5 typed consent contract/state-machine implementation：协议源 schema
+  增加独立 `REALTIME_SIGNAL_KIND_SCREEN_SHARE_CONSENT` 与
+  `ScreenShareConsentV1`；Rust/native/Dart/App codec parity、generation/replay
+  guard、`feature_screen_share` explicit accept/reject/timeout/cancel 状态机和
+  media-ready gate 已落地。真实双端 UI/transport acceptance 仍待完成。
+- [x] Phase 6 credential foundation：Relay 增加 device-authenticated、短时
+  `/v2/turn/credentials` issuer，SDK 增加 bounded parser、in-memory
+  `RealtimeTurnCredentialStore` 与 App provider；生产部署、secret scan 和
+  relay-only E2E 仍待完成。
+- [x] Phase 7 QoS foundation：`RealtimeMediaStats` 增加 bounded packet/drop/
+  recovery/keyframe/jitter/RTT/queue counters，并提供不改变三帧队列的有界
+  adaptation policy/native recovery port；原生 keyframe、全链路隐私和最终门禁
+  仍待完成。
+
 当前状态：Phase 0、Phase 1、Phase 2 的实现、exact-head CI 证据和 PR #67
-接受记录已齐；Phase 3.1 capture lifecycle、Phase 3.2 H.264 ingress 与
-Phase 3.3 H.264 decode/Texture implementation 已落地并完成本地 C++/Rust
-复核，但 Phase 3 尚未接受。Windows 双端硬件 E2E 与 Phase 4–7 仍不得描述为
-已交付能力。
+接受记录已齐；Phase 3/4 的 native platform owner、Phase 5 consent/Feature、
+Phase 6 TURN issuer foundation 与 Phase 7 stats/adaptation foundation 已分别
+落地，但对应硬件、设备、生产安全和最终 E2E gate 尚未接受。Windows/Android
+双端能力、production TURN、native keyframe recovery 与完整 Phase 5–7 仍不得
+描述为已交付产品能力。
 
 ## PR #67 评审修正清单
 
@@ -185,20 +203,32 @@ evidence。Windows Graphics Capture、Media Foundation hardware ingress/decode �
 
 ### Phase 5 — Consent / Feature Integration
 
-- [ ] 独立 `feature_screen_share` 与 typed consent contract。
-- [ ] IncomingRequest → explicit accept/reject → answer。
-- [ ] sender 只在远端接受且 WebRTC ready 后捕获/编码。
-- [ ] reject/cancel/timeout/duplicate/recovery 测试。
+- [x] 独立 `feature_screen_share` 与 typed/versioned consent contract；协议源、
+  Rust/native/Dart/App codec 和唯一 signal kind 已同步。
+- [x] IncomingRequest → explicit accept/reject → typed operation state machine；
+  REQUEST 不自动应答或启动媒体。
+- [x] sender 只在远端 ACCEPT 且匹配 generation media-ready 后进入 capture gate；
+  Feature 只持有业务状态与 metadata subscriptions。
+- [x] reject/cancel/timeout/duplicate/stale-generation/recoverable media failure
+  的单元回归已加入。
+- [ ] 真实 App Shell UI、Realtime transport 与 Windows/Android consent E2E 验收。
 
 ### Phase 6 — TURN Credential Delivery
 
-- [ ] 移除生产静态 TURN 密码。
-- [ ] 接入短时 credential、现有 device auth、日志/数据库脱敏。
-- [ ] relay-only production-shaped E2E 与 secret-scan 证据。
+- [x] Relay `/v2/turn/credentials` issuer 使用现有 device-authenticated Bearer
+  session，服务端只保留 shared secret，TTL 有界。
+- [x] SDK/App 提供 bounded credential parser、一次 401 refresh、generation-bound
+  in-memory store 和脱敏 `toString`；不把 credential 暴露给 Feature。
+- [ ] 生产部署移除静态客户端 TURN 密码，完成日志/telemetry/database/crash
+  脱敏、secret-scan、expiry/refresh 和 relay-only production-shaped E2E。
 
 ### Phase 7 — QoS / Privacy / Final Gate
 
-- [ ] keyframe request、发送/接收/丢帧统计和 adaptation。
+- [x] `RealtimeMediaStats` 增加 bounded sender/receiver/drop/recovery/keyframe/
+  jitter/RTT/queue 指标；默认低频快照，不创建 per-frame Dart stream。
+- [x] 增加保持三帧 queue invariant 的 bounded bitrate/framerate/resolution
+  adaptation policy 与 optional native recovery port。
+- [ ] native keyframe request/decoder reset、拥塞恢复与完整平台接线。
 - [ ] stop/revoke/permission/privacy 回归及全链路 recovery。
 - [ ] Rust、Dart、Go、平台测试与覆盖率门禁全部通过。
 - [ ] 更新 architecture status，确认没有把未验收能力描述为已交付。
@@ -232,6 +262,16 @@ evidence。Windows Graphics Capture、Media Foundation hardware ingress/decode �
 - [x] surface generation 不匹配时的 detach/release/fail-closed 回归测试通过。
 - [x] 本轮 `network-core` clippy（all targets、`-D warnings`）通过。
 - [x] `git diff --check`
+- [x] 本轮 Phase 5–7 foundation focused validation（2026-09-08）：
+  `cargo fmt --all -- --check`、`cargo check -p network-core -p network-protocol
+  -p network-relay --locked`、`cargo test -p network-protocol --locked`（14
+  passed）、`cargo test -p network-core realtime::tests --locked`（41 passed）、
+  `go test ./internal/relay -run 'TurnCredentials|TurnPassword' -count=1`（passed）。
+  相关 `network_sdk`、`realtime_media`、Windows/Android adapter、transport、
+  native binding 和 Feature 的 targeted Dart analyzer 均无问题；App Shell 新增
+  codec/adapter 文件 targeted analyzer 无问题。完整 Flutter workspace test、平台
+  设备/E2E、production TURN、native keyframe 和 secret-scan 仍是后续 gate，未因
+  foundation 检查而标记通过。
 - [x] 新增 connection-session loss endpoint invalidation 回归测试通过。
 - [x] endpoint release queue/order reset 回归测试与 network-webrtc queue clear 单测
   通过。
@@ -251,6 +291,11 @@ evidence。Windows Graphics Capture、Media Foundation hardware ingress/decode �
 1. 保留当前工作树和用户提供的中文架构原文，不混入无关文件。
 2. 保留已完成的 real Dart→native adapter parity 和 PR #67 接受证据，不再扩展
    Phase 2 scope。
-3. 在当前独立 Phase 3 分支继续实现 Windows capture/codec/render，并按 Windows
-   owner、工具链和手工 E2E 入口记录验收证据；当前 boundary package 不等于
-   平台能力已交付。
+3. 在独立 Phase 3 分支完成 Windows 硬件能力、Texture 双端 E2E 和验收；当前
+   native owner implementation 不等于平台能力已交付。
+4. 在 Phase 4 分支完成 Android 设备权限/Projection/MediaCodec/Surface 验收，
+   然后验收 Phase 5 的真实 consent UI/transport。
+5. 将 Phase 6 issuer 接入生产 device-auth/TURN 配置，完成 secret-scan 与
+   relay-only E2E；再将 Phase 7 native keyframe/recovery、隐私和最终门禁接线。
+6. 推送后的 PR/CI 运行保持后台观察并绑定 exact head；任何失败、超时或环境
+   缺口都记录为未通过，不能把基础契约勾选扩展成产品交付声明。

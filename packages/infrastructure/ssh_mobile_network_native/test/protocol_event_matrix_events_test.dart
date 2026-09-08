@@ -209,6 +209,68 @@ void main() {
     final presenceSnapshot = decoded[25]! as NativePeerPresenceSnapshotEvent;
     expect(presenceSnapshot.peers.single.generation, 4);
   });
+
+  test('screen-share consent encodes and decodes through realtime signal', () {
+    final consent = NativeScreenShareConsent(
+      schemaVersion: 1,
+      operationId: 'operation-a',
+      realtimeId: realtimeId,
+      generation: 7,
+      issuedAtMs: 1_735_732_800_000,
+      expiresAtMs: 1_735_732_860_000,
+      decision: NativeScreenShareConsentDecision.request,
+      senderPeerId: 'peer-a',
+      purpose: NativeScreenShareConsentPurpose.screenShare,
+      media: NativeScreenShareMediaKind.screenVideo,
+      requiresAcceptance: true,
+      actionRevision: 1,
+    );
+    final payload = NativeNetworkProtocol.encodeScreenShareConsent(consent);
+    final signal = _message(<List<int>>[
+      _stringField(1, realtimeId),
+      _stringField(2, 'peer-a'),
+      _varintField(3, NativeRealtimeSignalKind.screenShareConsent.wireValue),
+      _varintField(4, 1),
+      _bytesField(5, payload),
+    ]);
+    final decoded = NativeNetworkProtocol.decodeEvent(_event(22, signal));
+    expect(decoded, isA<NativeRealtimeSignalEvent>());
+    final event = decoded! as NativeRealtimeSignalEvent;
+    expect(event.kind, NativeRealtimeSignalKind.screenShareConsent);
+    expect(event.consent?.operationId, 'operation-a');
+    expect(event.consent?.generation, 7);
+    expect(event.consent?.decision, NativeScreenShareConsentDecision.request);
+  });
+
+  test('screen-share consent rejects a realtime-id mismatch', () {
+    final payload = NativeNetworkProtocol.encodeScreenShareConsent(
+      const NativeScreenShareConsent(
+        schemaVersion: 1,
+        operationId: 'operation-a',
+        realtimeId: realtimeId,
+        generation: 7,
+        issuedAtMs: 1_735_732_800_000,
+        expiresAtMs: 1_735_732_860_000,
+        decision: NativeScreenShareConsentDecision.request,
+        senderPeerId: 'peer-a',
+        purpose: NativeScreenShareConsentPurpose.screenShare,
+        media: NativeScreenShareMediaKind.screenVideo,
+        requiresAcceptance: true,
+        actionRevision: 1,
+      ),
+    );
+    final signal = _message(<List<int>>[
+      _stringField(1, 'ffeeddccbbaa99887766554433221100'),
+      _stringField(2, 'peer-a'),
+      _varintField(3, NativeRealtimeSignalKind.screenShareConsent.wireValue),
+      _varintField(4, 1),
+      _bytesField(5, payload),
+    ]);
+    expect(
+      () => NativeNetworkProtocol.decodeEvent(_event(22, signal)),
+      throwsFormatException,
+    );
+  });
 }
 
 Uint8List _event(int payloadField, List<int> payload) =>
