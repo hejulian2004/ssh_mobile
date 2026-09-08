@@ -215,7 +215,9 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
   void StopOwner(const EncodableMap& arguments,
                  std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
     const auto owner_id = OwnerIdArgument(arguments);
-    if (!owner_id) {
+    const auto direction = StringArgument(arguments, "direction");
+    if (!owner_id || !direction ||
+        (*direction != "send" && *direction != "receive")) {
       ReplyError(result, "invalid_argument", "A native owner token is required.");
       return;
     }
@@ -227,7 +229,11 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
                  "The native media owner lifecycle is unavailable.");
       return;
     }
-    if (native_media_api_.detach_renderer != nullptr) {
+    // Renderer state exists only for receive owners. The native ABI
+    // intentionally returns direction-mismatch for detachRenderer(send), so
+    // do not turn an ordinary send capture stop into a lifecycle failure.
+    if (*direction == "receive" &&
+        native_media_api_.detach_renderer != nullptr) {
       const auto renderer_status = native_media_api_.detach_renderer(*owner_id);
       if (renderer_status != 0 && renderer_status != -12) {
         ReplyError(result, NativeStatusCode(renderer_status),
@@ -260,7 +266,9 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
   void ReleaseOwner(const EncodableMap& arguments,
                     std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
     const auto owner_id = OwnerIdArgument(arguments);
-    if (!owner_id) {
+    const auto direction = StringArgument(arguments, "direction");
+    if (!owner_id || !direction ||
+        (*direction != "send" && *direction != "receive")) {
       ReplyError(result, "invalid_argument", "A native owner token is required.");
       return;
     }
@@ -275,7 +283,8 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
                  "The native media owner lifecycle is unavailable.");
       return;
     }
-    if (native_media_api_.detach_renderer != nullptr) {
+    if (*direction == "receive" &&
+        native_media_api_.detach_renderer != nullptr) {
       const auto renderer_status = native_media_api_.detach_renderer(*owner_id);
       if (renderer_status != 0 && renderer_status != -12) {
         ReplyError(result, NativeStatusCode(renderer_status),
