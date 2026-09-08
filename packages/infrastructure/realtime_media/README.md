@@ -6,6 +6,11 @@ Last updated: 2026-09-08
 
 The public API contains only endpoint/session identity, lifecycle, capture-source selection metadata, a renderer capability, and payload-free statistics. Statistics are requested as a low-frequency `readStats` snapshot, never a media stream; the bounded QoS counters and adaptation decision are metadata only. Raw or encoded frames never cross this package's Dart API. Native platform adapters introduced by later phases own capture/codec/surface resources and use the native bridge directly.
 
+The optional `RealtimeMediaKeyframeBackend` capability exposes generation-bound
+`requestKeyframe` and `resetDecoder` commands without carrying frame payloads.
+It is a recovery port only: platform owners and the native WebRTC peer retain
+the request, and codec/RTCP actuation plus hardware E2E remain phase gates.
+
 ## Ownership and release
 
 `RealtimeMediaSessionController` owns its endpoint leases. It releases an endpoint in this order: detach the native source/surface binding, release the native endpoint lease, then mark the renderer capability released. `stop()` is the terminal, idempotent controller-level release after native cleanup succeeds; `dispose()` is its idempotent lifecycle alias and is safe before `start()`. The first terminal call closes the controller to new work immediately, waits for any in-flight native acquisition to be reclaimed, and shares its cleanup result with concurrent `stop()` or `dispose()` calls. Releasing an endpoint or controller is idempotent; controller release continues cleaning later leases after an earlier failure. A retryable native cleanup failure retains the endpoint lease, leaves the controller failed, and clears the in-flight release so a later `release()` or `stop()` retries it. A native endpoint acquired after stopping begins is registered before cleanup, so a failed late-start release remains retryable through the same ownership registry. Stale or already-stopped native leases are terminal and can be finalized. A lease is bound to realtime ID, peer ID, generation, and direction, so it cannot be reused by a new session generation. In-flight source/surface attach and detach operations re-check the lease before committing state; a late attach is detached/released and cannot resurrect a stopped endpoint. A malformed surface generation is released and fails closed.

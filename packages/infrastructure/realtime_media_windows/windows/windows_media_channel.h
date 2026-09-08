@@ -18,6 +18,7 @@ using OwnerCloseFunction = int(__cdecl *)(uint64_t);
 using OwnerStartFunction = int(__cdecl *)(uint64_t);
 using OwnerStopFunction = int(__cdecl *)(uint64_t);
 using OwnerValidateFunction = int(__cdecl *)(uint64_t);
+using OwnerRecoveryFunction = int(__cdecl *)(uint64_t);
 using OwnerRendererFunction = int(__cdecl *)(uint64_t);
 using OwnerPushFunction = H264PushCallback;
 using OwnerPullFunction = H264PullCallback;
@@ -27,6 +28,8 @@ struct NativeMediaApi {
   OwnerStartFunction start_owner = nullptr;
   OwnerStopFunction stop_owner = nullptr;
   OwnerValidateFunction validate_owner = nullptr;
+  OwnerRecoveryFunction request_keyframe = nullptr;
+  OwnerRecoveryFunction reset_decoder = nullptr;
   OwnerCloseFunction close_owner = nullptr;
   OwnerRendererFunction attach_renderer = nullptr;
   OwnerRendererFunction detach_renderer = nullptr;

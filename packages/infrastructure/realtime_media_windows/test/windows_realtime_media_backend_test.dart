@@ -116,35 +116,65 @@ void main() {
     expect(platform.operations, <String>['stats:1']);
   });
 
-  test('enumerates bounded display and window metadata without payloads', () async {
-    platform.sources = <ScreenCaptureSource>[
-      ScreenCaptureSource(
-        id: ScreenCaptureSourceId('display:1'),
-        kind: ScreenCaptureSourceKind.display,
-        label: 'Primary display',
-        width: 1920,
-        height: 1080,
-      ),
-      ScreenCaptureSource(
-        id: ScreenCaptureSourceId('window:1'),
-        kind: ScreenCaptureSourceKind.window,
-        label: 'Terminal',
-        width: 1280,
-        height: 720,
-      ),
-    ];
+  test(
+    'routes keyframe and decoder recovery through the owner token',
+    () async {
+      final sendEndpoint = await backend.start(identity);
+      await backend.requestKeyframe(
+        endpointId: sendEndpoint,
+        identity: identity,
+      );
 
-    final sources = await backend.listCaptureSources();
+      final receiveIdentity = RealtimeMediaEndpointIdentity(
+        realtimeId: identity.realtimeId,
+        peerId: identity.peerId,
+        generation: identity.generation,
+        direction: RealtimeMediaDirection.receive,
+      );
+      final receiveEndpoint = await backend.start(receiveIdentity);
+      await backend.resetDecoder(
+        endpointId: receiveEndpoint,
+        identity: receiveIdentity,
+      );
 
-    expect(sources, hasLength(2));
-    expect(sources.map((source) => source.kind), <ScreenCaptureSourceKind>[
-      ScreenCaptureSourceKind.display,
-      ScreenCaptureSourceKind.window,
-    ]);
-    expect(sources.singleWhere((source) => source.id.value == 'display:1').width,
-        1920);
-    expect(platform.operations, isEmpty);
-  });
+      expect(platform.operations, <String>['keyframe:1', 'reset-decoder:2']);
+    },
+  );
+
+  test(
+    'enumerates bounded display and window metadata without payloads',
+    () async {
+      platform.sources = <ScreenCaptureSource>[
+        ScreenCaptureSource(
+          id: ScreenCaptureSourceId('display:1'),
+          kind: ScreenCaptureSourceKind.display,
+          label: 'Primary display',
+          width: 1920,
+          height: 1080,
+        ),
+        ScreenCaptureSource(
+          id: ScreenCaptureSourceId('window:1'),
+          kind: ScreenCaptureSourceKind.window,
+          label: 'Terminal',
+          width: 1280,
+          height: 720,
+        ),
+      ];
+
+      final sources = await backend.listCaptureSources();
+
+      expect(sources, hasLength(2));
+      expect(sources.map((source) => source.kind), <ScreenCaptureSourceKind>[
+        ScreenCaptureSourceKind.display,
+        ScreenCaptureSourceKind.window,
+      ]);
+      expect(
+        sources.singleWhere((source) => source.id.value == 'display:1').width,
+        1920,
+      );
+      expect(platform.operations, isEmpty);
+    },
+  );
 
   test('source disappearance is typed and remains releasable', () async {
     platform.failure = const RealtimeMediaException(
@@ -256,15 +286,17 @@ final class RecordingEndpointBackend
     implements RealtimeMediaBackend, RealtimeMediaNativeOwnerBackend {
   final List<String> operations = <String>[];
   RealtimeMediaException? releaseFailure;
+  int _nextEndpoint = 0;
 
   @override
   Future<RealtimeMediaEndpointId> start(
     RealtimeMediaEndpointIdentity identity,
   ) async {
+    _nextEndpoint += 1;
     operations.add(
       'start:${identity.realtimeId}:${identity.generation}:${identity.direction.name}',
     );
-    return RealtimeMediaEndpointId('1');
+    return RealtimeMediaEndpointId('$_nextEndpoint');
   }
 
   @override
@@ -421,5 +453,23 @@ final class RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
   }) async {
     operations.add('stats:${endpointId.value}');
     return stats;
+  }
+
+  @override
+  Future<void> requestKeyframe({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {
+    operations.add('keyframe:${endpointId.value}');
+  }
+
+  @override
+  Future<void> resetDecoder({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {
+    operations.add('reset-decoder:${endpointId.value}');
   }
 }

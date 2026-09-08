@@ -36,6 +36,10 @@ internal object NativeMediaBridge {
 
     fun detachRenderer(owner: Long): Int = invoke { nativeDetachRenderer(owner) }
 
+    fun requestKeyframe(owner: Long): Int = invoke { nativeRequestKeyframe(owner) }
+
+    fun resetDecoder(owner: Long): Int = invoke { nativeResetDecoder(owner) }
+
     fun closeOwner(owner: Long): Int = invoke { nativeCloseOwner(owner) }
 
     fun pushH264(
@@ -105,6 +109,12 @@ internal object NativeMediaBridge {
 
     @JvmStatic
     private external fun nativeDetachRenderer(owner: Long): Int
+
+    @JvmStatic
+    private external fun nativeRequestKeyframe(owner: Long): Int
+
+    @JvmStatic
+    private external fun nativeResetDecoder(owner: Long): Int
 
     @JvmStatic
     private external fun nativeCloseOwner(owner: Long): Int

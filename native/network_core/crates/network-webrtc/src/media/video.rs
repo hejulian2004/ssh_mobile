@@ -321,6 +321,41 @@ impl WebRtcPeer {
         Ok(())
     }
 
+    /// Requests a fresh keyframe for one native screen-video direction.
+    ///
+    /// The request is coalesced by the bounded queue and is consumed by the
+    /// native WebRTC owner; no control or media payload crosses into Dart.
+    pub fn request_h264_screen_video_keyframe(
+        &mut self,
+        direction: MediaDirection,
+    ) -> Result<(), WebRtcError> {
+        let video = self
+            .screen_video
+            .as_mut()
+            .ok_or(WebRtcError::ScreenVideoNotConfigured)?;
+        match direction {
+            MediaDirection::Sendonly => {
+                video
+                    .outbound
+                    .request_keyframe(KeyframeRequestReason::PacketLoss);
+            }
+            MediaDirection::Recvonly => {
+                video
+                    .inbound
+                    .request_keyframe(KeyframeRequestReason::PacketLoss);
+            }
+            MediaDirection::Sendrecv => {
+                video
+                    .outbound
+                    .request_keyframe(KeyframeRequestReason::PacketLoss);
+                video
+                    .inbound
+                    .request_keyframe(KeyframeRequestReason::PacketLoss);
+            }
+        }
+        Ok(())
+    }
+
     /// Clears the queue and partial RTP reassembly state for one endpoint
     /// direction. This is intentionally separate from connection-loss and
     /// decoder-reset handling: releasing an endpoint must not request a

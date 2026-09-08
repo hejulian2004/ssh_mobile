@@ -20,6 +20,24 @@ abstract interface class RealtimeMediaRecoveryBackend {
   });
 }
 
+/// Optional native capability for explicit keyframe and decoder recovery.
+///
+/// This is deliberately narrower than [RealtimeMediaRecoveryBackend]: a
+/// platform owner may support recovery before it can apply adaptive encoder
+/// targets. Both operations remain generation-bound and carry no media
+/// payloads.
+abstract interface class RealtimeMediaKeyframeBackend {
+  Future<void> requestKeyframe({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  });
+
+  Future<void> resetDecoder({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  });
+}
+
 /// Prevents a packet-loss burst from creating an unbounded keyframe request
 /// storm. Native owners should apply the same limit at their recovery boundary.
 final class RealtimeMediaKeyframeRequestLimiter {
@@ -57,13 +75,37 @@ extension RealtimeMediaSessionQos on RealtimeMediaSessionController {
     await stats(endpoint);
     if (limiter != null && !limiter.allow()) return;
     final recovery = backend;
-    if (recovery is! RealtimeMediaRecoveryBackend) {
+    if (recovery is RealtimeMediaRecoveryBackend) {
+      await (recovery as RealtimeMediaRecoveryBackend).requestKeyframe(
+        endpointId: endpoint.id,
+        identity: endpoint.identity,
+      );
+      return;
+    }
+    if (recovery is RealtimeMediaKeyframeBackend) {
+      await (recovery as RealtimeMediaKeyframeBackend).requestKeyframe(
+        endpointId: endpoint.id,
+        identity: endpoint.identity,
+      );
+      return;
+    }
+    throw const RealtimeMediaException(
+      RealtimeMediaErrorCode.backendFailure,
+      'Native keyframe recovery is unavailable.',
+    );
+  }
+
+  /// Resets one native decoder and discards its stale access-unit state.
+  Future<void> resetDecoder({required RealtimeMediaEndpoint endpoint}) async {
+    await stats(endpoint);
+    final recovery = backend;
+    if (recovery is! RealtimeMediaKeyframeBackend) {
       throw const RealtimeMediaException(
         RealtimeMediaErrorCode.backendFailure,
-        'Native keyframe recovery is unavailable.',
+        'Native decoder recovery is unavailable.',
       );
     }
-    await (recovery as RealtimeMediaRecoveryBackend).requestKeyframe(
+    await (recovery as RealtimeMediaKeyframeBackend).resetDecoder(
       endpointId: endpoint.id,
       identity: endpoint.identity,
     );

@@ -131,6 +131,20 @@ Java_com_hejulian_realtime_1media_1android_NativeMediaBridge_nativeDetachRendere
 }
 
 extern "C" JNIEXPORT jint JNICALL
+Java_com_hejulian_realtime_1media_1android_NativeMediaBridge_nativeRequestKeyframe(
+    JNIEnv*, jclass, jlong owner) {
+  return ResolveOwnerStatus("ssh_net_realtime_media_owner_request_keyframe",
+                           static_cast<uint64_t>(owner));
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_hejulian_realtime_1media_1android_NativeMediaBridge_nativeResetDecoder(
+    JNIEnv*, jclass, jlong owner) {
+  return ResolveOwnerStatus("ssh_net_realtime_media_owner_reset_decoder",
+                           static_cast<uint64_t>(owner));
+}
+
+extern "C" JNIEXPORT jint JNICALL
 Java_com_hejulian_realtime_1media_1android_NativeMediaBridge_nativeCloseOwner(
     JNIEnv*, jclass, jlong owner) {
   return ResolveOwnerStatus("ssh_net_realtime_media_owner_close",

@@ -519,6 +519,24 @@ void main() {
     expect(backend.operations.last, 'stats:endpoint-1');
   });
 
+  test(
+    'routes keyframe and decoder recovery through the native capability',
+    () async {
+      final endpoint = await controller.start(RealtimeMediaDirection.receive);
+
+      await controller.requestKeyframe(endpoint: endpoint);
+      await controller.resetDecoder(endpoint: endpoint);
+
+      expect(backend.operations, <String>[
+        'start:realtime-1:7:receive',
+        'stats:endpoint-1',
+        'request-keyframe:endpoint-1',
+        'stats:endpoint-1',
+        'reset-decoder:endpoint-1',
+      ]);
+    },
+  );
+
   test('foreign generation endpoint is stale', () async {
     final oldEndpoint = await controller.start(RealtimeMediaDirection.send);
     final nextController = RealtimeMediaSessionController(
@@ -629,7 +647,8 @@ void main() {
   );
 }
 
-final class RecordingBackend implements RealtimeMediaBackend {
+final class RecordingBackend
+    implements RealtimeMediaBackend, RealtimeMediaKeyframeBackend {
   final List<String> operations = <String>[];
   bool failStart = false;
   bool failAttach = false;
@@ -751,5 +770,21 @@ final class RecordingBackend implements RealtimeMediaBackend {
   }) async {
     operations.add('stats:${endpointId.value}');
     return stats;
+  }
+
+  @override
+  Future<void> requestKeyframe({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) async {
+    operations.add('request-keyframe:${endpointId.value}');
+  }
+
+  @override
+  Future<void> resetDecoder({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) async {
+    operations.add('reset-decoder:${endpointId.value}');
   }
 }

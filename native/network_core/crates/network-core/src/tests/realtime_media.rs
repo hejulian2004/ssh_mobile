@@ -239,6 +239,56 @@ async fn endpoint_registry_enforces_direction_and_queue_frame_limits() {
 }
 
 #[tokio::test]
+async fn endpoint_registry_routes_explicit_keyframe_and_decoder_recovery() {
+    let driver = test_driver().await;
+    let mut registry = RealtimeMediaRegistry::new();
+    let send = registry
+        .create(
+            REALTIME_ID,
+            PEER_ID,
+            RealtimeMediaDirection::Send,
+            1,
+            1,
+            &driver,
+        )
+        .expect("create send endpoint");
+    let receive = registry
+        .create(
+            REALTIME_ID,
+            PEER_ID,
+            RealtimeMediaDirection::Receive,
+            1,
+            1,
+            &driver,
+        )
+        .expect("create receive endpoint");
+
+    registry
+        .request_keyframe(send)
+        .expect("request sender keyframe");
+    assert_eq!(
+        driver
+            .lock()
+            .expect("driver lock")
+            .peer_mut()
+            .take_h264_screen_video_keyframe_request(),
+        Some(network_webrtc::KeyframeRequestReason::PacketLoss)
+    );
+
+    registry
+        .reset_decoder(receive)
+        .expect("reset receiver decoder");
+    assert_eq!(
+        driver
+            .lock()
+            .expect("driver lock")
+            .peer_mut()
+            .take_h264_screen_video_keyframe_request(),
+        Some(network_webrtc::KeyframeRequestReason::DecoderReset)
+    );
+}
+
+#[tokio::test]
 async fn release_keeps_the_lease_retryable_when_queue_cleanup_fails() {
     let driver = test_driver().await;
     let mut registry = RealtimeMediaRegistry::new();

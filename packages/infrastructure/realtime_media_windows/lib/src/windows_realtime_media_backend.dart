@@ -8,7 +8,8 @@ import 'windows_realtime_media_platform.dart';
 /// Windows owns only capture, codec, decoder, surface, and texture resources;
 /// therefore release first tears down the platform resource and only then
 /// finalizes the endpoint lease.
-final class WindowsRealtimeMediaBackend implements RealtimeMediaBackend {
+final class WindowsRealtimeMediaBackend
+    implements RealtimeMediaBackend, RealtimeMediaKeyframeBackend {
   WindowsRealtimeMediaBackend({
     required this.endpointBackend,
     required this.platform,
@@ -157,6 +158,26 @@ final class WindowsRealtimeMediaBackend implements RealtimeMediaBackend {
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
   }) => platform.readStats(
+    endpointId: endpointId,
+    identity: identity,
+    ownerToken: _ownerFor(endpointId, identity),
+  );
+
+  @override
+  Future<void> requestKeyframe({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) => platform.requestKeyframe(
+    endpointId: endpointId,
+    identity: identity,
+    ownerToken: _ownerFor(endpointId, identity),
+  );
+
+  @override
+  Future<void> resetDecoder({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) => platform.resetDecoder(
     endpointId: endpointId,
     identity: identity,
     ownerToken: _ownerFor(endpointId, identity),

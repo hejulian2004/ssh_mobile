@@ -44,6 +44,7 @@ internal class AndroidMediaOwner(
     private var decoderThread: Thread? = null
     private var decoderStopAck: CountDownLatch? = null
     private var decoderRunning = AtomicBoolean(false)
+    private var decoderResetRequested = AtomicBoolean(false)
     private var textureEntry: TextureRegistry.SurfaceTextureEntry? = null
     private var width = 0
     private var height = 0
@@ -203,6 +204,25 @@ internal class AndroidMediaOwner(
         return if (status == 0 || status == -12) null else statusCode(status)
     }
 
+    fun requestKeyframe(): String? {
+        synchronized(lock) {
+            val status = NativeMediaBridge.requestKeyframe(token)
+            return if (status == 0) null else statusCode(status)
+        }
+    }
+
+    fun resetDecoder(): String? {
+        synchronized(lock) {
+            if (identity.direction != "receive") return "direction_mismatch"
+            if (terminalCode != null) return terminalCode
+            val status = NativeMediaBridge.resetDecoder(token)
+            if (status != 0) return statusCode(status)
+            if (decoder == null || !decoderRunning.get()) return "decoder_unavailable"
+            decoderResetRequested.set(true)
+            return null
+        }
+    }
+
     fun release(): String? {
         val detachFailure = detach()
         if (detachFailure != null) return detachFailure
@@ -341,6 +361,18 @@ internal class AndroidMediaOwner(
         val info = MediaCodec.BufferInfo()
         try {
             while (decoderRunning.get()) {
+                if (decoderResetRequested.compareAndSet(true, false)) {
+                    try {
+                        codec.flush()
+                        synchronized(lock) {
+                            width = 0
+                            height = 0
+                        }
+                    } catch (_: IllegalStateException) {
+                        failFromWorker("decoder_failed", "MediaCodec reset failed.")
+                        break
+                    }
+                }
                 val frame = NativeMediaBridge.pullH264(token)
                 if (frame == null) {
                     Thread.sleep(2)
@@ -433,6 +465,7 @@ internal class AndroidMediaOwner(
         val worker = synchronized(lock) {
             decoderRunning.set(false)
             decoderThread to decoderStopAck
+            decoderResetRequested.set(false)
         }
         val thread = worker.first
         val ack = worker.second

@@ -7,7 +7,8 @@ import 'android_realtime_media_platform.dart';
 /// The endpoint backend remains the owner of the NetworkRuntime lease. Android
 /// owns only projection, codecs, surfaces, and its generation-bound owner
 /// token; release tears those down before final endpoint release.
-final class AndroidRealtimeMediaBackend implements RealtimeMediaBackend {
+final class AndroidRealtimeMediaBackend
+    implements RealtimeMediaBackend, RealtimeMediaKeyframeBackend {
   AndroidRealtimeMediaBackend({
     required this.endpointBackend,
     required this.platform,
@@ -134,6 +135,26 @@ final class AndroidRealtimeMediaBackend implements RealtimeMediaBackend {
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
   }) => platform.readStats(
+    endpointId: endpointId,
+    identity: identity,
+    ownerToken: _ownerFor(endpointId, identity),
+  );
+
+  @override
+  Future<void> requestKeyframe({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) => platform.requestKeyframe(
+    endpointId: endpointId,
+    identity: identity,
+    ownerToken: _ownerFor(endpointId, identity),
+  );
+
+  @override
+  Future<void> resetDecoder({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) => platform.resetDecoder(
     endpointId: endpointId,
     identity: identity,
     ownerToken: _ownerFor(endpointId, identity),

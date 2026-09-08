@@ -62,6 +62,7 @@ class WindowsDecoderManager final {
   DecoderStatus Attach(uint64_t owner, int64_t* surface_id);
   DecoderStatus Detach(uint64_t owner);
   DecoderStatus Release(uint64_t owner);
+  DecoderStatus Reset(uint64_t owner);
   DecoderStatus ReadStats(uint64_t owner, DecoderStats* stats);
 
  private:

@@ -104,6 +104,39 @@ void main() {
       ),
     );
   });
+
+  test('forwards generation-bound recovery commands', () async {
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return null;
+    });
+    const platform = MethodChannelAndroidRealtimeMediaPlatform();
+    final identity = RealtimeMediaEndpointIdentity(
+      realtimeId: 'realtime-1',
+      peerId: 'peer-1',
+      generation: 9,
+      direction: RealtimeMediaDirection.receive,
+    );
+
+    await platform.requestKeyframe(
+      endpointId: RealtimeMediaEndpointId('endpoint-1'),
+      identity: identity,
+      ownerToken: RealtimeMediaNativeOwnerToken('owner-1'),
+    );
+    await platform.resetDecoder(
+      endpointId: RealtimeMediaEndpointId('endpoint-1'),
+      identity: identity,
+      ownerToken: RealtimeMediaNativeOwnerToken('owner-1'),
+    );
+
+    expect(calls.map((call) => call.method), <String>[
+      'requestKeyframe',
+      'resetDecoder',
+    ]);
+    expect((calls.first.arguments as Map)['generation'], 9);
+    expect((calls.last.arguments as Map)['direction'], 'receive');
+  });
 }
 
 extension on RealtimeMediaEndpointIdentity {

@@ -84,6 +84,10 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
       ReleaseOwner(*arguments, std::move(result));
     } else if (call.method_name() == "readStats") {
       ReadStats(*arguments, std::move(result));
+    } else if (call.method_name() == "requestKeyframe") {
+      RequestKeyframe(*arguments, std::move(result));
+    } else if (call.method_name() == "resetDecoder") {
+      ResetDecoder(*arguments, std::move(result));
     } else {
       result->NotImplemented();
     }
@@ -386,6 +390,65 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
     result->Success(decoder_status == DecoderStatus::kOk
                         ? StatsMap(stats, &decoder_stats)
                         : StatsMap(stats));
+  }
+
+  void RequestKeyframe(
+      const EncodableMap& arguments,
+      std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
+    const auto owner_id = OwnerIdArgument(arguments);
+    if (!owner_id) {
+      ReplyError(result, "invalid_argument", "A native owner token is required.");
+      return;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!RefreshNativeMediaApi() || native_media_api_.request_keyframe == nullptr) {
+      ReplyError(result, kBackendFailure,
+                 "Native keyframe recovery is unavailable.");
+      return;
+    }
+    const auto status = native_media_api_.request_keyframe(*owner_id);
+    if (status != 0) {
+      ReplyError(result, NativeStatusCode(status),
+                 "The native keyframe request failed.");
+      return;
+    }
+    result->Success();
+  }
+
+  void ResetDecoder(
+      const EncodableMap& arguments,
+      std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
+    const auto owner_id = OwnerIdArgument(arguments);
+    const auto direction = StringArgument(arguments, "direction");
+    if (!owner_id || !direction) {
+      ReplyError(result, "invalid_argument",
+                 "A native owner token and media direction are required.");
+      return;
+    }
+    if (*direction != "receive") {
+      ReplyError(result, "direction_mismatch",
+                 "Decoder recovery requires a receive media owner.");
+      return;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!RefreshNativeMediaApi() || native_media_api_.reset_decoder == nullptr) {
+      ReplyError(result, kDecoderUnavailable,
+                 "Native decoder recovery is unavailable.");
+      return;
+    }
+    const auto native_status = native_media_api_.reset_decoder(*owner_id);
+    if (native_status != 0) {
+      ReplyError(result, NativeStatusCode(native_status),
+                 "The native decoder reset failed.");
+      return;
+    }
+    const auto decoder_status = decoder_manager_.Reset(*owner_id);
+    if (decoder_status != DecoderStatus::kOk) {
+      ReplyError(result, DecoderStatusCode(decoder_status),
+                 "The Windows H.264 decoder reset failed.");
+      return;
+    }
+    result->Success();
   }
 
   std::unique_ptr<flutter::MethodChannel<EncodableValue>> channel_;

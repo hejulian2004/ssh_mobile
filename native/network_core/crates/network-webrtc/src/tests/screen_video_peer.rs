@@ -132,6 +132,33 @@ fn screen_video_recovery_requests_a_keyframe_for_ice_restart_and_decoder_reset()
 }
 
 #[test]
+fn explicit_keyframe_request_targets_the_configured_media_direction() {
+    let mut sender = WebRtcPeer::new(WebRtcConfig::default()).expect("sender");
+    sender
+        .configure_h264_screen_video(MediaDirection::Sendonly, Some(SCREEN_SSRC))
+        .expect("sender config");
+    sender
+        .request_h264_screen_video_keyframe(MediaDirection::Sendonly)
+        .expect("sender keyframe request");
+    assert_eq!(
+        sender.take_h264_screen_video_keyframe_request(),
+        Some(KeyframeRequestReason::PacketLoss)
+    );
+
+    let mut receiver = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    receiver
+        .configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    receiver
+        .request_h264_screen_video_keyframe(MediaDirection::Recvonly)
+        .expect("receiver keyframe request");
+    assert_eq!(
+        receiver.take_h264_screen_video_keyframe_request(),
+        Some(KeyframeRequestReason::PacketLoss)
+    );
+}
+
+#[test]
 fn packet_loss_reorder_and_duplicate_are_media_local_recovery_events() {
     let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
     peer.configure_h264_screen_video(MediaDirection::Recvonly, None)

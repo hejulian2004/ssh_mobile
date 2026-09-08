@@ -14,7 +14,7 @@ use std::panic::catch_unwind;
 use std::slice;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::{
     identifier, map_error, SshNetBuffer, SshNetRealtimeMediaFrameMetadata, SshNetRuntime,
@@ -35,6 +35,7 @@ fn direction_from_native(value: u32) -> Option<RealtimeMediaDirection> {
 }
 
 static NEXT_MEDIA_OWNER_ID: AtomicU64 = AtomicU64::new(1);
+const MIN_KEYFRAME_REQUEST_INTERVAL: Duration = Duration::from_secs(1);
 
 struct MediaOwnerBinding {
     runtime: usize,
@@ -45,6 +46,7 @@ struct MediaOwnerBinding {
     direction: RealtimeMediaDirection,
     started: bool,
     renderer_attached: bool,
+    last_keyframe_request: Option<Instant>,
 }
 
 static MEDIA_OWNER_REGISTRY: OnceLock<Mutex<HashMap<u64, MediaOwnerBinding>>> = OnceLock::new();
@@ -149,6 +151,7 @@ pub unsafe extern "C" fn ssh_net_realtime_media_owner_open(
             direction,
             started: false,
             renderer_attached: false,
+            last_keyframe_request: None,
         };
         let mut owners = media_owner_registry()
             .lock()
@@ -214,6 +217,56 @@ pub extern "C" fn ssh_net_realtime_media_owner_stop(owner: u64) -> i32 {
 pub extern "C" fn ssh_net_realtime_media_owner_validate(owner: u64) -> i32 {
     owner_with_binding(owner, |binding| {
         validate_owner(binding)?;
+        Ok(0)
+    })
+}
+
+/// Requests a fresh H.264 keyframe through the generation-bound owner.
+///
+/// Requests are rate-limited and coalesced by the native queue so a loss burst
+/// cannot create an unbounded control storm. The platform caller receives only
+/// a status code; the request itself never enters Dart or the Relay path.
+#[no_mangle]
+pub extern "C" fn ssh_net_realtime_media_owner_request_keyframe(owner: u64) -> i32 {
+    owner_with_binding(owner, |binding| {
+        validate_owner(binding)?;
+        if !binding.started {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE);
+        }
+        let now = Instant::now();
+        if binding
+            .last_keyframe_request
+            .is_some_and(|last| now.saturating_duration_since(last) < MIN_KEYFRAME_REQUEST_INTERVAL)
+        {
+            return Ok(0);
+        }
+        let runtime = unsafe { &*(binding.runtime as *const SshNetRuntime) };
+        runtime
+            .runtime
+            .request_realtime_media_keyframe(RealtimeMediaEndpointId::from_raw(binding.endpoint))
+            .map_err(map_error)?;
+        binding.last_keyframe_request = Some(now);
+        Ok(0)
+    })
+}
+
+/// Resets a receive-side H.264 decoder and requests a recovery keyframe.
+#[no_mangle]
+pub extern "C" fn ssh_net_realtime_media_owner_reset_decoder(owner: u64) -> i32 {
+    owner_with_binding(owner, |binding| {
+        if binding.direction != RealtimeMediaDirection::Receive {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_DIRECTION_MISMATCH);
+        }
+        validate_owner(binding)?;
+        if !binding.started {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE);
+        }
+        let runtime = unsafe { &*(binding.runtime as *const SshNetRuntime) };
+        runtime
+            .runtime
+            .reset_realtime_media_decoder(RealtimeMediaEndpointId::from_raw(binding.endpoint))
+            .map_err(map_error)?;
+        binding.last_keyframe_request = Some(Instant::now());
         Ok(0)
     })
 }

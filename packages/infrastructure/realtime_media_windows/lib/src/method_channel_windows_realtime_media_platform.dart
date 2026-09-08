@@ -135,6 +135,26 @@ final class MethodChannelWindowsRealtimeMediaPlatform
     );
   }
 
+  @override
+  Future<void> requestKeyframe({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) => _invoke<void>(
+    'requestKeyframe',
+    _identityArguments(endpointId, identity, ownerToken),
+  );
+
+  @override
+  Future<void> resetDecoder({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) => _invoke<void>(
+    'resetDecoder',
+    _identityArguments(endpointId, identity, ownerToken),
+  );
+
   Map<String, Object?> _identityArguments(
     RealtimeMediaEndpointId endpointId,
     RealtimeMediaEndpointIdentity identity,

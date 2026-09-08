@@ -199,6 +199,22 @@ class RealtimeMediaAndroidPlugin :
                     result.success(owner.stats())
                 }
             }
+            "requestKeyframe" -> withOwner(call, result) { owner, _ ->
+                val failure = owner.requestKeyframe()
+                if (failure == null) result.success(null) else error(
+                    result,
+                    failure,
+                    "Android keyframe recovery failed.",
+                )
+            }
+            "resetDecoder" -> withOwner(call, result) { owner, _ ->
+                val failure = owner.resetDecoder()
+                if (failure == null) result.success(null) else error(
+                    result,
+                    failure,
+                    "Android decoder reset failed.",
+                )
+            }
             else -> result.notImplemented()
         }
     }

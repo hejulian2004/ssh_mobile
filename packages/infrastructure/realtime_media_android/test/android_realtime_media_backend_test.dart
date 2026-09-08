@@ -248,6 +248,25 @@ void main() {
   );
 
   test(
+    'routes keyframe and decoder recovery through the owner token',
+    () async {
+      final sendEndpoint = await backend.start(sendIdentity);
+      await backend.requestKeyframe(
+        endpointId: sendEndpoint,
+        identity: sendIdentity,
+      );
+
+      final receiveEndpoint = await backend.start(receiveIdentity);
+      await backend.resetDecoder(
+        endpointId: receiveEndpoint,
+        identity: receiveIdentity,
+      );
+
+      expect(platform.operations, <String>['keyframe:1', 'reset-decoder:2']);
+    },
+  );
+
+  test(
     'projection requests are delegated and repeated calls are safe',
     () async {
       await backend.requestProjection();
@@ -462,4 +481,22 @@ final class RecordingAndroidPlatform implements AndroidRealtimeMediaPlatform {
     required RealtimeMediaEndpointIdentity identity,
     RealtimeMediaNativeOwnerToken? ownerToken,
   }) async => const RealtimeMediaStats(framesRendered: 3);
+
+  @override
+  Future<void> requestKeyframe({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {
+    operations.add('keyframe:${endpointId.value}');
+  }
+
+  @override
+  Future<void> resetDecoder({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {
+    operations.add('reset-decoder:${endpointId.value}');
+  }
 }

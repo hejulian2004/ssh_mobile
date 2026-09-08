@@ -4,7 +4,8 @@ use crate::realtime_media::{
     ssh_net_realtime_media_endpoint_push_h264, ssh_net_realtime_media_endpoint_release,
     ssh_net_realtime_media_owner_attach_renderer, ssh_net_realtime_media_owner_close,
     ssh_net_realtime_media_owner_detach_renderer, ssh_net_realtime_media_owner_open,
-    ssh_net_realtime_media_owner_push_h264, ssh_net_realtime_media_owner_start,
+    ssh_net_realtime_media_owner_push_h264, ssh_net_realtime_media_owner_request_keyframe,
+    ssh_net_realtime_media_owner_reset_decoder, ssh_net_realtime_media_owner_start,
     ssh_net_realtime_media_owner_stop, ssh_net_realtime_media_owner_validate,
     SshNetRealtimeMediaFrameMetadata, SSH_NET_REALTIME_MEDIA_DIRECTION_RECEIVE,
     SSH_NET_REALTIME_MEDIA_DIRECTION_SEND, SSH_NET_REALTIME_MEDIA_STATUS_STALE_ENDPOINT,
@@ -107,6 +108,7 @@ fn media_endpoint_ffi_success_path_round_trips_native_h264_and_releases_cleanly(
     assert_ne!(owner, 0);
     assert_eq!(ssh_net_realtime_media_owner_start(owner), 0);
     assert_eq!(ssh_net_realtime_media_owner_validate(owner), 0);
+    assert_eq!(ssh_net_realtime_media_owner_request_keyframe(owner), 0);
     let mut duplicate_owner = 99_u64;
     assert_eq!(
         unsafe {
@@ -239,6 +241,11 @@ fn media_endpoint_ffi_success_path_round_trips_native_h264_and_releases_cleanly(
         0
     );
     assert_eq!(ssh_net_realtime_media_owner_start(receive_owner), 0);
+    assert_eq!(
+        ssh_net_realtime_media_owner_request_keyframe(receive_owner),
+        0
+    );
+    assert_eq!(ssh_net_realtime_media_owner_reset_decoder(receive_owner), 0);
 
     runtime
         .runtime
@@ -278,6 +285,10 @@ fn media_endpoint_ffi_success_path_round_trips_native_h264_and_releases_cleanly(
     assert_eq!(owner_returned, payload);
     unsafe { ssh_net_buffer_free(owner_payload) };
     assert_eq!(ssh_net_realtime_media_owner_stop(receive_owner), 0);
+    assert_eq!(
+        ssh_net_realtime_media_owner_reset_decoder(receive_owner),
+        crate::realtime_media::SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE
+    );
     assert_eq!(ssh_net_realtime_media_owner_close(receive_owner), 0);
 
     assert_eq!(

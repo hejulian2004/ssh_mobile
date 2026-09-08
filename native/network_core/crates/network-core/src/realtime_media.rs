@@ -288,6 +288,35 @@ impl RealtimeMediaRegistry {
         }
         Ok(())
     }
+
+    fn request_keyframe(
+        &mut self,
+        endpoint_id: RealtimeMediaEndpointId,
+    ) -> Result<(), RealtimeMediaError> {
+        let direction = self
+            .endpoints
+            .get(&endpoint_id)
+            .map(|endpoint| endpoint.direction)
+            .ok_or(RealtimeMediaError::StaleEndpoint)?;
+        let media_direction = match direction {
+            RealtimeMediaDirection::Send => MediaDirection::Sendonly,
+            RealtimeMediaDirection::Receive => MediaDirection::Recvonly,
+        };
+        self.with_endpoint(endpoint_id, direction, |driver| {
+            driver
+                .peer_mut()
+                .request_h264_screen_video_keyframe(media_direction)
+        })
+    }
+
+    fn reset_decoder(
+        &mut self,
+        endpoint_id: RealtimeMediaEndpointId,
+    ) -> Result<(), RealtimeMediaError> {
+        self.with_endpoint(endpoint_id, RealtimeMediaDirection::Receive, |driver| {
+            driver.peer_mut().reset_h264_screen_video_decoder()
+        })
+    }
 }
 
 pub(crate) async fn create_endpoint(
@@ -359,6 +388,28 @@ pub(crate) fn push_endpoint(
     registry.with_endpoint(endpoint_id, RealtimeMediaDirection::Send, |driver| {
         driver.peer_mut().enqueue_h264_screen_video(frame, now)
     })
+}
+
+pub(crate) fn request_keyframe(
+    state: &RuntimeState,
+    endpoint_id: RealtimeMediaEndpointId,
+) -> Result<(), RealtimeMediaError> {
+    let mut registry = state
+        .realtime_media
+        .lock()
+        .map_err(|_| RealtimeMediaError::Internal)?;
+    registry.request_keyframe(endpoint_id)
+}
+
+pub(crate) fn reset_decoder(
+    state: &RuntimeState,
+    endpoint_id: RealtimeMediaEndpointId,
+) -> Result<(), RealtimeMediaError> {
+    let mut registry = state
+        .realtime_media
+        .lock()
+        .map_err(|_| RealtimeMediaError::Internal)?;
+    registry.reset_decoder(endpoint_id)
 }
 
 pub(crate) fn pop_endpoint(

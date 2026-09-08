@@ -14,6 +14,11 @@ No runtime pointer, raw/encoded frame, `Uint8List` media API, or Surface handle
 is exposed. Hardware encoder/decoder unavailability is reported as a typed
 failure; there is no software or alternate-codec fallback.
 
+Generation-bound owner tokens also carry payload-free `requestKeyframe` and
+`resetDecoder` recovery commands. Kotlin/JNI and the native runtime validate
+the token before scheduling codec recovery; hardware/RTCP actuation and device
+E2E remain acceptance gates.
+
 ## Current Phase 4 boundary
 
 The package implements the deterministic MediaProjection/MediaCodec/Texture
