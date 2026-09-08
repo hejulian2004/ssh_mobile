@@ -289,6 +289,45 @@ fn screen_video_stats_report_rtp_loss_recovery_and_jitter_without_payloads() {
 }
 
 #[test]
+fn connection_loss_resets_rtp_ordering_without_erasing_bounded_counters() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+    let mut first_packetizer = RtpPacketizer::new(96, 102, SCREEN_SSRC, 10);
+    let first = first_packetizer
+        .packetize(&access_unit(20, 120_000))
+        .expect("first frame packetizes");
+    for packet in &first {
+        peer.receive_h264_screen_video_rtp(packet, now)
+            .expect("first frame accepted");
+    }
+    assert!(peer.pop_remote_h264_screen_video(now).is_some());
+
+    peer.on_connection_lost();
+
+    let mut replacement_packetizer = RtpPacketizer::new(96, 102, SCREEN_SSRC, 30_000);
+    let replacement = replacement_packetizer
+        .packetize(&access_unit(21, 126_000))
+        .expect("replacement frame packetizes");
+    for packet in &replacement {
+        peer.receive_h264_screen_video_rtp(packet, now)
+            .expect("replacement frame accepted");
+    }
+    assert!(peer.pop_remote_h264_screen_video(now).is_some());
+
+    let stats = peer
+        .h264_screen_video_stats(MediaDirection::Recvonly)
+        .expect("native stats");
+    assert_eq!(
+        stats.packets_received as usize,
+        first.len() + replacement.len()
+    );
+    assert_eq!(stats.packets_lost, 0);
+    assert_eq!(stats.frames_recovered, 1);
+}
+
+#[test]
 fn mismatched_screen_ssrc_is_ignored_after_track_binding() {
     let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
     peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
