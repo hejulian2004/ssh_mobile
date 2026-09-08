@@ -85,7 +85,6 @@ pub enum RealtimeSignalKind {
     IceCandidate = 3,
     IceRestart = 4,
     Close = 5,
-    ScreenShareConsent = 6,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]

@@ -731,6 +731,32 @@ impl RelayControlClient {
         revision: u64,
         payload: &[u8],
     ) -> Result<(), RelayError> {
+        self.signal_webrtc_wire_kind(
+            realtime_id,
+            target_device_id,
+            kind as i32,
+            revision,
+            payload,
+        )
+        .await
+    }
+
+    /// Sends a WebRTC signaling frame using its raw Relay V2 wire kind.
+    ///
+    /// Relay V2's protobuf descriptor is intentionally frozen.  New
+    /// Network-V2 signal kinds can therefore be forwarded as unknown numeric
+    /// enum values without changing the Relay schema or its generated
+    /// bindings.  Existing callers should prefer [`Self::signal_webrtc`]; this
+    /// escape hatch is reserved for forward-compatible signal kinds such as
+    /// screen-share consent.
+    pub async fn signal_webrtc_wire_kind(
+        &self,
+        realtime_id: &str,
+        target_device_id: &str,
+        kind: i32,
+        revision: u64,
+        payload: &[u8],
+    ) -> Result<(), RelayError> {
         if realtime_id.is_empty() || realtime_id.len() > MAX_REALTIME_ID_BYTES {
             return Err(RelayError::InvalidConfiguration(
                 "realtime_id must contain 1-128 characters".into(),

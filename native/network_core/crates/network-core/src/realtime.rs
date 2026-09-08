@@ -1635,7 +1635,7 @@ async fn send_signal(
     }
     let kind = to_v2_signal_kind(signal.kind);
     control
-        .signal_webrtc(
+        .signal_webrtc_wire_kind(
             &signal.realtime_id,
             &signal.peer_id,
             kind,
@@ -1653,16 +1653,20 @@ async fn send_signal(
         })
 }
 
-/// network-protocol 的 WebRTC 信号类型 → v2 控制面 wire 类型（值一一对应）。
-fn to_v2_signal_kind(kind: RealtimeSignalKind) -> V2RealtimeSignalKind {
+/// Maps a network-protocol WebRTC signal to its frozen Relay V2 wire number.
+///
+/// Screen-share consent is defined by Network V2, while Relay V2's descriptor
+/// remains frozen.  Its value (6) is intentionally sent as an unknown enum
+/// number and forwarded transparently by the Relay control plane.
+fn to_v2_signal_kind(kind: RealtimeSignalKind) -> i32 {
     match kind {
-        RealtimeSignalKind::WebRtcOffer => V2RealtimeSignalKind::Offer,
-        RealtimeSignalKind::WebRtcAnswer => V2RealtimeSignalKind::Answer,
-        RealtimeSignalKind::IceCandidate => V2RealtimeSignalKind::IceCandidate,
-        RealtimeSignalKind::IceRestart => V2RealtimeSignalKind::IceRestart,
-        RealtimeSignalKind::WebRtcClose => V2RealtimeSignalKind::Close,
-        RealtimeSignalKind::ScreenShareConsent => V2RealtimeSignalKind::ScreenShareConsent,
-        RealtimeSignalKind::Unspecified => V2RealtimeSignalKind::Unspecified,
+        RealtimeSignalKind::WebRtcOffer => V2RealtimeSignalKind::Offer as i32,
+        RealtimeSignalKind::WebRtcAnswer => V2RealtimeSignalKind::Answer as i32,
+        RealtimeSignalKind::IceCandidate => V2RealtimeSignalKind::IceCandidate as i32,
+        RealtimeSignalKind::IceRestart => V2RealtimeSignalKind::IceRestart as i32,
+        RealtimeSignalKind::WebRtcClose => V2RealtimeSignalKind::Close as i32,
+        RealtimeSignalKind::ScreenShareConsent => 6,
+        RealtimeSignalKind::Unspecified => V2RealtimeSignalKind::Unspecified as i32,
     }
 }
 

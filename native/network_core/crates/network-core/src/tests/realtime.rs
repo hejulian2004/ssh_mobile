@@ -1593,8 +1593,13 @@ fn realtime_signal_kind_mapping_and_owner_errors_are_explicit() {
         ),
         (RealtimeSignalKind::WebRtcClose, V2RealtimeSignalKind::Close),
     ] {
-        assert_eq!(to_v2_signal_kind(native), v2);
+        assert_eq!(to_v2_signal_kind(native), v2 as i32);
     }
+    assert_eq!(
+        to_v2_signal_kind(RealtimeSignalKind::ScreenShareConsent),
+        6,
+        "Network V2 consent uses a forward-compatible Relay wire kind"
+    );
 
     let mut empty = RealtimeSession {
         peer_id: "peer-a".into(),
@@ -2355,7 +2360,7 @@ fn realtime_validation_and_wire_kind_mapping_cover_all_signal_boundaries() {
         ),
         (RealtimeSignalKind::WebRtcClose, V2RealtimeSignalKind::Close),
     ] {
-        assert_eq!(to_v2_signal_kind(kind), expected);
+        assert_eq!(to_v2_signal_kind(kind), expected as i32);
     }
 }
 
