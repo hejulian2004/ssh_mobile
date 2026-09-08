@@ -1,10 +1,10 @@
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 # realtime_media
 
 `realtime_media` owns the Dart lifecycle contract for an opaque native screen-media endpoint. It is infrastructure: it does not own `NetworkRuntime`, a WebRTC peer, signaling, a network socket, capture, encoding, decoding, or renderer implementation.
 
-The public API contains only endpoint/session identity, lifecycle, capture-source selection metadata, a renderer capability, and payload-free statistics. Statistics are requested as a low-frequency `readStats` snapshot, never a media stream. Raw or encoded frames never cross this package's Dart API. Native platform adapters introduced by later phases own capture/codec/surface resources and use the native bridge directly.
+The public API contains only endpoint/session identity, lifecycle, capture-source selection metadata, a renderer capability, and payload-free statistics. Statistics are requested as a low-frequency `readStats` snapshot, never a media stream; the bounded QoS counters and adaptation decision are metadata only. Raw or encoded frames never cross this package's Dart API. Native platform adapters introduced by later phases own capture/codec/surface resources and use the native bridge directly.
 
 ## Ownership and release
 

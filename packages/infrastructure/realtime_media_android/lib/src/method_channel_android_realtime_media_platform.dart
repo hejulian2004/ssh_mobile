@@ -110,6 +110,15 @@ final class MethodChannelAndroidRealtimeMediaPlatform
       framesDropped: _nonNegativeInt(result['frames_dropped']),
       framesDecoded: _nonNegativeInt(result['frames_decoded']),
       framesRendered: _nonNegativeInt(result['frames_rendered']),
+      packetsSent: _nonNegativeInt(result['packets_sent']),
+      packetsReceived: _nonNegativeInt(result['packets_received']),
+      packetsLost: _nonNegativeInt(result['packets_lost']),
+      framesRecovered: _nonNegativeInt(result['frames_recovered']),
+      keyframeRequests: _nonNegativeInt(result['keyframe_requests']),
+      jitterMs: _nonNegativeInt(result['jitter_ms']),
+      rttMs: _nonNegativeInt(result['rtt_ms']),
+      queueDepth: _boundedQueueDepth(result['queue_depth']),
+      queueCapacity: _queueCapacity(result['queue_capacity']),
     );
   }
 
@@ -175,6 +184,29 @@ final class MethodChannelAndroidRealtimeMediaPlatform
   static int _nonNegativeInt(Object? value) {
     if (value is! num || !value.isFinite || value < 0) return 0;
     return value.toInt();
+  }
+
+  static int _boundedQueueDepth(Object? value) {
+    if (value == null) return 0;
+    final depth = _nonNegativeInt(value);
+    if (depth > 3) {
+      throw const RealtimeMediaException(
+        RealtimeMediaErrorCode.backendFailure,
+        'Android media queue exceeded the fixed three-frame bound.',
+      );
+    }
+    return depth;
+  }
+
+  static int _queueCapacity(Object? value) {
+    if (value == null) return 3;
+    if (_nonNegativeInt(value) != 3) {
+      throw const RealtimeMediaException(
+        RealtimeMediaErrorCode.backendFailure,
+        'Android media queue capacity violated the fixed three-frame bound.',
+      );
+    }
+    return 3;
   }
 
   static int? _positiveInt(Object? value) {

@@ -235,6 +235,18 @@ internal class AndroidMediaOwner(
             "frames_dropped" to framesDropped,
             "frames_decoded" to framesDecoded,
             "frames_rendered" to framesRendered,
+            // Packet-level counters are owned by the shared native media
+            // bridge. Keep this bounded snapshot shape stable until Android
+            // transport statistics are wired into the owner.
+            "packets_sent" to 0L,
+            "packets_received" to 0L,
+            "packets_lost" to 0L,
+            "frames_recovered" to 0L,
+            "keyframe_requests" to 0L,
+            "jitter_ms" to 0L,
+            "rtt_ms" to 0L,
+            "queue_depth" to 0L,
+            "queue_capacity" to 3L,
         )
     }
 

@@ -159,6 +159,18 @@ flutter::EncodableMap StatsMap(const CaptureStats& stats,
        flutter::EncodableValue(static_cast<int64_t>(frames_decoded))},
       {flutter::EncodableValue("frames_rendered"),
        flutter::EncodableValue(static_cast<int64_t>(frames_rendered))},
+      // Packet-level QoS counters are populated by the shared native media
+      // owner in later platform wiring. Keep the method-channel shape stable
+      // now and report bounded zero values until that owner is attached.
+      {flutter::EncodableValue("packets_sent"), flutter::EncodableValue(0)},
+      {flutter::EncodableValue("packets_received"), flutter::EncodableValue(0)},
+      {flutter::EncodableValue("packets_lost"), flutter::EncodableValue(0)},
+      {flutter::EncodableValue("frames_recovered"), flutter::EncodableValue(0)},
+      {flutter::EncodableValue("keyframe_requests"), flutter::EncodableValue(0)},
+      {flutter::EncodableValue("jitter_ms"), flutter::EncodableValue(0)},
+      {flutter::EncodableValue("rtt_ms"), flutter::EncodableValue(0)},
+      {flutter::EncodableValue("queue_depth"), flutter::EncodableValue(0)},
+      {flutter::EncodableValue("queue_capacity"), flutter::EncodableValue(3)},
   };
 }
 
