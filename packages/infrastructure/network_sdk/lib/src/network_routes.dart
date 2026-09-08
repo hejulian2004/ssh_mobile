@@ -18,6 +18,9 @@ abstract final class RelayBootstrapRoutes {
   /// 设备凭据刷新端点路径。
   static const String refreshV2 = '/v2/devices/refresh';
 
+  /// Device-authenticated, short-lived TURN REST credential endpoint.
+  static const String turnCredentialsV2 = '/v2/turn/credentials';
+
   /// 构造设备凭据刷新签名的 canonical transcript。
   static String buildRefreshTranscript(int timestamp, String nonce) =>
       'POST\n$refreshV2\n$timestamp\n$nonce';
