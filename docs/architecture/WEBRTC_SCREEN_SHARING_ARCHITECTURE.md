@@ -127,7 +127,7 @@ pass.
 | Runtime media | Generic Realtime sessions remain media-neutral; the explicit screen-share integration configures one H.264 screen transceiver on the sole native peer. `RealtimeIoDriver` flushes/receives encoded RTP without DataChannel or event-stream media; a native-only C ABI pushes/pulls encoded access units by opaque endpoint ID | Platform-native capture/codec/render owners invoke that bridge before screen SDP negotiation in later phases |
 | QoS | A separate screen-video queue is fixed to three frames with keyframe-aware dropping; generic MediaFrame's four-frame policy remains unchanged | Phase 7 adaptation and telemetry |
 | Dart video shape | `network_sdk` exposes only Realtime signaling/state; `realtime_media` exposes opaque endpoint/surface lifecycle with no per-frame Dart path | Concrete platform surface adapter lifecycle notifications |
-| Capture/rendering | Windows Graphics Capture, native H.264 send ingress, and the receive decoder/D3D11 texture owner are implemented but have no accepted hardware/E2E evidence | Windows and Android native capture, hardware codecs, and native surfaces |
+| Capture/rendering | Windows Graphics Capture, native H.264 send ingress, receive decoder/D3D11 texture owner, and the Android MediaProjection/MediaCodec/SurfaceTexture owner are implemented but have no accepted hardware/E2E evidence | Windows and Android native capture, hardware codecs, and native surfaces |
 | Consent | Existing signaling has no screen-share business intent or user-accept gate | Typed, versioned screen-share consent payload and explicit accept/reject before answer |
 | TURN | Runtime configuration may hold development credentials in memory | Authenticated, short-lived, per-session production credentials |
 | Recovery | Transport loss terminates Realtime and invalidates every bound native media endpoint before its peer closes | Same rule, with platform capture/decoder/surface cleanup in later phases |
@@ -147,7 +147,8 @@ later phase succeeds.
 | 1 | Implementation evidence accepted with PR #67; no separate screen-share PR | Native H.264-only RTP ingress/egress, exact three-frame queue, bounded frame validation, terminal media discard tests, local loopback, and relay-only coturn H.264 coverage |
 | 2 | Accepted in PR #67 and merged to `main` | Runtime/realtime-generation-bound opaque endpoint leases, native-only FFI create/release/H.264 push/pull controls, Dart lifecycle contract/fake tests, and no per-frame Dart API |
 | 3 | In progress: boundary, Windows capture lifecycle, H.264 ingress, and decoder/texture implementation | Hardware availability, Windows E2E, and the complete Phase 3 acceptance matrix remain outstanding |
-| 4–7 | Not started | Remain subject to the planned acceptance matrix below |
+| 4 | In progress: Android MediaProjection/MediaCodec/SurfaceTexture owner implementation | Device permission/revocation, lifecycle interruption, hardware codec and cross-platform E2E acceptance remain outstanding |
+| 5–7 | Not started | Remain subject to the planned acceptance matrix below |
 
 ## Layer boundaries
 

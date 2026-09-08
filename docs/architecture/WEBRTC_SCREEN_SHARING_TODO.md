@@ -173,9 +173,15 @@ evidence。Windows Graphics Capture、Media Foundation hardware ingress/decode �
 
 ### Phase 4 — Android Capture / Codec / Render
 
-- [ ] MediaProjection 与 foreground service 合规。
-- [ ] Android MediaCodec H.264 encode/decode。
-- [ ] Flutter Texture、权限撤销 fail-closed 和 Android E2E 记录。
+- [x] Android platform owner boundary：`realtime_media_android` 只传递源/端点
+  身份、projection/lifecycle 命令、opaque surface ID 和无载荷统计；
+  MediaProjection、foreground service、MediaCodec、SurfaceTexture 与 JNI
+  owner-token bridge 保持 native/Kotlin-owned。
+- [x] MediaProjection/foreground-service、hardware-only MediaCodec H.264
+  encode/decode、Annex-B normalization 和 Phase 2 owner push/pull 已实现；
+  硬件不可用时返回 typed failure，不静默软件或 Dart bytes fallback。
+- [ ] Android 权限拒绝、projection revoke、旋转/后台、Surface 销毁、重复
+  start/stop 与 generation replacement 的设备/instrumentation/E2E 验收。
 
 ### Phase 5 — Consent / Feature Integration
 

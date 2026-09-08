@@ -1,0 +1,26 @@
+name: realtime_media_android
+description: Android-native lifecycle adapter for realtime screen media.
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: '>=3.12.0 <4.0.0'
+  flutter: '>=3.44.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  realtime_media:
+    path: ../realtime_media
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.hejulian.realtime_media_android
+        pluginClass: RealtimeMediaAndroidPlugin
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter

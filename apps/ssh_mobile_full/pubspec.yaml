@@ -52,6 +52,8 @@ dependencies:
     path: ../../packages/infrastructure/network_transport
   realtime_media:
     path: ../../packages/infrastructure/realtime_media
+  realtime_media_android:
+    path: ../../packages/infrastructure/realtime_media_android
   realtime_media_windows:
     path: ../../packages/infrastructure/realtime_media_windows
   ssh_core:
