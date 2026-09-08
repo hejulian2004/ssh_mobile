@@ -779,7 +779,7 @@ impl RelayControlClient {
                 request_id,
                 realtime_id: realtime_id.to_string(),
                 target_device_id: target_device_id.to_string(),
-                kind: kind as i32,
+                kind,
                 revision,
                 payload: payload.to_vec(),
             })),
