@@ -25,6 +25,7 @@ pub use realtime_media_owner::{
     ssh_net_realtime_media_owner_detach_renderer, ssh_net_realtime_media_owner_open,
     ssh_net_realtime_media_owner_pull_h264, ssh_net_realtime_media_owner_push_h264,
     ssh_net_realtime_media_owner_start, ssh_net_realtime_media_owner_stop,
+    ssh_net_realtime_media_owner_validate,
 };
 
 /// Numeric C ABI values for a one-way screen-media lease.

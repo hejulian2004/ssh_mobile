@@ -5,9 +5,9 @@ use crate::realtime_media::{
     ssh_net_realtime_media_owner_attach_renderer, ssh_net_realtime_media_owner_close,
     ssh_net_realtime_media_owner_detach_renderer, ssh_net_realtime_media_owner_open,
     ssh_net_realtime_media_owner_push_h264, ssh_net_realtime_media_owner_start,
-    ssh_net_realtime_media_owner_stop, SshNetRealtimeMediaFrameMetadata,
-    SSH_NET_REALTIME_MEDIA_DIRECTION_RECEIVE, SSH_NET_REALTIME_MEDIA_DIRECTION_SEND,
-    SSH_NET_REALTIME_MEDIA_STATUS_STALE_ENDPOINT,
+    ssh_net_realtime_media_owner_stop, ssh_net_realtime_media_owner_validate,
+    SshNetRealtimeMediaFrameMetadata, SSH_NET_REALTIME_MEDIA_DIRECTION_RECEIVE,
+    SSH_NET_REALTIME_MEDIA_DIRECTION_SEND, SSH_NET_REALTIME_MEDIA_STATUS_STALE_ENDPOINT,
 };
 use crate::{
     ssh_net_buffer_free, ssh_net_runtime_create, ssh_net_runtime_destroy, ssh_net_runtime_start,
@@ -106,6 +106,7 @@ fn media_endpoint_ffi_success_path_round_trips_native_h264_and_releases_cleanly(
     );
     assert_ne!(owner, 0);
     assert_eq!(ssh_net_realtime_media_owner_start(owner), 0);
+    assert_eq!(ssh_net_realtime_media_owner_validate(owner), 0);
     let mut duplicate_owner = 99_u64;
     assert_eq!(
         unsafe {

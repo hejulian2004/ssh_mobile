@@ -205,6 +205,19 @@ pub extern "C" fn ssh_net_realtime_media_owner_stop(owner: u64) -> i32 {
     })
 }
 
+/// Validates an owner token without changing its started/renderer state.
+///
+/// Platform adapters use this low-frequency guard before reporting metadata
+/// or source status. Keeping validation separate from `owner_start` prevents a
+/// stats poll from accidentally reviving a stopped capture worker.
+#[no_mangle]
+pub extern "C" fn ssh_net_realtime_media_owner_validate(owner: u64) -> i32 {
+    owner_with_binding(owner, |binding| {
+        validate_owner(binding)?;
+        Ok(0)
+    })
+}
+
 /// Attaches a native renderer capability to a receive owner.
 #[no_mangle]
 pub extern "C" fn ssh_net_realtime_media_owner_attach_renderer(owner: u64) -> i32 {

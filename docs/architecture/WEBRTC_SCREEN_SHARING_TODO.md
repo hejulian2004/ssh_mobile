@@ -1,4 +1,4 @@
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 # WebRTC Screen Share TODO
 
@@ -57,13 +57,19 @@ ADR-034 或原始技术架构文档。
   Dart；owner registry 保存完整 identity 并在 runtime destroy 前失效；每次
   native push/pull 也会重新校验 endpoint identity，旧 generation 的 late
   callback fail closed。
-- [ ] Phase 3 hardware pipeline gate：Windows Graphics Capture、Media Foundation
+- [x] Phase 3.1 native capture lifecycle implementation：Windows Graphics Capture
+  已在 `realtime_media_windows` native owner 中实现 monitor/window source 枚举、
+  generation-bound start/stop/release、FrameArrived native buffer ownership、
+  source close、resolution change frame-pool recreate 和 payload-free stats；
+  C++17/W4 编译通过，Windows 实机与完整 Phase 3 PR 验收仍未完成。
+- [ ] Phase 3 hardware pipeline gate：Media Foundation
   H.264 worker、GPU decoder/Texture 和 Windows 双端 E2E 尚未完成；当前 plugin
-  对缺失 capability 只返回 typed failure，不报告虚假的成功。
+  对缺失 codec/renderer capability 只返回 typed failure，不报告虚假的成功。
 
 当前状态：Phase 0、Phase 1、Phase 2 的实现、exact-head CI 证据和 PR #67
-接受记录已齐；Phase 3 当前已进入 Windows boundary implementation。Phase 3
-的 capture/codec/render 与 Phase 4–7 仍不得描述为已交付能力。
+接受记录已齐；Phase 3.1 的 Windows Graphics Capture lifecycle implementation
+已落地并完成本地 C++/Rust 复核，但 Phase 3 尚未接受。Hardware codec、GPU
+decoder/Texture、Windows 双端 E2E 与 Phase 4–7 仍不得描述为已交付能力。
 
 ## PR #67 评审修正清单
 
@@ -137,17 +143,18 @@ ADR-034 或原始技术架构文档。
   可替换的 Windows platform owner 接口；缺失 native plugin 时 fail closed。
 - [x] 增加 runtime-owned native owner token port；owner close 与 endpoint release
   保持分离，generation/stale endpoint 校验仍由既有 native registry 负责。
-- [ ] Windows monitor/window capture。
+- [x] Windows monitor/window capture lifecycle owner（平台实机/E2E 验收待完成）。
 - [ ] Hardware H.264 encode/decode。
 - [ ] GPU surface 与 Flutter Texture 链路。
 - [ ] raw frames 不经过 Dart；完成 Windows 专属 analyze/test 和手工 E2E 记录。
 
-本轮 Phase 3 boundary 验证（2026-09-07）：`network-ffi` 23 tests passed；
+本轮 Phase 3 boundary/capture 验证（2026-09-08）：`network-ffi` 23 tests passed；
 `network-core` realtime-media focused tests 7 passed；`realtime_media` 与
 `realtime_media_windows` focused tests 32 passed；`network_transport` focused
 tests 16 passed；`ssh_mobile_network_native` native-asset tests 22 passed。
-Dart analyzer 无 error，Rust format/clippy、module/resource/architecture checks
-和 Windows plugin C++17 syntax compile 均通过。Flutter wrapper test 在当前离线
+Dart analyzer 无 error，Rust format、module/resource/architecture checks 和
+Windows plugin 两个 C++17/W4 translation units compile 均通过。Flutter wrapper
+test/analyzer 在当前离线
 环境无法完成 native-asset/pub advisory 阶段，因此不作为 Phase 3 acceptance
 evidence。Windows Graphics Capture、Media Foundation worker、GPU decoder/
 Texture 和 Windows 双端 E2E 仍未通过，PR #68 继续保持 draft。

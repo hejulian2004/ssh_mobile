@@ -116,6 +116,65 @@ void main() {
     expect(platform.operations, <String>['stats:1']);
   });
 
+  test('enumerates bounded display and window metadata without payloads', () async {
+    platform.sources = <ScreenCaptureSource>[
+      ScreenCaptureSource(
+        id: ScreenCaptureSourceId('display:1'),
+        kind: ScreenCaptureSourceKind.display,
+        label: 'Primary display',
+        width: 1920,
+        height: 1080,
+      ),
+      ScreenCaptureSource(
+        id: ScreenCaptureSourceId('window:1'),
+        kind: ScreenCaptureSourceKind.window,
+        label: 'Terminal',
+        width: 1280,
+        height: 720,
+      ),
+    ];
+
+    final sources = await backend.listCaptureSources();
+
+    expect(sources, hasLength(2));
+    expect(sources.map((source) => source.kind), <ScreenCaptureSourceKind>[
+      ScreenCaptureSourceKind.display,
+      ScreenCaptureSourceKind.window,
+    ]);
+    expect(sources.singleWhere((source) => source.id.value == 'display:1').width,
+        1920);
+    expect(platform.operations, isEmpty);
+  });
+
+  test('source disappearance is typed and remains releasable', () async {
+    platform.failure = const RealtimeMediaException(
+      RealtimeMediaErrorCode.captureSourceEnded,
+      'window closed while capture was starting',
+    );
+    final endpoint = await backend.start(identity);
+
+    await expectLater(
+      backend.attachCaptureSource(
+        endpointId: endpoint,
+        identity: identity,
+        source: ScreenCaptureSource(
+          id: ScreenCaptureSourceId('window:closed'),
+          kind: ScreenCaptureSourceKind.window,
+        ),
+      ),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.captureSourceEnded,
+        ),
+      ),
+    );
+
+    await backend.release(endpointId: endpoint, identity: identity);
+    expect(endpointBackend.operations.last, 'release:1');
+  });
+
   test('retains the owner token when endpoint release is retryable', () async {
     endpointBackend.releaseFailure = const RealtimeMediaException(
       RealtimeMediaErrorCode.driverUnavailable,
@@ -305,9 +364,10 @@ final class RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
   final List<String> operations = <String>[];
   RealtimeMediaException? failure;
   RealtimeMediaStats stats = const RealtimeMediaStats();
+  List<ScreenCaptureSource> sources = const <ScreenCaptureSource>[];
 
   @override
-  Future<List<ScreenCaptureSource>> listCaptureSources() async => const [];
+  Future<List<ScreenCaptureSource>> listCaptureSources() async => sources;
 
   @override
   Future<void> startCapture({
