@@ -527,12 +527,14 @@ the actual hardware mutation and the queue never grows beyond three frames:
 | Ten seconds healthy with loss below 2 percent, RTT below 150 ms, and healthy queues | Recover one level only |
 
 Statistics update outside the blocking media hot path. The current native owner
-bridge exports fixed-width enqueue/dequeue/drop, keyframe-request, and bounded
-queue depth/capacity counters into the low-frequency `RealtimeMediaStats`
-snapshot; packet transport, RTT, and jitter counters remain platform-gated.
-The planned aggregate fields include capture, encode, sent, decode, and render
-FPS; resolution; target and actual bitrate; RTT, jitter, loss; frame and
-keyframe counters; codec; and selected ICE path.
+bridge exports fixed-width enqueue/dequeue/drop, packet sent/received/lost,
+recovered-frame, keyframe-request, jitter, and bounded queue depth/capacity
+counters into the low-frequency `RealtimeMediaStats` snapshot. RTT remains
+platform-gated until the rtc integration exposes an authoritative RTCP/ICE
+source; it is never synthesized from media arrival timing. The planned
+aggregate fields include capture, encode, sent, decode, and render FPS;
+resolution; target and actual bitrate; RTT, jitter, loss; frame and keyframe
+counters; codec; and selected ICE path.
 
 Telemetry work follows ADR-033 and its contract source. It may emit outcome,
 duration, metric buckets, codec, ICE path, and error category. It may not emit

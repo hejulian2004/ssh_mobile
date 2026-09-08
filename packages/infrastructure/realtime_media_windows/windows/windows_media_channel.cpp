@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <cstdlib>
+#include <limits>
 
 namespace realtime_media_windows {
 namespace {
@@ -13,6 +14,11 @@ constexpr char kDecoderUnavailable[] = "decoder_unavailable";
 constexpr char kDecoderFailed[] = "decoder_failed";
 constexpr char kEncoderUnavailable[] = "encoder_unavailable";
 constexpr char kEncoderFailed[] = "encoder_failed";
+
+int64_t BoundedInt64(uint64_t value) {
+  constexpr auto kMax = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  return static_cast<int64_t>(value > kMax ? kMax : value);
+}
 
 }  // namespace
 
@@ -164,26 +170,29 @@ flutter::EncodableMap StatsMap(const CaptureStats& stats,
       {flutter::EncodableValue("width"), flutter::EncodableValue(width)},
       {flutter::EncodableValue("height"), flutter::EncodableValue(height)},
       {flutter::EncodableValue("frames_captured"),
-       flutter::EncodableValue(static_cast<int64_t>(stats.frames_captured))},
+       flutter::EncodableValue(BoundedInt64(stats.frames_captured))},
       {flutter::EncodableValue("frames_sent"),
-       flutter::EncodableValue(static_cast<int64_t>(stats.frames_sent))},
+       flutter::EncodableValue(BoundedInt64(stats.frames_sent))},
       {flutter::EncodableValue("frames_dropped"),
-       flutter::EncodableValue(static_cast<int64_t>(frames_dropped))},
+       flutter::EncodableValue(BoundedInt64(frames_dropped))},
       {flutter::EncodableValue("frames_decoded"),
-       flutter::EncodableValue(static_cast<int64_t>(frames_decoded))},
+       flutter::EncodableValue(BoundedInt64(frames_decoded))},
       {flutter::EncodableValue("frames_rendered"),
-       flutter::EncodableValue(static_cast<int64_t>(frames_rendered))},
-      // Packet-level transport counters remain owned by the shared WebRTC
-      // owner and are not yet exposed here. Keep the method-channel shape
-      // stable while reporting bounded zero values for those fields.
-      {flutter::EncodableValue("packets_sent"), flutter::EncodableValue(0)},
-      {flutter::EncodableValue("packets_received"), flutter::EncodableValue(0)},
-      {flutter::EncodableValue("packets_lost"), flutter::EncodableValue(0)},
-      {flutter::EncodableValue("frames_recovered"), flutter::EncodableValue(0)},
+       flutter::EncodableValue(BoundedInt64(frames_rendered))},
+      {flutter::EncodableValue("packets_sent"),
+       flutter::EncodableValue(BoundedInt64(native == nullptr ? 0 : native->packets_sent))},
+      {flutter::EncodableValue("packets_received"),
+       flutter::EncodableValue(BoundedInt64(native == nullptr ? 0 : native->packets_received))},
+      {flutter::EncodableValue("packets_lost"),
+       flutter::EncodableValue(BoundedInt64(native == nullptr ? 0 : native->packets_lost))},
+      {flutter::EncodableValue("frames_recovered"),
+       flutter::EncodableValue(BoundedInt64(native == nullptr ? 0 : native->frames_recovered))},
       {flutter::EncodableValue("keyframe_requests"),
-       flutter::EncodableValue(static_cast<int64_t>(keyframe_requests))},
-      {flutter::EncodableValue("jitter_ms"), flutter::EncodableValue(0)},
-      {flutter::EncodableValue("rtt_ms"), flutter::EncodableValue(0)},
+       flutter::EncodableValue(BoundedInt64(keyframe_requests))},
+      {flutter::EncodableValue("jitter_ms"),
+       flutter::EncodableValue(BoundedInt64(native == nullptr ? 0 : native->jitter_ms))},
+      {flutter::EncodableValue("rtt_ms"),
+       flutter::EncodableValue(BoundedInt64(native == nullptr ? 0 : native->rtt_ms))},
       {flutter::EncodableValue("queue_depth"),
        flutter::EncodableValue(static_cast<int64_t>(queue_depth))},
       {flutter::EncodableValue("queue_capacity"),

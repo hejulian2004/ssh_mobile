@@ -335,17 +335,13 @@ internal class AndroidMediaOwner(
                 "frames_dropped" to (framesDropped + native.dropped),
                 "frames_decoded" to framesDecoded,
                 "frames_rendered" to framesRendered,
-                // Packet-level transport counters remain owned by the shared
-                // WebRTC owner. Queue and keyframe counters above are already
-                // sourced from that owner; these fields stay bounded at zero
-                // until packet telemetry is exposed by the native peer.
-                "packets_sent" to 0L,
-                "packets_received" to 0L,
-                "packets_lost" to 0L,
-                "frames_recovered" to 0L,
+                "packets_sent" to native.packetsSent,
+                "packets_received" to native.packetsReceived,
+                "packets_lost" to native.packetsLost,
+                "frames_recovered" to native.framesRecovered,
                 "keyframe_requests" to native.keyframeRequests,
-                "jitter_ms" to 0L,
-                "rtt_ms" to 0L,
+                "jitter_ms" to native.jitterMs,
+                "rtt_ms" to native.rttMs,
                 "queue_depth" to native.queueDepth,
                 "queue_capacity" to native.queueCapacity,
             ),

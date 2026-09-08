@@ -55,8 +55,11 @@ pub struct SshNetRealtimeMediaFrameMetadata {
 /// Bounded, payload-free native queue/recovery snapshot for one owner.
 ///
 /// Platform owners merge these counters with their local capture/decoder
-/// counters before returning the low-frequency Dart stats snapshot. The
-/// representation is intentionally fixed-width for the Windows/Android ABI.
+/// counters before returning the low-frequency Dart stats snapshot. Packet,
+/// loss, recovered-frame and jitter values are native RTP observations; RTT
+/// remains zero until the rtc integration supplies an authoritative source.
+/// The representation is intentionally fixed-width for the Windows/Android
+/// ABI.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct SshNetRealtimeMediaStats {
@@ -64,6 +67,12 @@ pub struct SshNetRealtimeMediaStats {
     pub dequeued: u64,
     pub dropped: u64,
     pub keyframe_requests: u64,
+    pub packets_sent: u64,
+    pub packets_received: u64,
+    pub packets_lost: u64,
+    pub frames_recovered: u64,
+    pub jitter_ms: u64,
+    pub rtt_ms: u64,
     pub queue_depth: u32,
     pub queue_capacity: u32,
 }

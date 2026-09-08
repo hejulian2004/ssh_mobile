@@ -26,12 +26,18 @@ pub struct H264ScreenVideoStats {
     pub dequeued: u64,
     pub dropped: u64,
     pub keyframe_requests: u64,
+    pub packets_sent: u64,
+    pub packets_received: u64,
+    pub packets_lost: u64,
+    pub frames_recovered: u64,
+    pub jitter_ms: u64,
+    pub rtt_ms: u64,
     pub queue_depth: u32,
     pub queue_capacity: u32,
 }
 
 impl H264ScreenVideoStats {
-    fn from_queue(queue: &VideoQueue) -> Self {
+    fn from_direction(video: &H264ScreenVideo, queue: &VideoQueue, send: bool) -> Self {
         let stats: VideoMediaStats = queue.stats();
         Self {
             enqueued: stats.enqueued,
@@ -42,6 +48,15 @@ impl H264ScreenVideoStats {
                 .saturating_add(stats.dropped_unsafe_delta)
                 .saturating_add(stats.dropped_on_disconnect),
             keyframe_requests: stats.keyframe_requests,
+            packets_sent: if send { video.packets_sent } else { 0 },
+            packets_received: if send { 0 } else { video.packets_received },
+            packets_lost: if send { 0 } else { video.packets_lost },
+            frames_recovered: if send { 0 } else { video.frames_recovered },
+            jitter_ms: if send { 0 } else { video.jitter_ms() },
+            // RTT is owned by the ICE/RTCP implementation. It remains zero
+            // until that native statistics source is exposed by the rtc
+            // integration; do not synthesize it from media arrival timing.
+            rtt_ms: 0,
             queue_depth: queue.len().min(SCREEN_VIDEO_QUEUE_CAPACITY) as u32,
             queue_capacity: SCREEN_VIDEO_QUEUE_CAPACITY as u32,
         }
@@ -102,6 +117,15 @@ pub(crate) struct H264ScreenVideo {
     inbound_receiver_id: Option<RTCRtpReceiverId>,
     inbound_media_ssrc: Option<u32>,
     adaptation_target: H264AdaptationTarget,
+    packets_sent: u64,
+    packets_received: u64,
+    packets_lost: u64,
+    frames_recovered: u64,
+    recovery_pending: bool,
+    last_inbound_sequence: Option<u16>,
+    last_inbound_timestamp: Option<u32>,
+    last_inbound_arrival: Option<Instant>,
+    jitter_rtp_units: u64,
 }
 
 impl H264ScreenVideo {
@@ -130,6 +154,15 @@ impl H264ScreenVideo {
                 height: 0,
                 reason: H264AdaptationReason::Steady,
             },
+            packets_sent: 0,
+            packets_received: 0,
+            packets_lost: 0,
+            frames_recovered: 0,
+            recovery_pending: false,
+            last_inbound_sequence: None,
+            last_inbound_timestamp: None,
+            last_inbound_arrival: None,
+            jitter_rtp_units: 0,
         }
     }
 
@@ -145,6 +178,72 @@ impl H264ScreenVideo {
         self.inbound_track_id = None;
         self.inbound_receiver_id = None;
         self.inbound_media_ssrc = None;
+        self.reset_inbound_timing();
+        self.recovery_pending = self.accepts_inbound;
+    }
+
+    fn observe_inbound_packet(&mut self, packet: &rtc::rtp::Packet, now: Instant) {
+        self.packets_received = self.packets_received.saturating_add(1);
+
+        if let Some(previous) = self.last_inbound_sequence {
+            let delta = packet.header.sequence_number.wrapping_sub(previous);
+            // A forward jump in the RTP sequence space represents one or more
+            // missing packets. Equal/backward values are duplicates or late
+            // reordering and must not inflate loss counters.
+            if delta > 0 && delta <= u16::MAX / 2 {
+                self.packets_lost = self
+                    .packets_lost
+                    .saturating_add(u64::from(delta.saturating_sub(1)));
+                self.last_inbound_sequence = Some(packet.header.sequence_number);
+            }
+        } else {
+            self.last_inbound_sequence = Some(packet.header.sequence_number);
+        }
+
+        if let (Some(previous_timestamp), Some(previous_arrival)) =
+            (self.last_inbound_timestamp, self.last_inbound_arrival)
+        {
+            let timestamp_delta = packet.header.timestamp.wrapping_sub(previous_timestamp);
+            if timestamp_delta > 0 && timestamp_delta <= u32::MAX / 2 {
+                let arrival_ticks = now
+                    .saturating_duration_since(previous_arrival)
+                    .as_nanos()
+                    .saturating_mul(90_000)
+                    / 1_000_000_000;
+                let arrival_ticks = arrival_ticks.min(u128::from(u64::MAX)) as u64;
+                let transit_delta = i128::from(arrival_ticks) - i128::from(timestamp_delta);
+                let absolute_delta = if transit_delta >= 0 {
+                    transit_delta as u64
+                } else {
+                    (-transit_delta) as u64
+                };
+                let jitter = self.jitter_rtp_units;
+                self.jitter_rtp_units =
+                    jitter.saturating_add(absolute_delta.saturating_sub(jitter) / 16);
+                self.last_inbound_timestamp = Some(packet.header.timestamp);
+                self.last_inbound_arrival = Some(now);
+            }
+        } else {
+            self.last_inbound_timestamp = Some(packet.header.timestamp);
+            self.last_inbound_arrival = Some(now);
+        }
+    }
+
+    fn mark_recovery_needed(&mut self) {
+        self.recovery_pending = true;
+        self.inbound
+            .request_keyframe(KeyframeRequestReason::PacketLoss);
+    }
+
+    fn reset_inbound_timing(&mut self) {
+        self.last_inbound_sequence = None;
+        self.last_inbound_timestamp = None;
+        self.last_inbound_arrival = None;
+        self.jitter_rtp_units = 0;
+    }
+
+    fn jitter_ms(&self) -> u64 {
+        self.jitter_rtp_units.saturating_mul(1_000) / 90_000
     }
 }
 
@@ -247,6 +346,9 @@ impl WebRtcPeer {
             for packet in packets {
                 sender.write_rtp(packet).map_err(rtc_error)?;
                 packet_count += 1;
+                if let Some(video) = self.screen_video.as_mut() {
+                    video.packets_sent = video.packets_sent.saturating_add(1);
+                }
             }
         }
         Ok(packet_count)
@@ -323,17 +425,28 @@ impl WebRtcPeer {
         } else {
             video.inbound_media_ssrc = Some(packet.header.ssrc);
         }
+        video.observe_inbound_packet(packet, now);
         match video.reassembler.push_at(packet, now) {
-            Ok(Some(frame)) => match video.inbound.enqueue(frame, now) {
-                Ok(_) => {}
-                Err(VideoFrameError::InvalidAccessUnit) => {
-                    video.reassembler.reset();
-                    video
-                        .inbound
-                        .request_keyframe(KeyframeRequestReason::PacketLoss);
+            Ok(Some(frame)) => {
+                let keyframe = frame.keyframe;
+                match video.inbound.enqueue(frame, now) {
+                    Ok(
+                        VideoEnqueueResult::Accepted
+                        | VideoEnqueueResult::AcceptedAfterDropping { .. },
+                    ) => {
+                        if video.recovery_pending && keyframe {
+                            video.frames_recovered = video.frames_recovered.saturating_add(1);
+                            video.recovery_pending = false;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(VideoFrameError::InvalidAccessUnit) => {
+                        video.reassembler.reset();
+                        video.mark_recovery_needed();
+                    }
+                    Err(error) => return Err(error.into()),
                 }
-                Err(error) => return Err(error.into()),
-            },
+            }
             Ok(None) => {}
             Err(
                 error @ (RtpMediaError::MalformedPayload
@@ -342,9 +455,7 @@ impl WebRtcPeer {
             ) => {
                 let _ = error;
                 video.reassembler.reset();
-                video
-                    .inbound
-                    .request_keyframe(KeyframeRequestReason::PacketLoss);
+                video.mark_recovery_needed();
             }
             Err(error) => return Err(error.into()),
         }
@@ -396,6 +507,8 @@ impl WebRtcPeer {
                     video.inbound_receiver_id = None;
                     video.inbound_media_ssrc = None;
                     video.reassembler.reset();
+                    video.reset_inbound_timing();
+                    video.recovery_pending = video.accepts_inbound;
                 }
             }
             _ => {}
@@ -428,11 +541,15 @@ impl WebRtcPeer {
             .as_ref()
             .ok_or(WebRtcError::ScreenVideoNotConfigured)?;
         let stats = match direction {
-            MediaDirection::Sendonly => H264ScreenVideoStats::from_queue(&video.outbound),
-            MediaDirection::Recvonly => H264ScreenVideoStats::from_queue(&video.inbound),
+            MediaDirection::Sendonly => {
+                H264ScreenVideoStats::from_direction(video, &video.outbound, true)
+            }
+            MediaDirection::Recvonly => {
+                H264ScreenVideoStats::from_direction(video, &video.inbound, false)
+            }
             MediaDirection::Sendrecv => {
-                let outbound = H264ScreenVideoStats::from_queue(&video.outbound);
-                let inbound = H264ScreenVideoStats::from_queue(&video.inbound);
+                let outbound = H264ScreenVideoStats::from_direction(video, &video.outbound, true);
+                let inbound = H264ScreenVideoStats::from_direction(video, &video.inbound, false);
                 H264ScreenVideoStats {
                     enqueued: outbound.enqueued.saturating_add(inbound.enqueued),
                     dequeued: outbound.dequeued.saturating_add(inbound.dequeued),
@@ -440,6 +557,12 @@ impl WebRtcPeer {
                     keyframe_requests: outbound
                         .keyframe_requests
                         .saturating_add(inbound.keyframe_requests),
+                    packets_sent: outbound.packets_sent,
+                    packets_received: inbound.packets_received,
+                    packets_lost: inbound.packets_lost,
+                    frames_recovered: inbound.frames_recovered,
+                    jitter_ms: outbound.jitter_ms.max(inbound.jitter_ms),
+                    rtt_ms: outbound.rtt_ms.max(inbound.rtt_ms),
                     queue_depth: outbound.queue_depth.saturating_add(inbound.queue_depth),
                     queue_capacity: (SCREEN_VIDEO_QUEUE_CAPACITY * 2) as u32,
                 }
@@ -455,6 +578,7 @@ impl WebRtcPeer {
             .ok_or(WebRtcError::ScreenVideoNotConfigured)?;
         video.reassembler.reset();
         video.inbound.on_decoder_reset();
+        video.recovery_pending = true;
         Ok(())
     }
 
@@ -579,11 +703,15 @@ impl WebRtcPeer {
             MediaDirection::Recvonly => {
                 video.inbound.clear();
                 video.reassembler.clear_for_endpoint_release();
+                video.reset_inbound_timing();
+                video.recovery_pending = false;
             }
             MediaDirection::Sendrecv => {
                 video.outbound.clear();
                 video.inbound.clear();
                 video.reassembler.clear_for_endpoint_release();
+                video.reset_inbound_timing();
+                video.recovery_pending = false;
             }
         }
         Ok(())

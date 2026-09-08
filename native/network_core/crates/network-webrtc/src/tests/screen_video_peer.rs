@@ -248,6 +248,47 @@ fn packet_loss_reorder_and_duplicate_are_media_local_recovery_events() {
 }
 
 #[test]
+fn screen_video_stats_report_rtp_loss_recovery_and_jitter_without_payloads() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+    let mut packetizer = RtpPacketizer::new(96, 102, SCREEN_SSRC, 100);
+
+    let first = packetizer
+        .packetize(&access_unit(10, 90_000))
+        .expect("first frame packetizes");
+    assert!(first.len() > 2, "test needs a multi-packet access unit");
+    for packet in first.iter().take(1).chain(first.iter().skip(2)) {
+        peer.receive_h264_screen_video_rtp(packet, now)
+            .expect("loss remains media-local");
+    }
+
+    let recovered = packetizer
+        .packetize(&access_unit(11, 96_000))
+        .expect("recovery frame packetizes");
+    for packet in &recovered {
+        peer.receive_h264_screen_video_rtp(packet, now)
+            .expect("recovery keyframe is accepted");
+    }
+    assert!(peer.pop_remote_h264_screen_video(now).is_some());
+
+    let stats = peer
+        .h264_screen_video_stats(MediaDirection::Recvonly)
+        .expect("native stats");
+    assert_eq!(
+        stats.packets_received as usize,
+        first.len() - 1 + recovered.len()
+    );
+    assert_eq!(stats.packets_lost, 1);
+    assert_eq!(stats.frames_recovered, 1);
+    assert_eq!(stats.keyframe_requests, 1);
+    assert!(stats.jitter_ms > 0, "timestamp/arrival skew is observable");
+    assert!(stats.queue_depth <= stats.queue_capacity);
+    assert_eq!(stats.queue_capacity, 3);
+}
+
+#[test]
 fn mismatched_screen_ssrc_is_ignored_after_track_binding() {
     let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
     peer.configure_h264_screen_video(MediaDirection::Recvonly, None)

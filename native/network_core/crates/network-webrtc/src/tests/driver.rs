@@ -340,6 +340,26 @@ async fn two_local_drivers_exchange_h264_frames_over_rtp() {
     assert_eq!(received.keyframe, input.keyframe);
     assert_eq!(received.payload, input.payload);
 
+    let caller_stats = caller
+        .lock()
+        .unwrap()
+        .peer_mut()
+        .h264_screen_video_stats(MediaDirection::Sendonly)
+        .expect("sender stats");
+    assert!(caller_stats.packets_sent > 0);
+    assert_eq!(caller_stats.packets_received, 0);
+    assert_eq!(caller_stats.queue_capacity, 3);
+    let responder_stats = responder
+        .lock()
+        .unwrap()
+        .peer_mut()
+        .h264_screen_video_stats(MediaDirection::Recvonly)
+        .expect("receiver stats");
+    assert!(responder_stats.packets_received > 0);
+    assert_eq!(responder_stats.packets_lost, 0);
+    assert_eq!(responder_stats.frames_recovered, 0);
+    assert!(responder_stats.jitter_ms <= 1_000);
+
     caller_task.abort();
     responder_task.abort();
     let _ = caller_task.await;

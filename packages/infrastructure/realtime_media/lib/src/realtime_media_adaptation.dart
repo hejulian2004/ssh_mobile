@@ -143,7 +143,7 @@ final class RealtimeMediaAdaptationController {
     final nominal = policy.decide(
       RealtimeMediaStats(width: stats.width, height: stats.height),
     );
-    if (nominal.width > 0 && _level == 0) {
+    if (nominal.width > 0 && (_level == 0 || _nominalWidth == 0)) {
       _nominalWidth = nominal.width;
       _nominalHeight = nominal.height;
     }
@@ -156,16 +156,19 @@ final class RealtimeMediaAdaptationController {
         : stats.packetsLost > 0
         ? 100
         : 0;
+    final queuePressure =
+        stats.queueCapacity > 0 && stats.queueDepth >= stats.queueCapacity;
     final congested =
         lossRatio >= 5 ||
         stats.jitterMs >= 80 ||
         stats.rttMs >= 250 ||
-        stats.queueDepth >= stats.queueCapacity;
+        queuePressure;
     final severe = lossRatio >= 10 || stats.rttMs >= 400;
     final healthy =
         lossRatio < 2 &&
         stats.jitterMs < 80 &&
         stats.rttMs < 150 &&
+        stats.queueCapacity > 0 &&
         stats.queueDepth < stats.queueCapacity;
 
     if (congested) {

@@ -18,6 +18,7 @@ use crate::{
 };
 use network_core::RealtimeMediaEndpointId;
 use network_webrtc::{EncodedVideoFrame, VideoCodec};
+use std::mem::{align_of, size_of};
 use std::ptr;
 use std::time::{Duration, Instant};
 
@@ -39,6 +40,12 @@ fn create_endpoint(handle: SshNetRuntimeHandle, generation: u64, direction: u32)
         )
     };
     (status, endpoint)
+}
+
+#[test]
+fn media_stats_abi_layout_stays_fixed_width_for_platform_bridges() {
+    assert_eq!(size_of::<SshNetRealtimeMediaStats>(), 88);
+    assert_eq!(align_of::<SshNetRealtimeMediaStats>(), 8);
 }
 
 #[test]
@@ -178,6 +185,12 @@ fn media_endpoint_ffi_success_path_round_trips_native_h264_and_releases_cleanly(
     assert_eq!(owner_stats.queue_depth, 1);
     assert_eq!(owner_stats.queue_capacity, 3);
     assert_eq!(owner_stats.keyframe_requests, 1);
+    assert_eq!(owner_stats.packets_sent, 0);
+    assert_eq!(owner_stats.packets_received, 0);
+    assert_eq!(owner_stats.packets_lost, 0);
+    assert_eq!(owner_stats.frames_recovered, 0);
+    assert_eq!(owner_stats.jitter_ms, 0);
+    assert_eq!(owner_stats.rtt_ms, 0);
 
     let malformed_payload = [0, 0, 0, 1];
     assert_eq!(

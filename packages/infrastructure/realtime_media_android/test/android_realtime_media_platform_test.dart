@@ -187,12 +187,12 @@ void main() {
         'frames_dropped': 2,
         'frames_decoded': 0,
         'frames_rendered': 0,
-        'packets_sent': 0,
-        'packets_received': 0,
-        'packets_lost': 0,
-        'frames_recovered': 0,
+        'packets_sent': 24,
+        'packets_received': 20,
+        'packets_lost': 2,
+        'frames_recovered': 1,
         'keyframe_requests': 3,
-        'jitter_ms': 0,
+        'jitter_ms': 7,
         'rtt_ms': 0,
         'queue_depth': 2,
         'queue_capacity': 3,
@@ -212,7 +212,12 @@ void main() {
     );
 
     expect(stats.framesDropped, 2);
+    expect(stats.packetsSent, 24);
+    expect(stats.packetsReceived, 20);
+    expect(stats.packetsLost, 2);
+    expect(stats.framesRecovered, 1);
     expect(stats.keyframeRequests, 3);
+    expect(stats.jitterMs, 7);
     expect(stats.queueDepth, 2);
     expect(stats.queueCapacity, 3);
   });

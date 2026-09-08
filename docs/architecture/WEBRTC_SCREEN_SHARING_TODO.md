@@ -318,9 +318,11 @@ evidence。Windows Graphics Capture、Media Foundation hardware ingress/decode �
   步进、loss/RTT 严重拥塞 720p10 和 10 秒健康单档恢复；适配命令仍不改变
   native 三帧队列，平台硬件/设备 E2E 仍待验收。
 - [x] Phase 7 native stats bridge（2026-09-08）：`owner_read_stats` 以固定宽度
-  C ABI 返回 queue depth/capacity、enqueue/dequeue/drop 和 keyframe 计数，
-  Windows/Android owner 将其合并进低频 `RealtimeMediaStats`；Rust FFI/live
-  endpoint tests 和 Dart adapter analyzer 通过，平台编译/设备 E2E 仍待验收。
+  C ABI 返回 queue depth/capacity、enqueue/dequeue/drop、packet sent/received/
+  lost、recovered-frame、jitter 和 keyframe 计数，Windows/Android owner 将其
+  合并进低频 `RealtimeMediaStats`；RTT 继续等待 rtc 的权威 RTCP/ICE 来源，
+  不从媒体到达时间伪造；Rust FFI/live endpoint、RTP loss/recovery 和 Dart
+  adapter tests/analyzer 通过，平台编译/设备 E2E 仍待验收。
 - [ ] 本轮新增的 realtime_media、Windows/Android method-channel stats tests：
   当前 Windows 主机的离线 workspace/native-asset 阶段无法启动 Dart test
   runner，未将其计入通过证据；CI 仍以 exact-head workflow 为准。

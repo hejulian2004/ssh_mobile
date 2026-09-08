@@ -174,4 +174,41 @@ void main() {
     expect(backwards.height, 1080);
     expect(backwards.reason, RealtimeMediaAdaptationReason.steady);
   });
+
+  test('controller learns dimensions after an early metadata-only sample', () {
+    final controller = RealtimeMediaAdaptationController();
+    final first = DateTime.utc(2026, 9, 8, 12);
+    const severeWithoutDimensions = RealtimeMediaStats(
+      packetsReceived: 100,
+      packetsLost: 10,
+      rttMs: 400,
+    );
+    controller.decide(severeWithoutDimensions, now: first);
+    final degraded = controller.decide(
+      severeWithoutDimensions,
+      now: first.add(const Duration(seconds: 3)),
+    );
+    expect(degraded.width, 1280);
+    expect(degraded.height, 720);
+
+    final dimensionsArrived = controller.decide(
+      const RealtimeMediaStats(
+        width: 1920,
+        height: 1080,
+        packetsReceived: 100,
+        packetsLost: 10,
+        rttMs: 400,
+      ),
+      now: first.add(const Duration(seconds: 4)),
+    );
+    expect(dimensionsArrived.width, 1280);
+    expect(dimensionsArrived.height, 720);
+
+    final healthy = controller.decide(
+      const RealtimeMediaStats(width: 1920, height: 1080, packetsReceived: 100),
+      now: first.add(const Duration(seconds: 14)),
+    );
+    expect(healthy.width, 1920);
+    expect(healthy.height, 1080);
+  });
 }

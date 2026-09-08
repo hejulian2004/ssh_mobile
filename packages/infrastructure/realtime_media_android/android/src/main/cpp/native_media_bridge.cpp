@@ -25,18 +25,30 @@ struct NativeMediaStats {
   uint64_t dequeued = 0;
   uint64_t dropped = 0;
   uint64_t keyframe_requests = 0;
+  uint64_t packets_sent = 0;
+  uint64_t packets_received = 0;
+  uint64_t packets_lost = 0;
+  uint64_t frames_recovered = 0;
+  uint64_t jitter_ms = 0;
+  uint64_t rtt_ms = 0;
   uint32_t queue_depth = 0;
   uint32_t queue_capacity = 3;
 };
 
-static_assert(sizeof(NativeMediaStats) == 40,
+static_assert(sizeof(NativeMediaStats) == 88,
               "NativeMediaStats must match the Rust C ABI");
 static_assert(offsetof(NativeMediaStats, enqueued) == 0);
 static_assert(offsetof(NativeMediaStats, dequeued) == 8);
 static_assert(offsetof(NativeMediaStats, dropped) == 16);
 static_assert(offsetof(NativeMediaStats, keyframe_requests) == 24);
-static_assert(offsetof(NativeMediaStats, queue_depth) == 32);
-static_assert(offsetof(NativeMediaStats, queue_capacity) == 36);
+static_assert(offsetof(NativeMediaStats, packets_sent) == 32);
+static_assert(offsetof(NativeMediaStats, packets_received) == 40);
+static_assert(offsetof(NativeMediaStats, packets_lost) == 48);
+static_assert(offsetof(NativeMediaStats, frames_recovered) == 56);
+static_assert(offsetof(NativeMediaStats, jitter_ms) == 64);
+static_assert(offsetof(NativeMediaStats, rtt_ms) == 72);
+static_assert(offsetof(NativeMediaStats, queue_depth) == 80);
+static_assert(offsetof(NativeMediaStats, queue_capacity) == 84);
 
 // Keep this layout locked to the Rust `#[repr(C)]` frame metadata. A mismatch
 // would corrupt every native push/pull call, so fail the platform build rather
@@ -141,6 +153,12 @@ jlongArray NewStats(JNIEnv* env, jint status, const NativeMediaStats& stats) {
       ToJlong(stats.dequeued),
       ToJlong(stats.dropped),
       ToJlong(stats.keyframe_requests),
+      ToJlong(stats.packets_sent),
+      ToJlong(stats.packets_received),
+      ToJlong(stats.packets_lost),
+      ToJlong(stats.frames_recovered),
+      ToJlong(stats.jitter_ms),
+      ToJlong(stats.rtt_ms),
       static_cast<jlong>(stats.queue_depth),
       static_cast<jlong>(stats.queue_capacity),
   };

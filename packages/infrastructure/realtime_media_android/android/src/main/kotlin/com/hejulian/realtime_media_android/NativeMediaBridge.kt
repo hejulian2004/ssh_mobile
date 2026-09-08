@@ -18,6 +18,12 @@ internal data class NativeMediaStats(
     val dequeued: Long,
     val dropped: Long,
     val keyframeRequests: Long,
+    val packetsSent: Long,
+    val packetsReceived: Long,
+    val packetsLost: Long,
+    val framesRecovered: Long,
+    val jitterMs: Long,
+    val rttMs: Long,
     val queueDepth: Int,
     val queueCapacity: Int,
 )
@@ -61,8 +67,22 @@ internal object NativeMediaBridge {
                 null
             }
         }
-        if (values == null || values.size < 7) {
-            return NativeMediaStats(STATUS_DRIVER_UNAVAILABLE, 0, 0, 0, 0, 0, 3)
+        if (values == null || values.size < 13) {
+            return NativeMediaStats(
+                status = STATUS_DRIVER_UNAVAILABLE,
+                enqueued = 0,
+                dequeued = 0,
+                dropped = 0,
+                keyframeRequests = 0,
+                packetsSent = 0,
+                packetsReceived = 0,
+                packetsLost = 0,
+                framesRecovered = 0,
+                jitterMs = 0,
+                rttMs = 0,
+                queueDepth = 0,
+                queueCapacity = 3,
+            )
         }
         return NativeMediaStats(
             status = values[0].coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
@@ -70,8 +90,14 @@ internal object NativeMediaBridge {
             dequeued = values[2].coerceAtLeast(0),
             dropped = values[3].coerceAtLeast(0),
             keyframeRequests = values[4].coerceAtLeast(0),
-            queueDepth = values[5].coerceIn(0, Int.MAX_VALUE.toLong()).toInt(),
-            queueCapacity = values[6].coerceIn(0, Int.MAX_VALUE.toLong()).toInt(),
+            packetsSent = values[5].coerceAtLeast(0),
+            packetsReceived = values[6].coerceAtLeast(0),
+            packetsLost = values[7].coerceAtLeast(0),
+            framesRecovered = values[8].coerceAtLeast(0),
+            jitterMs = values[9].coerceAtLeast(0),
+            rttMs = values[10].coerceAtLeast(0),
+            queueDepth = values[11].coerceIn(0, Int.MAX_VALUE.toLong()).toInt(),
+            queueCapacity = values[12].coerceIn(0, Int.MAX_VALUE.toLong()).toInt(),
         )
     }
 
