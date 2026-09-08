@@ -62,6 +62,7 @@ void main() {
       limiter.allow(first.add(const Duration(milliseconds: 999))),
       isFalse,
     );
+    expect(limiter.allow(first.subtract(const Duration(hours: 1))), isFalse);
     expect(limiter.allow(first.add(const Duration(seconds: 1))), isTrue);
   });
 

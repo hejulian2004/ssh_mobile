@@ -61,8 +61,12 @@ final class RealtimeMediaKeyframeRequestLimiter {
   DateTime? _lastRequest;
 
   bool allow([DateTime? now]) {
-    final current = now ?? DateTime.now();
     final last = _lastRequest;
+    final requested = now ?? DateTime.now();
+    // Host wall clocks can move backwards (NTP, suspend/resume). Treat a
+    // backwards sample as the last accepted instant so a clock correction
+    // cannot bypass the one-second recovery-request bound.
+    final current = last != null && requested.isBefore(last) ? last : requested;
     if (last != null && current.difference(last) < minimumInterval) {
       return false;
     }
