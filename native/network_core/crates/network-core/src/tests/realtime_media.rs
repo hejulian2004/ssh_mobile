@@ -1,6 +1,7 @@
 use super::*;
 use network_webrtc::{
-    EncodedVideoFrame, MediaDirection, RealtimeIoDriver, VideoCodec, WebRtcConfig, WebRtcPeer,
+    EncodedVideoFrame, H264AdaptationReason, H264AdaptationTarget, MediaDirection,
+    RealtimeIoDriver, VideoCodec, WebRtcConfig, WebRtcPeer,
 };
 use std::time::{Duration, Instant};
 
@@ -286,6 +287,55 @@ async fn endpoint_registry_routes_explicit_keyframe_and_decoder_recovery() {
             .take_h264_screen_video_keyframe_request(),
         Some(network_webrtc::KeyframeRequestReason::DecoderReset)
     );
+}
+
+#[tokio::test]
+async fn endpoint_registry_applies_bounded_sender_adaptation_only() {
+    let driver = test_driver().await;
+    let mut registry = RealtimeMediaRegistry::new();
+    let send = registry
+        .create(
+            REALTIME_ID,
+            PEER_ID,
+            RealtimeMediaDirection::Send,
+            1,
+            1,
+            &driver,
+        )
+        .expect("create send endpoint");
+    let receive = registry
+        .create(
+            REALTIME_ID,
+            PEER_ID,
+            RealtimeMediaDirection::Receive,
+            1,
+            1,
+            &driver,
+        )
+        .expect("create receive endpoint");
+    let target = H264AdaptationTarget {
+        bitrate_kbps: 1_536,
+        framerate: 7,
+        width: 1_280,
+        height: 720,
+        reason: H264AdaptationReason::Congestion,
+    };
+
+    registry
+        .apply_adaptation(send, target)
+        .expect("apply sender adaptation");
+    assert_eq!(
+        driver
+            .lock()
+            .expect("driver lock")
+            .peer_mut()
+            .h264_screen_video_adaptation(),
+        Some(target)
+    );
+    assert!(matches!(
+        registry.apply_adaptation(receive, target),
+        Err(RealtimeMediaError::DirectionMismatch)
+    ));
 }
 
 #[tokio::test]

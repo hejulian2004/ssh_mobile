@@ -30,6 +30,8 @@ NativeMediaApi NativeMediaApi::Resolve() {
       GetProcAddress(module, "ssh_net_realtime_media_owner_request_keyframe"));
   api.reset_decoder = reinterpret_cast<OwnerRecoveryFunction>(
       GetProcAddress(module, "ssh_net_realtime_media_owner_reset_decoder"));
+  api.apply_adaptation = reinterpret_cast<OwnerAdaptationFunction>(
+      GetProcAddress(module, "ssh_net_realtime_media_owner_apply_adaptation"));
   api.close_owner = reinterpret_cast<OwnerCloseFunction>(
       GetProcAddress(module, "ssh_net_realtime_media_owner_close"));
   api.attach_renderer = reinterpret_cast<OwnerRendererFunction>(

@@ -9,7 +9,13 @@ The public API contains only endpoint/session identity, lifecycle, capture-sourc
 The optional `RealtimeMediaKeyframeBackend` capability exposes generation-bound
 `requestKeyframe` and `resetDecoder` commands without carrying frame payloads.
 It is a recovery port only: platform owners and the native WebRTC peer retain
-the request, and codec/RTCP actuation plus hardware E2E remain phase gates.
+the request, and native owners may turn it into bounded codec/RTCP recovery.
+
+The optional `RealtimeMediaAdaptationBackend` capability carries one bounded
+bitrate/framerate/resolution decision to the native owner. The native owner
+applies bitrate and frame-rate changes without changing the fixed three-frame
+queue; a resolution change is an explicit stop/release/recreate operation.
+No frame payload or per-frame statistic is part of this capability.
 
 ## Ownership and release
 

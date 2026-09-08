@@ -36,6 +36,8 @@ static_assert(sizeof(NativeBuffer) == sizeof(void*) + sizeof(size_t),
               "NativeBuffer must match the Rust C ABI");
 
 using OwnerStatusFunction = int (*)(uint64_t);
+using OwnerAdaptationFunction = int (*)(uint64_t, uint32_t, uint32_t, uint32_t,
+                                        uint32_t, uint32_t);
 using PushFunction = int (*)(uint64_t, FrameMetadata, const uint8_t*, size_t);
 using PullFunction = int (*)(uint64_t, FrameMetadata*, NativeBuffer*);
 using BufferFreeFunction = void (*)(NativeBuffer);
@@ -66,6 +68,16 @@ Function Resolve(const char* name) {
 int ResolveOwnerStatus(const char* name, uint64_t owner) {
   const auto function = Resolve<OwnerStatusFunction>(name);
   return function == nullptr ? kDriverUnavailable : function(owner);
+}
+
+int ResolveOwnerAdaptation(uint64_t owner, uint32_t bitrate_kbps,
+                           uint32_t framerate, uint32_t width, uint32_t height,
+                           uint32_t reason) {
+  const auto function = Resolve<OwnerAdaptationFunction>(
+      "ssh_net_realtime_media_owner_apply_adaptation");
+  return function == nullptr
+             ? kDriverUnavailable
+             : function(owner, bitrate_kbps, framerate, width, height, reason);
 }
 
 jobject NewFrame(JNIEnv* env, jint status, const FrameMetadata& metadata,
@@ -142,6 +154,22 @@ Java_com_hejulian_realtime_1media_1android_NativeMediaBridge_nativeResetDecoder(
     JNIEnv*, jclass, jlong owner) {
   return ResolveOwnerStatus("ssh_net_realtime_media_owner_reset_decoder",
                            static_cast<uint64_t>(owner));
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_hejulian_realtime_1media_1android_NativeMediaBridge_nativeApplyAdaptation(
+    JNIEnv*, jclass, jlong owner, jint bitrate_kbps, jint framerate, jint width,
+    jint height, jint reason) {
+  if (owner <= 0 || bitrate_kbps < 0 || framerate < 0 || width < 0 ||
+      height < 0 || reason < 0) {
+    return -1;
+  }
+  return ResolveOwnerAdaptation(static_cast<uint64_t>(owner),
+                                static_cast<uint32_t>(bitrate_kbps),
+                                static_cast<uint32_t>(framerate),
+                                static_cast<uint32_t>(width),
+                                static_cast<uint32_t>(height),
+                                static_cast<uint32_t>(reason));
 }
 
 extern "C" JNIEXPORT jint JNICALL

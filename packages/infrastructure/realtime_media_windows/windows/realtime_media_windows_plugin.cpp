@@ -7,8 +7,11 @@
 #include <flutter/standard_method_codec.h>
 
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -41,6 +44,30 @@ constexpr char kDecoderUnavailable[] = "decoder_unavailable";
 constexpr char kEncoderUnavailable[] = "encoder_unavailable";
 constexpr char kEncoderFailed[] = "encoder_failed";
 constexpr char kDecoderFailed[] = "decoder_failed";
+
+std::optional<uint32_t> Uint32Argument(const EncodableMap& arguments,
+                                       const char* key) {
+  const auto it = arguments.find(EncodableValue(key));
+  if (it == arguments.end()) return std::nullopt;
+  if (const auto* value = std::get_if<int32_t>(&it->second)) {
+    return *value >= 0 ? std::optional<uint32_t>(*value) : std::nullopt;
+  }
+  if (const auto* value = std::get_if<int64_t>(&it->second)) {
+    return *value >= 0 &&
+                   static_cast<uint64_t>(*value) <= std::numeric_limits<uint32_t>::max()
+               ? std::optional<uint32_t>(static_cast<uint32_t>(*value))
+               : std::nullopt;
+  }
+  if (const auto* value = std::get_if<double>(&it->second)) {
+    if (!std::isfinite(*value) || *value < 0 ||
+        *value > std::numeric_limits<uint32_t>::max() ||
+        std::floor(*value) != *value) {
+      return std::nullopt;
+    }
+    return static_cast<uint32_t>(*value);
+  }
+  return std::nullopt;
+}
 
 class RealtimeMediaWindowsPlugin : public flutter::Plugin {
  public:
@@ -88,6 +115,8 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
       RequestKeyframe(*arguments, std::move(result));
     } else if (call.method_name() == "resetDecoder") {
       ResetDecoder(*arguments, std::move(result));
+    } else if (call.method_name() == "applyAdaptation") {
+      ApplyAdaptation(*arguments, std::move(result));
     } else {
       result->NotImplemented();
     }
@@ -396,8 +425,14 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
       const EncodableMap& arguments,
       std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
     const auto owner_id = OwnerIdArgument(arguments);
-    if (!owner_id) {
-      ReplyError(result, "invalid_argument", "A native owner token is required.");
+    const auto direction = StringArgument(arguments, "direction");
+    if (!owner_id || !direction) {
+      ReplyError(result, "invalid_argument",
+                 "A native owner token and media direction are required.");
+      return;
+    }
+    if (*direction != "send" && *direction != "receive") {
+      ReplyError(result, "invalid_argument", "The media direction is invalid.");
       return;
     }
     std::lock_guard<std::mutex> lock(mutex_);
@@ -409,8 +444,16 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
     const auto status = native_media_api_.request_keyframe(*owner_id);
     if (status != 0) {
       ReplyError(result, NativeStatusCode(status),
-                 "The native keyframe request failed.");
+                  "The native keyframe request failed.");
       return;
+    }
+    if (*direction == "send") {
+      const auto capture_status = capture_manager_.RequestKeyframe(*owner_id);
+      if (capture_status != CaptureStatus::kOk) {
+        ReplyError(result, CaptureStatusCode(capture_status),
+                   "The Windows hardware encoder could not request a keyframe.");
+        return;
+      }
     }
     result->Success();
   }
@@ -446,6 +489,60 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
     if (decoder_status != DecoderStatus::kOk) {
       ReplyError(result, DecoderStatusCode(decoder_status),
                  "The Windows H.264 decoder reset failed.");
+      return;
+    }
+    result->Success();
+  }
+
+  void ApplyAdaptation(
+      const EncodableMap& arguments,
+      std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
+    const auto owner_id = OwnerIdArgument(arguments);
+    const auto direction = StringArgument(arguments, "direction");
+    const auto bitrate = Uint32Argument(arguments, "bitrate_kbps");
+    const auto framerate = Uint32Argument(arguments, "framerate");
+    const auto width = Uint32Argument(arguments, "width");
+    const auto height = Uint32Argument(arguments, "height");
+    const auto reason = StringArgument(arguments, "reason");
+    if (!owner_id || !direction || !bitrate || !framerate || !width ||
+        !height || !reason) {
+      ReplyError(result, "invalid_argument",
+                 "A complete bounded adaptation target is required.");
+      return;
+    }
+    if (*direction != "send") {
+      ReplyError(result, "direction_mismatch",
+                 "Adaptation requires a send media owner.");
+      return;
+    }
+    uint32_t reason_value = 0;
+    if (*reason == "congestion") {
+      reason_value = 1;
+    } else if (*reason == "recovery") {
+      reason_value = 2;
+    } else if (*reason != "steady") {
+      ReplyError(result, "invalid_argument", "The adaptation reason is invalid.");
+      return;
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!RefreshNativeMediaApi() || native_media_api_.apply_adaptation == nullptr) {
+      ReplyError(result, kEncoderUnavailable,
+                 "Native H.264 adaptation is unavailable.");
+      return;
+    }
+    const auto native_status = native_media_api_.apply_adaptation(
+        *owner_id, *bitrate, *framerate, *width, *height, reason_value);
+    if (native_status != 0) {
+      ReplyError(result, NativeStatusCode(native_status),
+                 "The native adaptation target was rejected.");
+      return;
+    }
+    const auto capture_status = capture_manager_.ApplyAdaptation(
+        *owner_id, *bitrate, *framerate, *width, *height);
+    if (capture_status != CaptureStatus::kOk) {
+      ReplyError(result, CaptureStatusCode(capture_status),
+                 "The Windows hardware encoder rejected the adaptation target.");
       return;
     }
     result->Success();

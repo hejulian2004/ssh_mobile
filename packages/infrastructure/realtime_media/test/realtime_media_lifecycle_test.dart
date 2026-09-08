@@ -537,6 +537,30 @@ void main() {
     },
   );
 
+  test(
+    'adaptation uses the narrower native capability after one stats read',
+    () async {
+      backend.stats = const RealtimeMediaStats(
+        width: 1280,
+        height: 720,
+        jitterMs: 120,
+        queueDepth: 3,
+      );
+      final endpoint = await controller.start(RealtimeMediaDirection.send);
+
+      final decision = await controller.adapt(endpoint);
+
+      expect(decision.reason, RealtimeMediaAdaptationReason.congestion);
+      expect(decision.bitrateKbps, 1536);
+      expect(decision.framerate, 7);
+      expect(backend.operations, <String>[
+        'start:realtime-1:7:send',
+        'stats:endpoint-1',
+        'adapt:endpoint-1:1536:7',
+      ]);
+    },
+  );
+
   test('foreign generation endpoint is stale', () async {
     final oldEndpoint = await controller.start(RealtimeMediaDirection.send);
     final nextController = RealtimeMediaSessionController(
@@ -648,7 +672,10 @@ void main() {
 }
 
 final class RecordingBackend
-    implements RealtimeMediaBackend, RealtimeMediaKeyframeBackend {
+    implements
+        RealtimeMediaBackend,
+        RealtimeMediaKeyframeBackend,
+        RealtimeMediaAdaptationBackend {
   final List<String> operations = <String>[];
   bool failStart = false;
   bool failAttach = false;
@@ -786,5 +813,16 @@ final class RecordingBackend
     required RealtimeMediaEndpointIdentity identity,
   }) async {
     operations.add('reset-decoder:${endpointId.value}');
+  }
+
+  @override
+  Future<void> applyAdaptation({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    required RealtimeMediaAdaptationDecision decision,
+  }) async {
+    operations.add(
+      'adapt:${endpointId.value}:${decision.bitrateKbps}:${decision.framerate}',
+    );
   }
 }

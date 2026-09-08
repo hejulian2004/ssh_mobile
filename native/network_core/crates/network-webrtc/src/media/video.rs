@@ -2,18 +2,63 @@ use std::time::Instant;
 
 use rtc::peer_connection::configuration::media_engine::{MediaEngine, MIME_TYPE_H264};
 use rtc::peer_connection::event::{RTCPeerConnectionEvent, RTCTrackEvent};
+use rtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
 use rtc::rtp_transceiver::rtp_sender::{RTCPFeedback, RTCRtpCodec, RTCRtpCodecParameters};
-use rtc::rtp_transceiver::RTCRtpSenderId;
+use rtc::rtp_transceiver::{RTCRtpReceiverId, RTCRtpSenderId};
 
 use crate::peer::{rtc_error, MediaDirection, WebRtcError, WebRtcPeer};
 
 use super::{
     EncodedVideoFrame, KeyframeRequestReason, RtpMediaError, RtpPacketizer, RtpReassembler,
-    VideoEnqueueResult, VideoFrameError, VideoQueue,
+    VideoEnqueueResult, VideoFrameError, VideoQueue, MAX_SCREEN_VIDEO_HEIGHT,
+    MAX_SCREEN_VIDEO_WIDTH,
 };
 
 const H264_RTP_PAYLOAD_TYPE: u8 = 102;
 const H264_RTP_MTU: usize = 1_200;
+
+/// Why a native sender target was selected. The value is carried only across
+/// the native owner port and is never serialized as media payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum H264AdaptationReason {
+    Steady,
+    Congestion,
+    Recovery,
+}
+
+/// One bounded target for the native H.264 sender.
+///
+/// A zero dimension means "keep the current capture size". In-place
+/// resolution changes are still rejected by platform owners; callers must
+/// stop/release/recreate for a source-size change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct H264AdaptationTarget {
+    pub bitrate_kbps: u32,
+    pub framerate: u32,
+    pub width: u32,
+    pub height: u32,
+    pub reason: H264AdaptationReason,
+}
+
+impl H264AdaptationTarget {
+    pub const MIN_BITRATE_KBPS: u32 = 256;
+    pub const MAX_BITRATE_KBPS: u32 = 3 * 1024;
+    pub const MIN_FRAMERATE: u32 = 5;
+    pub const MAX_FRAMERATE: u32 = 30;
+
+    pub const fn is_valid(self) -> bool {
+        let dimensions_valid = (self.width == 0 && self.height == 0)
+            || (self.width > 0
+                && self.height > 0
+                && self.width <= MAX_SCREEN_VIDEO_WIDTH
+                && self.height <= MAX_SCREEN_VIDEO_HEIGHT);
+        self.bitrate_kbps >= Self::MIN_BITRATE_KBPS
+            && self.bitrate_kbps <= Self::MAX_BITRATE_KBPS
+            && self.framerate >= Self::MIN_FRAMERATE
+            && self.framerate <= Self::MAX_FRAMERATE
+            && dimensions_valid
+    }
+}
 
 pub(crate) struct H264ScreenVideo {
     sender_id: Option<RTCRtpSenderId>,
@@ -23,6 +68,9 @@ pub(crate) struct H264ScreenVideo {
     reassembler: RtpReassembler,
     accepts_inbound: bool,
     inbound_track_id: Option<String>,
+    inbound_receiver_id: Option<RTCRtpReceiverId>,
+    inbound_media_ssrc: Option<u32>,
+    adaptation_target: H264AdaptationTarget,
 }
 
 impl H264ScreenVideo {
@@ -42,6 +90,15 @@ impl H264ScreenVideo {
             reassembler: RtpReassembler::new(),
             accepts_inbound,
             inbound_track_id: None,
+            inbound_receiver_id: None,
+            inbound_media_ssrc: None,
+            adaptation_target: H264AdaptationTarget {
+                bitrate_kbps: H264AdaptationTarget::MAX_BITRATE_KBPS,
+                framerate: H264AdaptationTarget::MAX_FRAMERATE,
+                width: 0,
+                height: 0,
+                reason: H264AdaptationReason::Steady,
+            },
         }
     }
 
@@ -55,6 +112,8 @@ impl H264ScreenVideo {
         self.inbound.on_disconnect();
         self.reassembler.reset();
         self.inbound_track_id = None;
+        self.inbound_receiver_id = None;
+        self.inbound_media_ssrc = None;
     }
 }
 
@@ -222,6 +281,17 @@ impl WebRtcPeer {
         if !video.accepts_inbound {
             return Err(WebRtcError::ScreenVideoNotConfigured);
         }
+        if let Some(media_ssrc) = video.inbound_media_ssrc {
+            // A negotiated track may carry retransmission or unrelated SSRCs;
+            // only the first screen-video SSRC is allowed into the H.264
+            // reassembler. Ignore a mismatched packet as a media-local event
+            // instead of letting it perturb sequence/order state.
+            if media_ssrc != packet.header.ssrc {
+                return Ok(());
+            }
+        } else {
+            video.inbound_media_ssrc = Some(packet.header.ssrc);
+        }
         match video.reassembler.push_at(packet, now) {
             Ok(Some(frame)) => match video.inbound.enqueue(frame, now) {
                 Ok(_) => {}
@@ -275,6 +345,8 @@ impl WebRtcPeer {
                 if is_h264 {
                     if let Some(video) = self.screen_video.as_mut() {
                         video.inbound_track_id = Some(init.track_id.clone());
+                        video.inbound_receiver_id = Some(init.receiver_id);
+                        video.inbound_media_ssrc = None;
                     }
                 }
             }
@@ -290,6 +362,8 @@ impl WebRtcPeer {
             {
                 if let Some(video) = self.screen_video.as_mut() {
                     video.inbound_track_id = None;
+                    video.inbound_receiver_id = None;
+                    video.inbound_media_ssrc = None;
                     video.reassembler.reset();
                 }
             }
@@ -354,6 +428,75 @@ impl WebRtcPeer {
             }
         }
         Ok(())
+    }
+
+    /// Flushes one pending receive-side keyframe request as native RTCP PLI.
+    ///
+    /// The request remains queued until the negotiated screen receiver exists
+    /// and the peer can accept an RTCP packet. A missing receiver is expected
+    /// during early negotiation and is therefore not a fatal peer error.
+    pub fn flush_h264_screen_video_keyframe_requests(&mut self) {
+        let pending = self.screen_video.as_mut().and_then(|video| {
+            video
+                .inbound
+                .take_keyframe_request()
+                .map(|reason| (reason, video.inbound_receiver_id, video.inbound_media_ssrc))
+        });
+        let Some((reason, receiver_id, media_ssrc)) = pending else {
+            return;
+        };
+        let Some(receiver_id) = receiver_id else {
+            if let Some(video) = self.screen_video.as_mut() {
+                video.inbound.request_keyframe(reason);
+            }
+            return;
+        };
+        let Some(mut receiver) = self.peer.rtp_receiver(receiver_id) else {
+            if let Some(video) = self.screen_video.as_mut() {
+                video.inbound.request_keyframe(reason);
+            }
+            return;
+        };
+        let pli = PictureLossIndication {
+            sender_ssrc: 0,
+            media_ssrc: media_ssrc.unwrap_or_default(),
+        };
+        if receiver.write_rtcp(vec![Box::new(pli)]).is_err() {
+            if let Some(video) = self.screen_video.as_mut() {
+                video.inbound.request_keyframe(reason);
+            }
+        }
+    }
+
+    /// Applies a validated sender target while preserving the fixed queue
+    /// capacity. Platform owners apply the target to their hardware encoder;
+    /// the peer retains it as the native source of truth for the generation.
+    pub fn apply_h264_screen_video_adaptation(
+        &mut self,
+        target: H264AdaptationTarget,
+    ) -> Result<(), WebRtcError> {
+        if !target.is_valid() {
+            return Err(WebRtcError::InvalidConfiguration(
+                "H.264 adaptation target is outside the bounded policy".into(),
+            ));
+        }
+        let video = self
+            .screen_video
+            .as_mut()
+            .ok_or(WebRtcError::ScreenVideoNotConfigured)?;
+        if video.sender_id.is_none() {
+            return Err(WebRtcError::ScreenVideoNotConfigured);
+        }
+        video.adaptation_target = target;
+        Ok(())
+    }
+
+    /// Returns the latest native sender target for diagnostics and tests.
+    pub fn h264_screen_video_adaptation(&self) -> Option<H264AdaptationTarget> {
+        self.screen_video
+            .as_ref()
+            .filter(|video| video.sender_id.is_some())
+            .map(|video| video.adaptation_target)
     }
 
     /// Clears the queue and partial RTP reassembly state for one endpoint

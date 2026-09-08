@@ -97,15 +97,16 @@ ADR-034 或原始技术架构文档。
 - [x] Phase 7 QoS foundation：`RealtimeMediaStats` 增加 bounded packet/drop/
   recovery/keyframe/jitter/RTT/queue counters，并提供不改变三帧队列的有界
   adaptation policy；generation-bound native keyframe/decoder-reset owner port
-  已通过 Rust FFI、Windows 和 Android 平台桥接接线，仍不暴露媒体载荷。
-  真实编码器/RTCP keyframe 触发、全链路隐私和最终门禁仍待完成。
+  已通过 Rust FFI、Windows 和 Android 平台桥接接线，仍不暴露媒体载荷；
+  native owner 已接入硬件 bitrate/framerate、IDR 与 receive-side PLI。
+  硬件/设备能力证明、全链路隐私和最终门禁仍待完成。
 
 当前状态：Phase 0、Phase 1、Phase 2 的实现、exact-head CI 证据和 PR #67
 接受记录已齐；Phase 3/4 的 native platform owner、Phase 5 consent/Feature、
 Phase 6 TURN issuer foundation 与 Phase 7 stats/adaptation/recovery bridge
 foundation 已分别落地，但对应硬件、设备、生产安全和最终 E2E gate 尚未接受。
-Windows/Android 双端能力、production TURN、实际编码器/RTCP keyframe recovery
-与完整 Phase 5–7 仍不得描述为已交付产品能力。
+Windows/Android 双端验证、production TURN、拥塞恢复策略与完整 Phase 5–7
+仍不得描述为已交付产品能力。
 
 ## PR #67 评审修正清单
 
@@ -234,11 +235,14 @@ evidence。Windows Graphics Capture、Media Foundation hardware ingress/decode �
 - [x] `RealtimeMediaStats` 增加 bounded sender/receiver/drop/recovery/keyframe/
   jitter/RTT/queue 指标；默认低频快照，不创建 per-frame Dart stream。
 - [x] 增加保持三帧 queue invariant 的 bounded bitrate/framerate/resolution
-  adaptation policy 与 optional native recovery port。
+  adaptation policy；命令现在沿 generation-bound owner 传到 Windows/Android
+  native owner，硬件编码器应用 bitrate/framerate，分辨率变化要求显式
+  stop/release/recreate。
 - [x] generation-bound native keyframe request/decoder reset bridge 已通过
   Rust FFI、Windows/Android owner 和平台 channel 接线，并由 native owner 做
-  一秒限频；请求仍保持在 native queue/peer owner 内。
-- [ ] 实际编码器/RTCP keyframe 触发、拥塞恢复与完整平台 E2E 接线。
+  一秒限频；发送端已接入硬件 IDR 请求，接收端由 native peer 在同一 WebRTC
+  路径发出 PLI，请求仍保持在 native queue/peer owner 内。
+- [ ] 完成真实硬件编码器/RTCP 设备验收、拥塞恢复策略与完整平台 E2E。
 - [ ] stop/revoke/permission/privacy 回归及全链路 recovery。
 - [ ] Rust、Dart、Go、平台测试与覆盖率门禁全部通过。
 - [ ] 更新 architecture status，确认没有把未验收能力描述为已交付。
@@ -296,12 +300,18 @@ evidence。Windows Graphics Capture、Media Foundation hardware ingress/decode �
 - [x] screen-media production boundary forbidden-pattern audit 通过：没有第二套
   PeerConnection、Dart 帧流、RelayDataFrame 或无界 native queue。
 - [x] Phase 7 native recovery bridge focused validation（2026-09-08）：
-  `cargo test -p network-webrtc --locked`（47 passed、2 ignored）、
-  `cargo test -p network-core realtime_media --locked`（8 passed）、
+  `cargo test -p network-webrtc --locked`（50 passed、2 ignored）、
+  `cargo test -p network-core realtime_media --locked`（9 passed）、
   `cargo test -p network-ffi --locked`（23 passed）和对应 clippy/check 通过；
   `realtime_media`、Windows/Android adapter analyzer 通过。Dart/Flutter
   package test 在当前离线 native-asset/pub 环境仍无法完成，平台硬件和双端
   E2E 也未作为本轮证据。
+- [x] Phase 7 native adaptation/keyframe actuation wiring（2026-09-08）：
+  `cargo check -p network-core -p network-webrtc -p network-ffi --locked`、
+  `cargo test -p network-webrtc --locked`（50 passed、2 ignored）、
+  `cargo test -p network-core realtime_media --locked`（9 passed）和三个
+  realtime_media Dart package analyzer 均通过；Windows Media Foundation、
+  Android MediaCodec、native PLI/IDR 和设备 E2E 仍待平台门禁。
 
 ## 下一步
 

@@ -2,8 +2,8 @@ use std::time::{Duration, Instant};
 
 use crate::media::RtpPacketizer;
 use crate::{
-    EncodedVideoFrame, KeyframeRequestReason, MediaDirection, VideoCodec, VideoEnqueueResult,
-    WebRtcConfig, WebRtcError, WebRtcPeer,
+    EncodedVideoFrame, H264AdaptationReason, H264AdaptationTarget, KeyframeRequestReason,
+    MediaDirection, VideoCodec, VideoEnqueueResult, WebRtcConfig, WebRtcError, WebRtcPeer,
 };
 use rtc::peer_connection::event::{RTCPeerConnectionEvent, RTCTrackEvent, RTCTrackEventInit};
 use rtc::rtp::Packet;
@@ -159,6 +159,54 @@ fn explicit_keyframe_request_targets_the_configured_media_direction() {
 }
 
 #[test]
+fn receive_keyframe_request_is_retained_until_the_native_receiver_is_ready() {
+    let mut receiver = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    receiver
+        .configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    receiver
+        .request_h264_screen_video_keyframe(MediaDirection::Recvonly)
+        .expect("receiver keyframe request");
+
+    // Early negotiation has no RTP receiver yet. Flushing must not drop the
+    // request; the next native I/O tick can retry it after OnTrack activation.
+    receiver.flush_h264_screen_video_keyframe_requests();
+    assert_eq!(
+        receiver.take_h264_screen_video_keyframe_request(),
+        Some(KeyframeRequestReason::PacketLoss)
+    );
+}
+
+#[test]
+fn bounded_adaptation_is_native_sender_state_and_keeps_queue_capacity_fixed() {
+    let mut sender = WebRtcPeer::new(WebRtcConfig::default()).expect("sender");
+    sender
+        .configure_h264_screen_video(MediaDirection::Sendonly, Some(SCREEN_SSRC))
+        .expect("sender config");
+    let target = H264AdaptationTarget {
+        bitrate_kbps: 1_536,
+        framerate: 7,
+        width: 1_280,
+        height: 720,
+        reason: H264AdaptationReason::Congestion,
+    };
+    sender
+        .apply_h264_screen_video_adaptation(target)
+        .expect("bounded target");
+    assert_eq!(sender.h264_screen_video_adaptation(), Some(target));
+    assert_eq!(sender.pending_h264_screen_video_frames(), 0);
+
+    let invalid = H264AdaptationTarget {
+        bitrate_kbps: 1,
+        ..target
+    };
+    assert!(matches!(
+        sender.apply_h264_screen_video_adaptation(invalid),
+        Err(WebRtcError::InvalidConfiguration(_))
+    ));
+}
+
+#[test]
 fn packet_loss_reorder_and_duplicate_are_media_local_recovery_events() {
     let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
     peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
@@ -197,6 +245,28 @@ fn packet_loss_reorder_and_duplicate_are_media_local_recovery_events() {
     }
     peer.receive_h264_screen_video_rtp(&duplicate[0], now)
         .expect("duplicate fragment must be discarded locally");
+}
+
+#[test]
+fn mismatched_screen_ssrc_is_ignored_after_track_binding() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+
+    for packet in packetize(&access_unit(5, 114_000), 500) {
+        peer.receive_h264_screen_video_rtp(&packet, now)
+            .expect("first screen SSRC is accepted");
+    }
+    assert!(peer.pop_remote_h264_screen_video(now).is_some());
+
+    let mut foreign_ssrc = packetize(&access_unit(6, 120_000), 600);
+    for packet in &mut foreign_ssrc {
+        packet.header.ssrc = SCREEN_SSRC.wrapping_add(1);
+        peer.receive_h264_screen_video_rtp(packet, now)
+            .expect("foreign SSRC is ignored without failing the peer");
+    }
+    assert!(peer.pop_remote_h264_screen_video(now).is_none());
 }
 
 #[test]

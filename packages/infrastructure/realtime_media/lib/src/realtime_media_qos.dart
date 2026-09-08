@@ -3,20 +3,28 @@ import 'realtime_media_endpoint.dart';
 import 'realtime_media_error.dart';
 import 'realtime_media_session.dart';
 
-/// Optional native capability for keyframe recovery and bounded adaptation.
+/// Optional native capability for bounded adaptation.
 ///
 /// Implementations remain native owners. The Dart contract carries only a
 /// bounded decision and endpoint identity, never media payloads.
-abstract interface class RealtimeMediaRecoveryBackend {
-  Future<void> requestKeyframe({
-    required RealtimeMediaEndpointId endpointId,
-    required RealtimeMediaEndpointIdentity identity,
-  });
-
+abstract interface class RealtimeMediaAdaptationBackend {
   Future<void> applyAdaptation({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
     required RealtimeMediaAdaptationDecision decision,
+  });
+}
+
+/// Optional native capability for keyframe recovery and bounded adaptation.
+///
+/// This combined interface is retained for adapters that implement both
+/// operations. Platform owners may implement the narrower capabilities
+/// independently while their codec support is being brought up.
+abstract interface class RealtimeMediaRecoveryBackend
+    implements RealtimeMediaAdaptationBackend {
+  Future<void> requestKeyframe({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
   });
 }
 
@@ -120,17 +128,25 @@ extension RealtimeMediaSessionQos on RealtimeMediaSessionController {
   }) async {
     final decision = policy.decide(await stats(endpoint));
     final recovery = backend;
-    if (recovery is! RealtimeMediaRecoveryBackend) {
-      throw const RealtimeMediaException(
-        RealtimeMediaErrorCode.backendFailure,
-        'Native media adaptation is unavailable.',
+    if (recovery is RealtimeMediaRecoveryBackend) {
+      await (recovery as RealtimeMediaRecoveryBackend).applyAdaptation(
+        endpointId: endpoint.id,
+        identity: endpoint.identity,
+        decision: decision,
       );
+      return decision;
     }
-    await (recovery as RealtimeMediaRecoveryBackend).applyAdaptation(
-      endpointId: endpoint.id,
-      identity: endpoint.identity,
-      decision: decision,
+    if (recovery is RealtimeMediaAdaptationBackend) {
+      await (recovery as RealtimeMediaAdaptationBackend).applyAdaptation(
+        endpointId: endpoint.id,
+        identity: endpoint.identity,
+        decision: decision,
+      );
+      return decision;
+    }
+    throw const RealtimeMediaException(
+      RealtimeMediaErrorCode.backendFailure,
+      'Native media adaptation is unavailable.',
     );
-    return decision;
   }
 }

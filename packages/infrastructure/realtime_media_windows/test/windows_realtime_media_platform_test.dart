@@ -114,4 +114,42 @@ void main() {
     expect((calls.first.arguments as Map)['generation'], 9);
     expect((calls.last.arguments as Map)['direction'], 'receive');
   });
+
+  test('forwards bounded adaptation without media payloads', () async {
+    MethodCall? captured;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      captured = call;
+      return null;
+    });
+    const platform = MethodChannelWindowsRealtimeMediaPlatform();
+    final identity = RealtimeMediaEndpointIdentity(
+      realtimeId: 'realtime-1',
+      peerId: 'peer-1',
+      generation: 9,
+      direction: RealtimeMediaDirection.send,
+    );
+
+    await platform.applyAdaptation(
+      endpointId: RealtimeMediaEndpointId('endpoint-1'),
+      identity: identity,
+      ownerToken: RealtimeMediaNativeOwnerToken('owner-1'),
+      decision: const RealtimeMediaAdaptationDecision(
+        bitrateKbps: 1536,
+        framerate: 7,
+        width: 1280,
+        height: 720,
+        reason: RealtimeMediaAdaptationReason.congestion,
+      ),
+    );
+
+    expect(captured?.method, 'applyAdaptation');
+    final arguments = captured?.arguments as Map;
+    expect(arguments['generation'], 9);
+    expect(arguments['bitrate_kbps'], 1536);
+    expect(arguments['framerate'], 7);
+    expect(arguments['width'], 1280);
+    expect(arguments['height'], 720);
+    expect(arguments['reason'], 'congestion');
+    expect(arguments.keys, isNot(contains('payload')));
+  });
 }

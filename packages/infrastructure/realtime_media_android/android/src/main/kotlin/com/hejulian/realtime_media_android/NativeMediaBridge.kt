@@ -40,6 +40,17 @@ internal object NativeMediaBridge {
 
     fun resetDecoder(owner: Long): Int = invoke { nativeResetDecoder(owner) }
 
+    fun applyAdaptation(
+        owner: Long,
+        bitrateKbps: Int,
+        framerate: Int,
+        width: Int,
+        height: Int,
+        reason: Int,
+    ): Int = invoke {
+        nativeApplyAdaptation(owner, bitrateKbps, framerate, width, height, reason)
+    }
+
     fun closeOwner(owner: Long): Int = invoke { nativeCloseOwner(owner) }
 
     fun pushH264(
@@ -115,6 +126,16 @@ internal object NativeMediaBridge {
 
     @JvmStatic
     private external fun nativeResetDecoder(owner: Long): Int
+
+    @JvmStatic
+    private external fun nativeApplyAdaptation(
+        owner: Long,
+        bitrateKbps: Int,
+        framerate: Int,
+        width: Int,
+        height: Int,
+        reason: Int,
+    ): Int
 
     @JvmStatic
     private external fun nativeCloseOwner(owner: Long): Int

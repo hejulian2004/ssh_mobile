@@ -2,13 +2,14 @@ use super::*;
 use crate::realtime_media::{
     ssh_net_realtime_media_endpoint_create, ssh_net_realtime_media_endpoint_pull_h264,
     ssh_net_realtime_media_endpoint_push_h264, ssh_net_realtime_media_endpoint_release,
-    ssh_net_realtime_media_owner_attach_renderer, ssh_net_realtime_media_owner_close,
-    ssh_net_realtime_media_owner_detach_renderer, ssh_net_realtime_media_owner_open,
-    ssh_net_realtime_media_owner_push_h264, ssh_net_realtime_media_owner_request_keyframe,
-    ssh_net_realtime_media_owner_reset_decoder, ssh_net_realtime_media_owner_start,
-    ssh_net_realtime_media_owner_stop, ssh_net_realtime_media_owner_validate,
-    SshNetRealtimeMediaFrameMetadata, SSH_NET_REALTIME_MEDIA_DIRECTION_RECEIVE,
-    SSH_NET_REALTIME_MEDIA_DIRECTION_SEND, SSH_NET_REALTIME_MEDIA_STATUS_STALE_ENDPOINT,
+    ssh_net_realtime_media_owner_apply_adaptation, ssh_net_realtime_media_owner_attach_renderer,
+    ssh_net_realtime_media_owner_close, ssh_net_realtime_media_owner_detach_renderer,
+    ssh_net_realtime_media_owner_open, ssh_net_realtime_media_owner_push_h264,
+    ssh_net_realtime_media_owner_request_keyframe, ssh_net_realtime_media_owner_reset_decoder,
+    ssh_net_realtime_media_owner_start, ssh_net_realtime_media_owner_stop,
+    ssh_net_realtime_media_owner_validate, SshNetRealtimeMediaFrameMetadata,
+    SSH_NET_REALTIME_MEDIA_DIRECTION_RECEIVE, SSH_NET_REALTIME_MEDIA_DIRECTION_SEND,
+    SSH_NET_REALTIME_MEDIA_STATUS_STALE_ENDPOINT,
 };
 use crate::{
     ssh_net_buffer_free, ssh_net_runtime_create, ssh_net_runtime_destroy, ssh_net_runtime_start,
@@ -109,6 +110,22 @@ fn media_endpoint_ffi_success_path_round_trips_native_h264_and_releases_cleanly(
     assert_eq!(ssh_net_realtime_media_owner_start(owner), 0);
     assert_eq!(ssh_net_realtime_media_owner_validate(owner), 0);
     assert_eq!(ssh_net_realtime_media_owner_request_keyframe(owner), 0);
+    assert_eq!(
+        ssh_net_realtime_media_owner_apply_adaptation(owner, 1_536, 7, 1_280, 720, 1),
+        0
+    );
+    assert_eq!(
+        ssh_net_realtime_media_owner_apply_adaptation(owner, 1, 7, 1_280, 720, 1),
+        crate::realtime_media::SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT
+    );
+    assert_eq!(
+        ssh_net_realtime_media_owner_apply_adaptation(owner, 1_536, 7, 0, 720, 1),
+        crate::realtime_media::SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT
+    );
+    assert_eq!(
+        ssh_net_realtime_media_owner_apply_adaptation(owner, 1_536, 7, 1_280, 720, 99),
+        crate::realtime_media::SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT
+    );
     let mut duplicate_owner = 99_u64;
     assert_eq!(
         unsafe {
@@ -241,6 +258,10 @@ fn media_endpoint_ffi_success_path_round_trips_native_h264_and_releases_cleanly(
         0
     );
     assert_eq!(ssh_net_realtime_media_owner_start(receive_owner), 0);
+    assert_eq!(
+        ssh_net_realtime_media_owner_apply_adaptation(receive_owner, 1_536, 7, 1_280, 720, 1),
+        crate::realtime_media::SSH_NET_REALTIME_MEDIA_STATUS_DIRECTION_MISMATCH
+    );
     assert_eq!(
         ssh_net_realtime_media_owner_request_keyframe(receive_owner),
         0

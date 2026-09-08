@@ -1758,6 +1758,18 @@ impl NetworkRuntime {
         crate::realtime_media::reset_decoder(&state, endpoint_id)
     }
 
+    /// Applies one bounded sender target through the native H.264 peer owner.
+    /// Platform adapters apply the same target to their hardware encoder while
+    /// the peer retains it for this generation.
+    pub fn apply_realtime_media_adaptation(
+        &self,
+        endpoint_id: crate::realtime_media::RealtimeMediaEndpointId,
+        target: network_webrtc::H264AdaptationTarget,
+    ) -> Result<(), crate::realtime_media::RealtimeMediaError> {
+        let state = self.media_state()?;
+        crate::realtime_media::apply_adaptation(&state, endpoint_id, target)
+    }
+
     /// 返回原生轮询边界使用的 Tokio handle。
     pub fn handle(&self) -> &tokio::runtime::Handle {
         self.runtime.handle()

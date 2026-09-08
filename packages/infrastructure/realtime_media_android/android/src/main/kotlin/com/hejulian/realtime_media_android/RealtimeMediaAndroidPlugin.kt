@@ -215,6 +215,36 @@ class RealtimeMediaAndroidPlugin :
                     "Android decoder reset failed.",
                 )
             }
+            "applyAdaptation" -> withOwner(call, result) { owner, args ->
+                val bitrate = boundedNonNegativeInt(args["bitrate_kbps"])
+                val framerate = boundedNonNegativeInt(args["framerate"])
+                val width = boundedNonNegativeInt(args["width"])
+                val height = boundedNonNegativeInt(args["height"])
+                val reason = when (args["reason"] as? String) {
+                    "steady" -> 0
+                    "congestion" -> 1
+                    "recovery" -> 2
+                    else -> null
+                }
+                if (bitrate == null || framerate == null || width == null ||
+                    height == null || reason == null
+                ) {
+                    error(result, "invalid_argument", "A bounded adaptation target is required.")
+                    return@withOwner
+                }
+                val failure = owner.applyAdaptation(
+                    bitrate,
+                    framerate,
+                    width,
+                    height,
+                    reason,
+                )
+                if (failure == null) result.success(null) else error(
+                    result,
+                    failure,
+                    "Android hardware encoder rejected the adaptation target.",
+                )
+            }
             else -> result.notImplemented()
         }
     }
@@ -338,6 +368,17 @@ class RealtimeMediaAndroidPlugin :
     private fun boundedString(value: Any?): String? {
         val normalized = (value as? String)?.trim() ?: return null
         return normalized.takeIf { it.isNotEmpty() && it.length <= MAX_ID_LENGTH }
+    }
+
+    private fun boundedNonNegativeInt(value: Any?): Int? {
+        val number = value as? Number ?: return null
+        val normalized = number.toDouble()
+        if (!normalized.isFinite() || normalized < 0.0 ||
+            normalized > Int.MAX_VALUE || normalized % 1.0 != 0.0
+        ) {
+            return null
+        }
+        return normalized.toInt()
     }
 
     private fun revokeProjection() {

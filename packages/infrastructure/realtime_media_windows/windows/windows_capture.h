@@ -89,6 +89,12 @@ class WindowsCaptureManager final {
                       const std::string& source_kind);
   CaptureStatus Stop(uint64_t owner);
   CaptureStatus Release(uint64_t owner);
+  CaptureStatus ApplyAdaptation(uint64_t owner,
+                                uint32_t bitrate_kbps,
+                                uint32_t framerate,
+                                uint32_t width,
+                                uint32_t height);
+  CaptureStatus RequestKeyframe(uint64_t owner);
   CaptureStatus ReadStats(uint64_t owner, CaptureStats* stats);
 
  private:

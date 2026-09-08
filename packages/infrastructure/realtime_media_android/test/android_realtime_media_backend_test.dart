@@ -267,6 +267,26 @@ void main() {
   );
 
   test(
+    'routes bounded adaptation through the generation-bound owner token',
+    () async {
+      final endpoint = await backend.start(sendIdentity);
+      await backend.applyAdaptation(
+        endpointId: endpoint,
+        identity: sendIdentity,
+        decision: const RealtimeMediaAdaptationDecision(
+          bitrateKbps: 1536,
+          framerate: 7,
+          width: 1280,
+          height: 720,
+          reason: RealtimeMediaAdaptationReason.congestion,
+        ),
+      );
+
+      expect(platform.operations, <String>['adapt:1:1536:7']);
+    },
+  );
+
+  test(
     'projection requests are delegated and repeated calls are safe',
     () async {
       await backend.requestProjection();
@@ -498,5 +518,17 @@ final class RecordingAndroidPlatform implements AndroidRealtimeMediaPlatform {
     RealtimeMediaNativeOwnerToken? ownerToken,
   }) async {
     operations.add('reset-decoder:${endpointId.value}');
+  }
+
+  @override
+  Future<void> applyAdaptation({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    required RealtimeMediaAdaptationDecision decision,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {
+    operations.add(
+      'adapt:${endpointId.value}:${decision.bitrateKbps}:${decision.framerate}',
+    );
   }
 }

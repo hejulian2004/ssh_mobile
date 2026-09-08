@@ -5,6 +5,7 @@
 #include <mfapi.h>
 #include <mferror.h>
 #include <mftransform.h>
+#include <oleauto.h>
 
 #include <algorithm>
 #include <cstring>
@@ -378,6 +379,53 @@ bool HardwareH264Encoder::Encode(ID3D11Texture2D* texture,
   if (timestamp_90khz == 0) sample->SetUINT32(MFSampleExtension_CleanPoint, 1);
   if (FAILED(impl_->transform->ProcessInput(0, sample.get(), 0)) ||
       !impl_->Drain(output)) {
+    impl_->failed = true;
+    return false;
+  }
+  return true;
+}
+
+bool HardwareH264Encoder::ApplyAdaptation(uint32_t bitrate_kbps) {
+  if (impl_ == nullptr || impl_->failed || impl_->transform == nullptr ||
+      bitrate_kbps < 256 || bitrate_kbps > 3 * 1024) {
+    return false;
+  }
+  winrt::com_ptr<ICodecAPI> codec_api;
+  if (FAILED(impl_->transform->QueryInterface(IID_PPV_ARGS(codec_api.put()))) ||
+      codec_api == nullptr) {
+    return false;
+  }
+  VARIANT value;
+  VariantInit(&value);
+  value.vt = VT_UI4;
+  value.ulVal = bitrate_kbps * 1'000;
+  const HRESULT result =
+      codec_api->SetValue(&CODECAPI_AVEncCommonMeanBitRate, &value);
+  VariantClear(&value);
+  if (FAILED(result)) {
+    impl_->failed = true;
+    return false;
+  }
+  return true;
+}
+
+bool HardwareH264Encoder::RequestKeyframe() {
+  if (impl_ == nullptr || impl_->failed || impl_->transform == nullptr) {
+    return false;
+  }
+  winrt::com_ptr<ICodecAPI> codec_api;
+  if (FAILED(impl_->transform->QueryInterface(IID_PPV_ARGS(codec_api.put()))) ||
+      codec_api == nullptr) {
+    return false;
+  }
+  VARIANT value;
+  VariantInit(&value);
+  value.vt = VT_UI4;
+  value.ulVal = 1;
+  const HRESULT result =
+      codec_api->SetValue(&CODECAPI_AVEncVideoForceKeyFrame, &value);
+  VariantClear(&value);
+  if (FAILED(result)) {
     impl_->failed = true;
     return false;
   }

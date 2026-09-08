@@ -16,3 +16,4 @@ pub use queue::{
 };
 pub use rtp::{RtpMediaError, RtpPacketizer, RtpReassembler};
 pub(crate) use video::{h264_media_engine, H264ScreenVideo};
+pub use video::{H264AdaptationReason, H264AdaptationTarget};

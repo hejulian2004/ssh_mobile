@@ -155,6 +155,24 @@ final class MethodChannelWindowsRealtimeMediaPlatform
     _identityArguments(endpointId, identity, ownerToken),
   );
 
+  @override
+  Future<void> applyAdaptation({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    required RealtimeMediaAdaptationDecision decision,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) => _invoke<void>(
+    'applyAdaptation',
+    _identityArguments(endpointId, identity, ownerToken)
+      ..addAll(<String, Object?>{
+        'bitrate_kbps': decision.bitrateKbps,
+        'framerate': decision.framerate,
+        'width': decision.width,
+        'height': decision.height,
+        'reason': decision.reason.name,
+      }),
+  );
+
   Map<String, Object?> _identityArguments(
     RealtimeMediaEndpointId endpointId,
     RealtimeMediaEndpointIdentity identity,

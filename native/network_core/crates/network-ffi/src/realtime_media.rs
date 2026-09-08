@@ -21,12 +21,12 @@ mod realtime_media_owner;
 pub(crate) use realtime_media_owner::invalidate_media_owners;
 #[allow(unused_imports)]
 pub use realtime_media_owner::{
-    ssh_net_realtime_media_owner_attach_renderer, ssh_net_realtime_media_owner_close,
-    ssh_net_realtime_media_owner_detach_renderer, ssh_net_realtime_media_owner_open,
-    ssh_net_realtime_media_owner_pull_h264, ssh_net_realtime_media_owner_push_h264,
-    ssh_net_realtime_media_owner_request_keyframe, ssh_net_realtime_media_owner_reset_decoder,
-    ssh_net_realtime_media_owner_start, ssh_net_realtime_media_owner_stop,
-    ssh_net_realtime_media_owner_validate,
+    ssh_net_realtime_media_owner_apply_adaptation, ssh_net_realtime_media_owner_attach_renderer,
+    ssh_net_realtime_media_owner_close, ssh_net_realtime_media_owner_detach_renderer,
+    ssh_net_realtime_media_owner_open, ssh_net_realtime_media_owner_pull_h264,
+    ssh_net_realtime_media_owner_push_h264, ssh_net_realtime_media_owner_request_keyframe,
+    ssh_net_realtime_media_owner_reset_decoder, ssh_net_realtime_media_owner_start,
+    ssh_net_realtime_media_owner_stop, ssh_net_realtime_media_owner_validate,
 };
 
 /// Numeric C ABI values for a one-way screen-media lease.

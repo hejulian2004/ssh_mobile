@@ -9,7 +9,10 @@ import 'windows_realtime_media_platform.dart';
 /// therefore release first tears down the platform resource and only then
 /// finalizes the endpoint lease.
 final class WindowsRealtimeMediaBackend
-    implements RealtimeMediaBackend, RealtimeMediaKeyframeBackend {
+    implements
+        RealtimeMediaBackend,
+        RealtimeMediaKeyframeBackend,
+        RealtimeMediaAdaptationBackend {
   WindowsRealtimeMediaBackend({
     required this.endpointBackend,
     required this.platform,
@@ -180,6 +183,18 @@ final class WindowsRealtimeMediaBackend
   }) => platform.resetDecoder(
     endpointId: endpointId,
     identity: identity,
+    ownerToken: _ownerFor(endpointId, identity),
+  );
+
+  @override
+  Future<void> applyAdaptation({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    required RealtimeMediaAdaptationDecision decision,
+  }) => platform.applyAdaptation(
+    endpointId: endpointId,
+    identity: identity,
+    decision: decision,
     ownerToken: _ownerFor(endpointId, identity),
   );
 

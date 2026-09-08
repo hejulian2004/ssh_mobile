@@ -54,4 +54,13 @@ abstract interface class AndroidRealtimeMediaPlatform {
     required RealtimeMediaEndpointIdentity identity,
     RealtimeMediaNativeOwnerToken? ownerToken,
   });
+
+  /// Applies one bounded sender target through the generation-bound native
+  /// owner. The platform owns the encoder; no frame payload crosses Dart.
+  Future<void> applyAdaptation({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    required RealtimeMediaAdaptationDecision decision,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  });
 }

@@ -14,10 +14,14 @@ No runtime pointer, raw/encoded frame, `Uint8List` media API, or Surface handle
 is exposed. Hardware encoder/decoder unavailability is reported as a typed
 failure; there is no software or alternate-codec fallback.
 
-Generation-bound owner tokens also carry payload-free `requestKeyframe` and
-`resetDecoder` recovery commands. Kotlin/JNI and the native runtime validate
-the token before scheduling codec recovery; hardware/RTCP actuation and device
-E2E remain acceptance gates.
+Generation-bound owner tokens also carry payload-free `requestKeyframe`,
+`resetDecoder`, and bounded `applyAdaptation` commands. Kotlin/JNI and the
+native runtime validate the token before touching a codec. Android applies
+bitrate and frame-rate targets through the hardware MediaCodec; a resolution
+change is rejected until an explicit stop/release/recreate path is used. Send
+owners request a MediaCodec sync frame and receive owners use the native
+WebRTC RTCP path; neither path exposes Dart bytes. Device capability and E2E
+remain acceptance gates.
 
 ## Current Phase 4 boundary
 

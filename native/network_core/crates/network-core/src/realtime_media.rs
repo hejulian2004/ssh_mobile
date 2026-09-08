@@ -15,8 +15,8 @@ use std::time::Instant;
 #[cfg(feature = "ffi-test-support")]
 use network_webrtc::media::RtpPacketizer;
 use network_webrtc::{
-    EncodedVideoFrame, MediaDirection, RealtimeIoDriver, RealtimeIoDriverHandle,
-    VideoEnqueueResult, WebRtcError,
+    EncodedVideoFrame, H264AdaptationTarget, MediaDirection, RealtimeIoDriver,
+    RealtimeIoDriverHandle, VideoEnqueueResult, WebRtcError,
 };
 
 use crate::runtime::RuntimeState;
@@ -317,6 +317,16 @@ impl RealtimeMediaRegistry {
             driver.peer_mut().reset_h264_screen_video_decoder()
         })
     }
+
+    fn apply_adaptation(
+        &mut self,
+        endpoint_id: RealtimeMediaEndpointId,
+        target: H264AdaptationTarget,
+    ) -> Result<(), RealtimeMediaError> {
+        self.with_endpoint(endpoint_id, RealtimeMediaDirection::Send, |driver| {
+            driver.peer_mut().apply_h264_screen_video_adaptation(target)
+        })
+    }
 }
 
 pub(crate) async fn create_endpoint(
@@ -410,6 +420,18 @@ pub(crate) fn reset_decoder(
         .lock()
         .map_err(|_| RealtimeMediaError::Internal)?;
     registry.reset_decoder(endpoint_id)
+}
+
+pub(crate) fn apply_adaptation(
+    state: &RuntimeState,
+    endpoint_id: RealtimeMediaEndpointId,
+    target: H264AdaptationTarget,
+) -> Result<(), RealtimeMediaError> {
+    let mut registry = state
+        .realtime_media
+        .lock()
+        .map_err(|_| RealtimeMediaError::Internal)?;
+    registry.apply_adaptation(endpoint_id, target)
 }
 
 pub(crate) fn pop_endpoint(

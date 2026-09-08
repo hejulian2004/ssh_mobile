@@ -35,6 +35,15 @@ class HardwareH264Encoder final {
               uint64_t timestamp_90khz,
               std::vector<EncodedAccessUnit>* output);
 
+  /// Applies a bounded bitrate target to the hardware MFT. Frame-rate
+  /// throttling is owned by the capture state; resolution changes are
+  /// intentionally rejected and require an explicit owner restart.
+  bool ApplyAdaptation(uint32_t bitrate_kbps);
+
+  /// Requests the hardware MFT to emit an IDR/keyframe on its next output.
+  /// This is a native codec control; it never crosses the Dart boundary.
+  bool RequestKeyframe();
+
  private:
   struct Impl;
   explicit HardwareH264Encoder(std::unique_ptr<Impl> impl);

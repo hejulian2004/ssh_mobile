@@ -21,10 +21,13 @@ token for its native capture/codec worker, but it never receives a Dart runtime
 pointer; native owner start/stop/renderer attach/detach and the high-frequency
 H.264 push/pull port remain entirely native.
 
-The same owner token carries payload-free `requestKeyframe` and
-`resetDecoder` recovery commands. Native rate limiting and generation checks
-apply before a platform owner touches the encoder or decoder; codec/RTCP
-actuation and hardware E2E remain separate acceptance gates.
+The same owner token carries payload-free `requestKeyframe`, `resetDecoder`,
+and bounded `applyAdaptation` commands. Native rate limiting and generation
+checks apply before a platform owner touches the encoder or decoder. Windows
+applies bitrate targets through the Media Foundation hardware MFT and bounds
+frame-rate in the native capture state; a resolution target that differs from
+the source is rejected and requires an explicit stop/release/recreate. PLI and
+IDR requests stay on the native WebRTC/codec path and never become Dart bytes.
 
 Release ordering is platform detach/close first, then native endpoint lease
 release. The package does not own `NetworkRuntime`, signaling, consent, TURN

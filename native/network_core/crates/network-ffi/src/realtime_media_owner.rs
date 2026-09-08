@@ -7,7 +7,8 @@
 
 use network_core::{RealtimeMediaDirection, RealtimeMediaEndpointId};
 use network_webrtc::{
-    EncodedVideoFrame, VideoCodec, VideoEnqueueResult, MAX_ENCODED_VIDEO_FRAME_BYTES,
+    EncodedVideoFrame, H264AdaptationReason, H264AdaptationTarget, VideoCodec, VideoEnqueueResult,
+    MAX_ENCODED_VIDEO_FRAME_BYTES,
 };
 use std::collections::HashMap;
 use std::panic::catch_unwind;
@@ -36,6 +37,10 @@ fn direction_from_native(value: u32) -> Option<RealtimeMediaDirection> {
 
 static NEXT_MEDIA_OWNER_ID: AtomicU64 = AtomicU64::new(1);
 const MIN_KEYFRAME_REQUEST_INTERVAL: Duration = Duration::from_secs(1);
+
+const ADAPTATION_REASON_STEADY: u32 = 0;
+const ADAPTATION_REASON_CONGESTION: u32 = 1;
+const ADAPTATION_REASON_RECOVERY: u32 = 2;
 
 struct MediaOwnerBinding {
     runtime: usize,
@@ -267,6 +272,62 @@ pub extern "C" fn ssh_net_realtime_media_owner_reset_decoder(owner: u64) -> i32 
             .reset_realtime_media_decoder(RealtimeMediaEndpointId::from_raw(binding.endpoint))
             .map_err(map_error)?;
         binding.last_keyframe_request = Some(Instant::now());
+        Ok(0)
+    })
+}
+
+fn adaptation_reason_from_native(value: u32) -> Option<H264AdaptationReason> {
+    match value {
+        ADAPTATION_REASON_STEADY => Some(H264AdaptationReason::Steady),
+        ADAPTATION_REASON_CONGESTION => Some(H264AdaptationReason::Congestion),
+        ADAPTATION_REASON_RECOVERY => Some(H264AdaptationReason::Recovery),
+        _ => None,
+    }
+}
+
+/// Applies one bounded H.264 sender target through the native peer owner.
+///
+/// The platform owner remains responsible for changing its hardware encoder;
+/// this call is the generation-bound native source of truth and rejects a
+/// target before any platform codec mutation can occur.
+#[no_mangle]
+pub extern "C" fn ssh_net_realtime_media_owner_apply_adaptation(
+    owner: u64,
+    bitrate_kbps: u32,
+    framerate: u32,
+    width: u32,
+    height: u32,
+    reason: u32,
+) -> i32 {
+    owner_with_binding(owner, |binding| {
+        if binding.direction != RealtimeMediaDirection::Send {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_DIRECTION_MISMATCH);
+        }
+        validate_owner(binding)?;
+        if !binding.started {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE);
+        }
+        let Some(reason) = adaptation_reason_from_native(reason) else {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT);
+        };
+        let target = H264AdaptationTarget {
+            bitrate_kbps,
+            framerate,
+            width,
+            height,
+            reason,
+        };
+        if !target.is_valid() {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT);
+        }
+        let runtime = unsafe { &*(binding.runtime as *const SshNetRuntime) };
+        runtime
+            .runtime
+            .apply_realtime_media_adaptation(
+                RealtimeMediaEndpointId::from_raw(binding.endpoint),
+                target,
+            )
+            .map_err(map_error)?;
         Ok(0)
     })
 }
