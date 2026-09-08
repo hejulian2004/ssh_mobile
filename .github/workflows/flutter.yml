@@ -533,6 +533,7 @@ jobs:
           --scope=feature_connection
           --scope=feature_developer
           --scope=feature_lan_share
+          --scope=feature_screen_share
           --scope=feature_mcp
           --scope=feature_monitoring
           --scope=feature_playbook
@@ -548,6 +549,7 @@ jobs:
           --scope=feature_connection
           --scope=feature_developer
           --scope=feature_lan_share
+          --scope=feature_screen_share
           --scope=feature_mcp
           --scope=feature_monitoring
           --scope=feature_playbook
@@ -563,6 +565,7 @@ jobs:
           --scope=feature_connection
           --scope=feature_developer
           --scope=feature_lan_share
+          --scope=feature_screen_share
           --scope=feature_mcp
           --scope=feature_monitoring
           --scope=feature_playbook
