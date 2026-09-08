@@ -1,18 +1,14 @@
 #include "include/realtime_media_windows/realtime_media_windows_plugin.h"
 
-#include "windows_capture.h"
+#include "windows_media_channel.h"
 
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
 
-#include <windows.h>
-
-#include <cstdlib>
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -25,8 +21,18 @@ using flutter::EncodableValue;
 using realtime_media_windows::CaptureSourceDescriptor;
 using realtime_media_windows::CaptureStatus;
 using realtime_media_windows::CaptureStats;
-using realtime_media_windows::H264PushCallback;
+using realtime_media_windows::DecoderStats;
+using realtime_media_windows::DecoderStatus;
+using realtime_media_windows::NativeMediaApi;
+using realtime_media_windows::WindowsDecoderManager;
 using realtime_media_windows::WindowsCaptureManager;
+using realtime_media_windows::CaptureStatusCode;
+using realtime_media_windows::DecoderStatusCode;
+using realtime_media_windows::NativeStatusCode;
+using realtime_media_windows::OwnerIdArgument;
+using realtime_media_windows::ReplyError;
+using realtime_media_windows::StatsMap;
+using realtime_media_windows::StringArgument;
 
 constexpr char kChannelName[] = "ssh_mobile/realtime_media/windows";
 constexpr char kBackendFailure[] = "backend_failure";
@@ -34,143 +40,7 @@ constexpr char kCaptureSourceEnded[] = "capture_source_ended";
 constexpr char kDecoderUnavailable[] = "decoder_unavailable";
 constexpr char kEncoderUnavailable[] = "encoder_unavailable";
 constexpr char kEncoderFailed[] = "encoder_failed";
-
-using OwnerCloseFunction = int(__cdecl*)(uint64_t);
-using OwnerStartFunction = int(__cdecl*)(uint64_t);
-using OwnerStopFunction = int(__cdecl*)(uint64_t);
-using OwnerValidateFunction = int(__cdecl*)(uint64_t);
-using OwnerRendererFunction = int(__cdecl*)(uint64_t);
-using OwnerPushFunction = H264PushCallback;
-
-struct NativeMediaApi {
-  OwnerStartFunction start_owner = nullptr;
-  OwnerStopFunction stop_owner = nullptr;
-  OwnerValidateFunction validate_owner = nullptr;
-  OwnerCloseFunction close_owner = nullptr;
-  OwnerRendererFunction attach_renderer = nullptr;
-  OwnerRendererFunction detach_renderer = nullptr;
-  OwnerPushFunction push_h264 = nullptr;
-
-  bool available() const { return close_owner != nullptr; }
-  bool lifecycle_available() const {
-    return start_owner != nullptr && stop_owner != nullptr &&
-           close_owner != nullptr;
-  }
-  bool validation_available() const { return validate_owner != nullptr; }
-
-  static NativeMediaApi Resolve() {
-    NativeMediaApi api;
-    const HMODULE module = GetModuleHandleW(L"network_ffi.dll");
-    if (module == nullptr) return api;
-    api.start_owner = reinterpret_cast<OwnerStartFunction>(
-        GetProcAddress(module, "ssh_net_realtime_media_owner_start"));
-    api.stop_owner = reinterpret_cast<OwnerStopFunction>(
-        GetProcAddress(module, "ssh_net_realtime_media_owner_stop"));
-    api.validate_owner = reinterpret_cast<OwnerValidateFunction>(
-        GetProcAddress(module, "ssh_net_realtime_media_owner_validate"));
-    api.close_owner = reinterpret_cast<OwnerCloseFunction>(
-        GetProcAddress(module, "ssh_net_realtime_media_owner_close"));
-    api.attach_renderer = reinterpret_cast<OwnerRendererFunction>(
-        GetProcAddress(module, "ssh_net_realtime_media_owner_attach_renderer"));
-    api.detach_renderer = reinterpret_cast<OwnerRendererFunction>(
-        GetProcAddress(module, "ssh_net_realtime_media_owner_detach_renderer"));
-    api.push_h264 = reinterpret_cast<OwnerPushFunction>(
-        GetProcAddress(module, "ssh_net_realtime_media_owner_push_h264"));
-    return api;
-  }
-};
-
-std::optional<std::string> StringArgument(const EncodableMap& arguments,
-                                          const char* key) {
-  const auto it = arguments.find(EncodableValue(key));
-  if (it == arguments.end()) return std::nullopt;
-  const auto* value = std::get_if<std::string>(&it->second);
-  if (value == nullptr || value->empty() || value->size() > 128) {
-    return std::nullopt;
-  }
-  return *value;
-}
-
-std::optional<uint64_t> OwnerIdArgument(const EncodableMap& arguments) {
-  const auto token = StringArgument(arguments, "owner_token");
-  if (!token) return std::nullopt;
-  char* end = nullptr;
-  const auto value = std::strtoull(token->c_str(), &end, 10);
-  if (end == token->c_str() || *end != '\0' || value == 0) {
-    return std::nullopt;
-  }
-  return value;
-}
-
-void ReplyError(const std::unique_ptr<flutter::MethodResult<EncodableValue>>&
-                    result,
-                const char* code,
-                const char* message) {
-  result->Error(code, message);
-}
-
-const char* NativeStatusCode(int status) {
-  switch (status) {
-    case -5:
-      return "stale_generation";
-    case -6:
-    case -12:
-      return "stale_endpoint";
-    case -7:
-      return "direction_mismatch";
-    case -8:
-      return "duplicate_endpoint";
-    case -9:
-      return "driver_unavailable";
-    case -10:
-      return "peer_mismatch";
-    case -11:
-      return "frame_rejected";
-    case -4:
-      return "session_released";
-    case -1:
-      return "invalid_argument";
-    default:
-      return kBackendFailure;
-  }
-}
-
-const char* CaptureStatusCode(CaptureStatus status) {
-  switch (status) {
-    case CaptureStatus::kSourceEnded:
-      return kCaptureSourceEnded;
-    case CaptureStatus::kDuplicate:
-      return "duplicate_endpoint";
-    case CaptureStatus::kUnsupported:
-    case CaptureStatus::kBackendFailure:
-      return kBackendFailure;
-    case CaptureStatus::kEncoderUnavailable:
-      return kEncoderUnavailable;
-    case CaptureStatus::kEncoderFailed:
-      return kEncoderFailed;
-    case CaptureStatus::kNativeFailure:
-      return kBackendFailure;
-    case CaptureStatus::kNotFound:
-    case CaptureStatus::kOk:
-      return kBackendFailure;
-  }
-  return kBackendFailure;
-}
-
-EncodableMap StatsMap(const CaptureStats& stats) {
-  return EncodableMap{
-      {EncodableValue("width"), EncodableValue(stats.width)},
-      {EncodableValue("height"), EncodableValue(stats.height)},
-      {EncodableValue("frames_captured"),
-       EncodableValue(static_cast<int64_t>(stats.frames_captured))},
-      {EncodableValue("frames_sent"),
-       EncodableValue(static_cast<int64_t>(stats.frames_sent))},
-      {EncodableValue("frames_dropped"),
-       EncodableValue(static_cast<int64_t>(stats.frames_dropped))},
-      {EncodableValue("frames_decoded"), EncodableValue(0)},
-      {EncodableValue("frames_rendered"), EncodableValue(0)},
-  };
-}
+constexpr char kDecoderFailed[] = "decoder_failed";
 
 class RealtimeMediaWindowsPlugin : public flutter::Plugin {
  public:
@@ -183,7 +53,8 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
       : channel_(std::make_unique<flutter::MethodChannel<EncodableValue>>(
             registrar->messenger(), kChannelName,
             &flutter::StandardMethodCodec::GetInstance())),
-        native_media_api_(NativeMediaApi::Resolve()) {
+        native_media_api_(NativeMediaApi::Resolve()),
+        decoder_manager_(registrar->texture_registrar()) {
     channel_->SetMethodCallHandler(
         [this](const auto& call, auto result) { HandleMethod(call, std::move(result)); });
   }
@@ -241,6 +112,8 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
       native_media_api_ = NativeMediaApi::Resolve();
     }
     capture_manager_.SetPushCallback(native_media_api_.push_h264);
+    decoder_manager_.SetNativeCallbacks(native_media_api_.pull_h264,
+                                         native_media_api_.free_buffer);
     return native_media_api_.lifecycle_available();
   }
 
@@ -303,10 +176,40 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
       ReplyError(result, "direction_mismatch", "Rendering requires a receive media owner.");
       return;
     }
-    // P3.3 owns the decoder/GPU surface implementation. Until that owner is
-    // installed, fail explicitly instead of returning a synthetic texture ID.
-    ReplyError(result, kDecoderUnavailable,
-               "The Windows H.264 decoder surface is not initialized.");
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!RefreshNativeMediaApi() || native_media_api_.validate_owner == nullptr ||
+        native_media_api_.attach_renderer == nullptr ||
+        native_media_api_.detach_renderer == nullptr ||
+        native_media_api_.pull_h264 == nullptr ||
+        native_media_api_.free_buffer == nullptr) {
+      ReplyError(result, kDecoderUnavailable,
+                 "The native H.264 decoder surface is unavailable.");
+      return;
+    }
+    const auto validation_status = native_media_api_.validate_owner(*owner_id);
+    if (validation_status != 0) {
+      ReplyError(result, NativeStatusCode(validation_status),
+                 "The native receive owner is no longer current.");
+      return;
+    }
+    const auto attach_status = native_media_api_.attach_renderer(*owner_id);
+    if (attach_status != 0) {
+      ReplyError(result, NativeStatusCode(attach_status),
+                 "The native renderer capability could not be attached.");
+      return;
+    }
+    int64_t surface_id = -1;
+    const auto decoder_status = decoder_manager_.Attach(*owner_id, &surface_id);
+    if (decoder_status != DecoderStatus::kOk) {
+      native_media_api_.detach_renderer(*owner_id);
+      ReplyError(result, DecoderStatusCode(decoder_status),
+                 "The Windows H.264 decoder surface could not be attached.");
+      return;
+    }
+    result->Success(EncodableMap{
+        {EncodableValue("surface_id"),
+         EncodableValue(std::to_string(surface_id))},
+    });
   }
 
   void StopOwner(const EncodableMap& arguments,
@@ -317,11 +220,20 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
       return;
     }
     std::lock_guard<std::mutex> lock(mutex_);
+    const auto decoder_status = decoder_manager_.Detach(*owner_id);
     const auto capture_status = capture_manager_.Stop(*owner_id);
     if (!RefreshNativeMediaApi()) {
       ReplyError(result, kBackendFailure,
                  "The native media owner lifecycle is unavailable.");
       return;
+    }
+    if (native_media_api_.detach_renderer != nullptr) {
+      const auto renderer_status = native_media_api_.detach_renderer(*owner_id);
+      if (renderer_status != 0 && renderer_status != -12) {
+        ReplyError(result, NativeStatusCode(renderer_status),
+                   "The native renderer capability could not be detached.");
+        return;
+      }
     }
     const auto native_status = native_media_api_.stop_owner(*owner_id);
     if (native_status != 0 && native_status != -12) {
@@ -334,6 +246,12 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
         capture_status != CaptureStatus::kNotFound) {
       ReplyError(result, CaptureStatusCode(capture_status),
                  "The Windows capture owner could not be stopped.");
+      return;
+    }
+    if (decoder_status != DecoderStatus::kOk &&
+        decoder_status != DecoderStatus::kNotFound) {
+      ReplyError(result, DecoderStatusCode(decoder_status),
+                 "The Windows decoder could not be stopped.");
       return;
     }
     result->Success();
@@ -350,11 +268,20 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
     // Stop platform production before closing the generation-bound native
     // owner. A retry after a native close failure still sees the same stopped
     // capture record and cannot leak a frame callback.
+    const auto decoder_status = decoder_manager_.Release(*owner_id);
     capture_manager_.Stop(*owner_id);
     if (!RefreshNativeMediaApi()) {
       ReplyError(result, kBackendFailure,
                  "The native media owner lifecycle is unavailable.");
       return;
+    }
+    if (native_media_api_.detach_renderer != nullptr) {
+      const auto renderer_status = native_media_api_.detach_renderer(*owner_id);
+      if (renderer_status != 0 && renderer_status != -12) {
+        ReplyError(result, NativeStatusCode(renderer_status),
+                   "The native renderer capability could not be detached.");
+        return;
+      }
     }
     const auto stop_status = native_media_api_.stop_owner(*owner_id);
     if (stop_status != 0 && stop_status != -12) {
@@ -369,6 +296,12 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
       return;
     }
     capture_manager_.Release(*owner_id);
+    if (decoder_status != DecoderStatus::kOk &&
+        decoder_status != DecoderStatus::kNotFound) {
+      ReplyError(result, DecoderStatusCode(decoder_status),
+                 "The Windows decoder stopped with a terminal failure.");
+      return;
+    }
     result->Success();
   }
 
@@ -391,6 +324,7 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
     const auto validation_status = native_media_api_.validate_owner(*owner_id);
     if (validation_status != 0) {
       capture_manager_.Release(*owner_id);
+      decoder_manager_.Release(*owner_id);
       ReplyError(result, NativeStatusCode(validation_status),
                  "The native media owner is no longer current.");
       return;
@@ -398,9 +332,24 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
 
     CaptureStats stats;
     const auto capture_status = capture_manager_.ReadStats(*owner_id, &stats);
+    DecoderStats decoder_stats;
+    const auto decoder_status = decoder_manager_.ReadStats(*owner_id, &decoder_stats);
+    if (decoder_status == DecoderStatus::kNativeFailure) {
+      const char* code =
+          decoder_stats.terminal_status ==
+                  realtime_media_windows::kDecoderTerminalFailed
+              ? kDecoderFailed
+              : NativeStatusCode(decoder_stats.terminal_status);
+      ReplyError(result, code, "The Windows H.264 decoder owner failed.");
+      return;
+    }
     if (capture_status == CaptureStatus::kNotFound) {
-      // A receive owner may be valid before a native decoder is attached.
-      result->Success(StatsMap(stats));
+      if (decoder_status == DecoderStatus::kOk) {
+        result->Success(StatsMap(stats, &decoder_stats));
+      } else {
+        // A receive owner may be valid before a native decoder is attached.
+        result->Success(StatsMap(stats));
+      }
       return;
     }
     if (capture_status != CaptureStatus::kOk) {
@@ -423,12 +372,15 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
                  "The Windows capture source is no longer producing frames.");
       return;
     }
-    result->Success(StatsMap(stats));
+    result->Success(decoder_status == DecoderStatus::kOk
+                        ? StatsMap(stats, &decoder_stats)
+                        : StatsMap(stats));
   }
 
   std::unique_ptr<flutter::MethodChannel<EncodableValue>> channel_;
   NativeMediaApi native_media_api_;
   WindowsCaptureManager capture_manager_;
+  WindowsDecoderManager decoder_manager_;
   std::mutex mutex_;
 };
 

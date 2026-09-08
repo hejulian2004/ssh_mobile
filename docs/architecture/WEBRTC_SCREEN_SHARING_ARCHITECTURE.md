@@ -12,11 +12,11 @@ merged at `352ef4dc9c602f648f0975809ce12553957b2a75` after final head
 Dart/native boundary package and runtime-owned opaque owner port; its Windows
 capture/codec/render capability and Phase 4–7 remain unshipped and must not be
 described as delivered. The native plugin now contains Windows Graphics
-Capture for monitor/window sources and a native Media Foundation H.264 send
-ingress implementation. Hardware availability, decoder/Texture rendering, and
-Windows E2E remain unaccepted. The plugin is still fail-closed when those later
-workers are unavailable; capture or ingress compilation evidence is not evidence
-of a working capture-to-render pipeline.
+Capture for monitor/window sources, native Media Foundation H.264 send ingress,
+and a hardware H.264 receive/D3D11 texture owner. Hardware availability and
+Windows E2E remain unaccepted. The plugin is still fail-closed when those
+workers are unavailable; native implementation or compilation evidence is not
+evidence of a working capture-to-render pipeline.
 
 This is only the Screen Share slice of M8 (RTC) in
 [`NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md`](../NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md).
@@ -127,7 +127,7 @@ pass.
 | Runtime media | Generic Realtime sessions remain media-neutral; the explicit screen-share integration configures one H.264 screen transceiver on the sole native peer. `RealtimeIoDriver` flushes/receives encoded RTP without DataChannel or event-stream media; a native-only C ABI pushes/pulls encoded access units by opaque endpoint ID | Platform-native capture/codec/render owners invoke that bridge before screen SDP negotiation in later phases |
 | QoS | A separate screen-video queue is fixed to three frames with keyframe-aware dropping; generic MediaFrame's four-frame policy remains unchanged | Phase 7 adaptation and telemetry |
 | Dart video shape | `network_sdk` exposes only Realtime signaling/state; `realtime_media` exposes opaque endpoint/surface lifecycle with no per-frame Dart path | Concrete platform surface adapter lifecycle notifications |
-| Capture/rendering | Windows Graphics Capture lifecycle and native H.264 send ingress are implemented but have no accepted hardware/E2E evidence; decoder and texture chain remain unavailable | Windows and Android native capture, hardware codecs, and native surfaces |
+| Capture/rendering | Windows Graphics Capture, native H.264 send ingress, and the receive decoder/D3D11 texture owner are implemented but have no accepted hardware/E2E evidence | Windows and Android native capture, hardware codecs, and native surfaces |
 | Consent | Existing signaling has no screen-share business intent or user-accept gate | Typed, versioned screen-share consent payload and explicit accept/reject before answer |
 | TURN | Runtime configuration may hold development credentials in memory | Authenticated, short-lived, per-session production credentials |
 | Recovery | Transport loss terminates Realtime and invalidates every bound native media endpoint before its peer closes | Same rule, with platform capture/decoder/surface cleanup in later phases |
@@ -146,7 +146,7 @@ later phase succeeds.
 | 0 | Implementation evidence accepted with PR #67; no separate screen-share PR | Accepted architecture, ADR-034, memory routing, and documentation checks |
 | 1 | Implementation evidence accepted with PR #67; no separate screen-share PR | Native H.264-only RTP ingress/egress, exact three-frame queue, bounded frame validation, terminal media discard tests, local loopback, and relay-only coturn H.264 coverage |
 | 2 | Accepted in PR #67 and merged to `main` | Runtime/realtime-generation-bound opaque endpoint leases, native-only FFI create/release/H.264 push/pull controls, Dart lifecycle contract/fake tests, and no per-frame Dart API |
-| 3 | In progress: boundary, Windows capture lifecycle, and unaccepted H.264 send ingress implementation | Hardware availability, decoder/render, Windows E2E, and the complete Phase 3 acceptance matrix remain outstanding |
+| 3 | In progress: boundary, Windows capture lifecycle, H.264 ingress, and decoder/texture implementation | Hardware availability, Windows E2E, and the complete Phase 3 acceptance matrix remain outstanding |
 | 4–7 | Not started | Remain subject to the planned acceptance matrix below |
 
 ## Layer boundaries

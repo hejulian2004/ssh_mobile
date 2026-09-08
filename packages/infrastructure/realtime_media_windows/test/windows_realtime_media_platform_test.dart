@@ -46,4 +46,34 @@ void main() {
       ),
     );
   });
+
+  test('maps native decoder-unavailable surface failure to typed media error',
+      () async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      throw PlatformException(
+        code: 'decoder_unavailable',
+        message: 'hardware H.264 decoder unavailable',
+      );
+    });
+
+    const platform = MethodChannelWindowsRealtimeMediaPlatform();
+    await expectLater(
+      platform.attachRemoteVideoSurface(
+        endpointId: RealtimeMediaEndpointId('endpoint-1'),
+        identity: RealtimeMediaEndpointIdentity(
+          realtimeId: 'realtime-1',
+          peerId: 'peer-1',
+          generation: 1,
+          direction: RealtimeMediaDirection.receive,
+        ),
+      ),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.decoderUnavailable,
+        ),
+      ),
+    );
+  });
 }

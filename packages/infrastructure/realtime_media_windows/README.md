@@ -5,9 +5,9 @@ Last updated: 2026-09-08
 `realtime_media_windows` is the Windows-owned adapter for the public
 `realtime_media` endpoint lifecycle. It composes the App Shell's native
 endpoint lease backend with a Windows platform owner. The native owner now
-implements Windows Graphics Capture for display/window sources and a native
-Media Foundation H.264 hardware send-ingress worker; later gates add hardware
-decode and GPU/Flutter Texture rendering.
+implements Windows Graphics Capture for display/window sources, a native Media
+Foundation H.264 hardware send-ingress worker, and a hardware receive decoder
+with D3D11/Flutter Texture ownership.
 
 The Dart side deliberately carries no frame bytes, encoded data, native
 addresses, or GPU buffers. Its method channel contains only bounded endpoint
@@ -28,13 +28,13 @@ credentials, or feature state.
 ## Current phase boundary
 
 This package now includes the runtime owner-token bridge and a native Windows
-Graphics Capture lifecycle owner for monitor/window sources and the native
-Media Foundation H.264 send ingress. Capture buffers and encoded access units
-remain native; source close, resolution-change restart boundaries, stop, and
-release are handled without a Dart frame path. Hardware encoder availability,
-decoder/GPU surface, Flutter Texture, and Windows E2E acceptance remain
-separate gates; this package must still fail closed for those capabilities
-until their owners are implemented and verified.
+Graphics Capture lifecycle owner for monitor/window sources, the native Media
+Foundation H.264 send ingress, and the receive-side hardware decoder/GPU
+surface owner. Capture buffers, encoded access units, decoded textures, and
+texture handles remain native; source close, resolution-change restart
+boundaries, stop, and release are handled without a Dart frame path. Hardware
+availability and Windows E2E acceptance remain separate gates; this package
+must still fail closed when a platform capability is unavailable or stale.
 
 ## Validation
 
