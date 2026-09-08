@@ -1,4 +1,4 @@
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 # realtime_media_windows maintenance contract
 
@@ -23,11 +23,12 @@ Last updated: 2026-09-07
 
 ## Native implementation gate
 
-The method-channel adapter is a contract boundary only until the Windows plugin
-implements Graphics Capture, Media Foundation H.264, decoder reset, and texture
-registration. Platform methods must return a typed failure such as
-`encoder_unavailable` or `decoder_unavailable` while that native capability is
-absent; they must not report a successful capture or surface.
+The Windows plugin now owns Graphics Capture and native Media Foundation H.264
+send ingress. Decoder reset, GPU surfaces, and texture registration remain a
+contract boundary until their native owners are implemented. Platform methods
+must return a typed failure such as `encoder_unavailable` or
+`decoder_unavailable` while that native capability is absent; they must not
+report a successful capture or surface.
 
 ## Validation
 

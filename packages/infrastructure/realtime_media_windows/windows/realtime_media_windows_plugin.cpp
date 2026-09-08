@@ -25,18 +25,22 @@ using flutter::EncodableValue;
 using realtime_media_windows::CaptureSourceDescriptor;
 using realtime_media_windows::CaptureStatus;
 using realtime_media_windows::CaptureStats;
+using realtime_media_windows::H264PushCallback;
 using realtime_media_windows::WindowsCaptureManager;
 
 constexpr char kChannelName[] = "ssh_mobile/realtime_media/windows";
 constexpr char kBackendFailure[] = "backend_failure";
 constexpr char kCaptureSourceEnded[] = "capture_source_ended";
 constexpr char kDecoderUnavailable[] = "decoder_unavailable";
+constexpr char kEncoderUnavailable[] = "encoder_unavailable";
+constexpr char kEncoderFailed[] = "encoder_failed";
 
 using OwnerCloseFunction = int(__cdecl*)(uint64_t);
 using OwnerStartFunction = int(__cdecl*)(uint64_t);
 using OwnerStopFunction = int(__cdecl*)(uint64_t);
 using OwnerValidateFunction = int(__cdecl*)(uint64_t);
 using OwnerRendererFunction = int(__cdecl*)(uint64_t);
+using OwnerPushFunction = H264PushCallback;
 
 struct NativeMediaApi {
   OwnerStartFunction start_owner = nullptr;
@@ -45,6 +49,7 @@ struct NativeMediaApi {
   OwnerCloseFunction close_owner = nullptr;
   OwnerRendererFunction attach_renderer = nullptr;
   OwnerRendererFunction detach_renderer = nullptr;
+  OwnerPushFunction push_h264 = nullptr;
 
   bool available() const { return close_owner != nullptr; }
   bool lifecycle_available() const {
@@ -69,6 +74,8 @@ struct NativeMediaApi {
         GetProcAddress(module, "ssh_net_realtime_media_owner_attach_renderer"));
     api.detach_renderer = reinterpret_cast<OwnerRendererFunction>(
         GetProcAddress(module, "ssh_net_realtime_media_owner_detach_renderer"));
+    api.push_h264 = reinterpret_cast<OwnerPushFunction>(
+        GetProcAddress(module, "ssh_net_realtime_media_owner_push_h264"));
     return api;
   }
 };
@@ -137,6 +144,12 @@ const char* CaptureStatusCode(CaptureStatus status) {
     case CaptureStatus::kUnsupported:
     case CaptureStatus::kBackendFailure:
       return kBackendFailure;
+    case CaptureStatus::kEncoderUnavailable:
+      return kEncoderUnavailable;
+    case CaptureStatus::kEncoderFailed:
+      return kEncoderFailed;
+    case CaptureStatus::kNativeFailure:
+      return kBackendFailure;
     case CaptureStatus::kNotFound:
     case CaptureStatus::kOk:
       return kBackendFailure;
@@ -150,7 +163,8 @@ EncodableMap StatsMap(const CaptureStats& stats) {
       {EncodableValue("height"), EncodableValue(stats.height)},
       {EncodableValue("frames_captured"),
        EncodableValue(static_cast<int64_t>(stats.frames_captured))},
-      {EncodableValue("frames_sent"), EncodableValue(0)},
+      {EncodableValue("frames_sent"),
+       EncodableValue(static_cast<int64_t>(stats.frames_sent))},
       {EncodableValue("frames_dropped"),
        EncodableValue(static_cast<int64_t>(stats.frames_dropped))},
       {EncodableValue("frames_decoded"), EncodableValue(0)},
@@ -226,6 +240,7 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
     if (!native_media_api_.available()) {
       native_media_api_ = NativeMediaApi::Resolve();
     }
+    capture_manager_.SetPushCallback(native_media_api_.push_h264);
     return native_media_api_.lifecycle_available();
   }
 
@@ -244,9 +259,9 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!RefreshNativeMediaApi()) {
+    if (!RefreshNativeMediaApi() || native_media_api_.push_h264 == nullptr) {
       ReplyError(result, kBackendFailure,
-                 "The native media owner lifecycle is unavailable.");
+                 "The native media owner or H.264 ingress is unavailable.");
       return;
     }
     const auto start_status = native_media_api_.start_owner(*owner_id);
@@ -389,6 +404,21 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
       return;
     }
     if (capture_status != CaptureStatus::kOk) {
+      if (capture_status == CaptureStatus::kNativeFailure) {
+        if (stats.terminal_status ==
+            realtime_media_windows::kCaptureTerminalEncoderFailed) {
+          ReplyError(result, kEncoderFailed,
+                     "The Windows hardware H.264 encoder failed.");
+        } else if (stats.terminal_status ==
+                   realtime_media_windows::kCaptureTerminalResolutionChanged) {
+          ReplyError(result, kCaptureSourceEnded,
+                     "The capture resolution changed; restart the media owner.");
+        } else {
+          ReplyError(result, NativeStatusCode(stats.terminal_status),
+                     "The native media owner rejected a captured frame.");
+        }
+        return;
+      }
       ReplyError(result, CaptureStatusCode(capture_status),
                  "The Windows capture source is no longer producing frames.");
       return;

@@ -60,15 +60,20 @@ ADR-034 或原始技术架构文档。
 - [x] Phase 3.1 native capture lifecycle implementation：Windows Graphics Capture
   已在 `realtime_media_windows` native owner 中实现 monitor/window source 枚举、
   generation-bound start/stop/release、FrameArrived native buffer ownership、
-  source close、resolution change frame-pool recreate 和 payload-free stats；
-  C++17/W4 编译通过，Windows 实机与完整 Phase 3 PR 验收仍未完成。
+  source close、resolution-change fail-closed restart boundary 和 payload-free
+  stats；C++17/W4 编译通过，Windows 实机与完整 Phase 3 PR 验收仍未完成。
+- [x] Phase 3.2 native Windows H.264 ingress implementation：Media Foundation
+  hardware MFT discovery、native BGRA→NV12 conversion、Annex-B access-unit
+  normalization、bounded Phase 2 owner push 和 typed encoder/native failure
+  mapping 已接入；仅有本地 translation-unit 编译证据，硬件实机吞吐与端到端
+  验收仍未完成。
 - [ ] Phase 3 hardware pipeline gate：Media Foundation
-  H.264 worker、GPU decoder/Texture 和 Windows 双端 E2E 尚未完成；当前 plugin
-  对缺失 codec/renderer capability 只返回 typed failure，不报告虚假的成功。
+  H.264 decode/Texture 和 Windows 双端 E2E 尚未完成；当前 plugin 对缺失
+  codec/renderer capability 只返回 typed failure，不报告虚假的成功。
 
 当前状态：Phase 0、Phase 1、Phase 2 的实现、exact-head CI 证据和 PR #67
-接受记录已齐；Phase 3.1 的 Windows Graphics Capture lifecycle implementation
-已落地并完成本地 C++/Rust 复核，但 Phase 3 尚未接受。Hardware codec、GPU
+接受记录已齐；Phase 3.1 capture lifecycle 与 Phase 3.2 H.264 ingress
+implementation 已落地并完成本地 C++/Rust 复核，但 Phase 3 尚未接受。Hardware
 decoder/Texture、Windows 双端 E2E 与 Phase 4–7 仍不得描述为已交付能力。
 
 ## PR #67 评审修正清单
@@ -144,7 +149,8 @@ decoder/Texture、Windows 双端 E2E 与 Phase 4–7 仍不得描述为已交付
 - [x] 增加 runtime-owned native owner token port；owner close 与 endpoint release
   保持分离，generation/stale endpoint 校验仍由既有 native registry 负责。
 - [x] Windows monitor/window capture lifecycle owner（平台实机/E2E 验收待完成）。
-- [ ] Hardware H.264 encode/decode。
+- [x] Hardware H.264 send ingress implementation（硬件实机/端到端验收待完成）。
+- [ ] Hardware H.264 decode。
 - [ ] GPU surface 与 Flutter Texture 链路。
 - [ ] raw frames 不经过 Dart；完成 Windows 专属 analyze/test 和手工 E2E 记录。
 
@@ -156,8 +162,8 @@ Dart analyzer 无 error，Rust format、module/resource/architecture checks 和
 Windows plugin 两个 C++17/W4 translation units compile 均通过。Flutter wrapper
 test/analyzer 在当前离线
 环境无法完成 native-asset/pub advisory 阶段，因此不作为 Phase 3 acceptance
-evidence。Windows Graphics Capture、Media Foundation worker、GPU decoder/
-Texture 和 Windows 双端 E2E 仍未通过，PR #68 继续保持 draft。
+evidence。Windows Graphics Capture、Media Foundation hardware ingress 的实机
+吞吐、GPU decoder/Texture 和 Windows 双端 E2E 仍未通过，PR #68 继续保持 draft。
 
 ### Phase 4 — Android Capture / Codec / Render
 

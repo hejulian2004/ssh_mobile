@@ -2,6 +2,7 @@
 #define REALTIME_MEDIA_WINDOWS_CAPTURE_H_
 
 #include <cstdint>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -24,9 +25,39 @@ struct CaptureStats {
   int width = 0;
   int height = 0;
   uint64_t frames_captured = 0;
+  uint64_t frames_sent = 0;
   uint64_t frames_dropped = 0;
   bool source_ended = false;
+  // Zero means that no terminal encoder/native push failure was observed.
+  // Negative values are the Phase 2 native status code; the internal sentinel
+  // value declared below represents a platform-owned encoder failure.
+  int terminal_status = 0;
 };
+
+// This layout must remain identical to the native-only
+// SshNetRealtimeMediaFrameMetadata #[repr(C)] type. It is intentionally not
+// exposed through the Flutter method channel.
+struct NativeH264FrameMetadata {
+  uint64_t sequence = 0;
+  uint64_t timestamp = 0;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint8_t keyframe = 0;
+};
+
+using H264PushCallback = int(__cdecl *)(uint64_t owner,
+                                         NativeH264FrameMetadata metadata,
+                                         const uint8_t* payload,
+                                         size_t payload_length);
+
+static_assert(sizeof(NativeH264FrameMetadata) == 32,
+              "Windows and Rust H.264 metadata layouts must stay ABI-identical");
+
+// Internal terminal values used when a platform encoder fails before a Phase
+// 2 status code exists. They never cross Dart; the plugin maps them to typed
+// encoder errors when a low-frequency stats read observes the failure.
+constexpr int kCaptureTerminalEncoderFailed = -1001;
+constexpr int kCaptureTerminalResolutionChanged = -1002;
 
 enum class CaptureStatus {
   kOk,
@@ -35,6 +66,9 @@ enum class CaptureStatus {
   kDuplicate,
   kNotFound,
   kBackendFailure,
+  kEncoderUnavailable,
+  kEncoderFailed,
+  kNativeFailure,
 };
 
 // Owns Windows Graphics Capture objects and frame callbacks. The class is
@@ -48,6 +82,7 @@ class WindowsCaptureManager final {
   WindowsCaptureManager(const WindowsCaptureManager&) = delete;
   WindowsCaptureManager& operator=(const WindowsCaptureManager&) = delete;
 
+  void SetPushCallback(H264PushCallback callback);
   bool EnumerateSources(std::vector<CaptureSourceDescriptor>* sources);
   CaptureStatus Start(uint64_t owner, const std::string& source_id);
   CaptureStatus Stop(uint64_t owner);

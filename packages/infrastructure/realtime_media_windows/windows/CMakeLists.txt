@@ -7,6 +7,7 @@ set(PLUGIN_NAME "realtime_media_windows_plugin")
 add_library(${PLUGIN_NAME} SHARED
   "realtime_media_windows_plugin.cpp"
   "windows_capture.cpp"
+  "windows_h264_encoder.cpp"
 )
 apply_standard_settings(${PLUGIN_NAME})
 set_target_properties(${PLUGIN_NAME} PROPERTIES
