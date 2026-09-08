@@ -152,4 +152,74 @@ void main() {
     expect(arguments['reason'], 'congestion');
     expect(arguments.keys, isNot(contains('payload')));
   });
+
+  test('decodes bounded native queue and recovery statistics', () async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'readStats');
+      return <String, Object?>{
+        'width': 1920,
+        'height': 1080,
+        'frames_captured': 12,
+        'frames_sent': 11,
+        'frames_dropped': 2,
+        'frames_decoded': 0,
+        'frames_rendered': 0,
+        'packets_sent': 0,
+        'packets_received': 0,
+        'packets_lost': 0,
+        'frames_recovered': 0,
+        'keyframe_requests': 3,
+        'jitter_ms': 0,
+        'rtt_ms': 0,
+        'queue_depth': 2,
+        'queue_capacity': 3,
+      };
+    });
+
+    const platform = MethodChannelWindowsRealtimeMediaPlatform();
+    final stats = await platform.readStats(
+      endpointId: RealtimeMediaEndpointId('endpoint-1'),
+      identity: RealtimeMediaEndpointIdentity(
+        realtimeId: 'realtime-1',
+        peerId: 'peer-1',
+        generation: 9,
+        direction: RealtimeMediaDirection.send,
+      ),
+      ownerToken: RealtimeMediaNativeOwnerToken('owner-1'),
+    );
+
+    expect(stats.framesDropped, 2);
+    expect(stats.keyframeRequests, 3);
+    expect(stats.queueDepth, 2);
+    expect(stats.queueCapacity, 3);
+  });
+
+  test(
+    'fails closed when native queue statistics exceed the fixed bound',
+    () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        return <String, Object?>{'queue_depth': 4, 'queue_capacity': 3};
+      });
+
+      const platform = MethodChannelWindowsRealtimeMediaPlatform();
+      await expectLater(
+        platform.readStats(
+          endpointId: RealtimeMediaEndpointId('endpoint-1'),
+          identity: RealtimeMediaEndpointIdentity(
+            realtimeId: 'realtime-1',
+            peerId: 'peer-1',
+            generation: 9,
+            direction: RealtimeMediaDirection.send,
+          ),
+        ),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.backendFailure,
+          ),
+        ),
+      );
+    },
+  );
 }

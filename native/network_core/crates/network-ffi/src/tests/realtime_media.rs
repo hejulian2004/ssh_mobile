@@ -5,9 +5,10 @@ use crate::realtime_media::{
     ssh_net_realtime_media_owner_apply_adaptation, ssh_net_realtime_media_owner_attach_renderer,
     ssh_net_realtime_media_owner_close, ssh_net_realtime_media_owner_detach_renderer,
     ssh_net_realtime_media_owner_open, ssh_net_realtime_media_owner_push_h264,
-    ssh_net_realtime_media_owner_request_keyframe, ssh_net_realtime_media_owner_reset_decoder,
-    ssh_net_realtime_media_owner_start, ssh_net_realtime_media_owner_stop,
-    ssh_net_realtime_media_owner_validate, SshNetRealtimeMediaFrameMetadata,
+    ssh_net_realtime_media_owner_read_stats, ssh_net_realtime_media_owner_request_keyframe,
+    ssh_net_realtime_media_owner_reset_decoder, ssh_net_realtime_media_owner_start,
+    ssh_net_realtime_media_owner_stop, ssh_net_realtime_media_owner_validate,
+    SshNetRealtimeMediaFrameMetadata, SshNetRealtimeMediaStats,
     SSH_NET_REALTIME_MEDIA_DIRECTION_RECEIVE, SSH_NET_REALTIME_MEDIA_DIRECTION_SEND,
     SSH_NET_REALTIME_MEDIA_STATUS_STALE_ENDPOINT,
 };
@@ -168,6 +169,15 @@ fn media_endpoint_ffi_success_path_round_trips_native_h264_and_releases_cleanly(
         },
         0
     );
+    let mut owner_stats = SshNetRealtimeMediaStats::default();
+    assert_eq!(
+        unsafe { ssh_net_realtime_media_owner_read_stats(owner, &mut owner_stats) },
+        0
+    );
+    assert_eq!(owner_stats.enqueued, 1);
+    assert_eq!(owner_stats.queue_depth, 1);
+    assert_eq!(owner_stats.queue_capacity, 3);
+    assert_eq!(owner_stats.keyframe_requests, 1);
 
     let malformed_payload = [0, 0, 0, 1];
     assert_eq!(
@@ -306,6 +316,11 @@ fn media_endpoint_ffi_success_path_round_trips_native_h264_and_releases_cleanly(
     assert_eq!(owner_returned, payload);
     unsafe { ssh_net_buffer_free(owner_payload) };
     assert_eq!(ssh_net_realtime_media_owner_stop(receive_owner), 0);
+    let mut stopped_stats = SshNetRealtimeMediaStats::default();
+    assert_eq!(
+        unsafe { ssh_net_realtime_media_owner_read_stats(receive_owner, &mut stopped_stats) },
+        0
+    );
     assert_eq!(
         ssh_net_realtime_media_owner_reset_decoder(receive_owner),
         crate::realtime_media::SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE

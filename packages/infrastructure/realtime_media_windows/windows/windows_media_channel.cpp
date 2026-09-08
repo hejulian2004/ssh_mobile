@@ -30,6 +30,8 @@ NativeMediaApi NativeMediaApi::Resolve() {
       GetProcAddress(module, "ssh_net_realtime_media_owner_request_keyframe"));
   api.reset_decoder = reinterpret_cast<OwnerRecoveryFunction>(
       GetProcAddress(module, "ssh_net_realtime_media_owner_reset_decoder"));
+  api.read_stats = reinterpret_cast<OwnerStatsFunction>(
+      GetProcAddress(module, "ssh_net_realtime_media_owner_read_stats"));
   api.apply_adaptation = reinterpret_cast<OwnerAdaptationFunction>(
       GetProcAddress(module, "ssh_net_realtime_media_owner_apply_adaptation"));
   api.close_owner = reinterpret_cast<OwnerCloseFunction>(
@@ -142,7 +144,8 @@ const char* DecoderStatusCode(DecoderStatus status) {
 }
 
 flutter::EncodableMap StatsMap(const CaptureStats& stats,
-                               const DecoderStats* decoder) {
+                               const DecoderStats* decoder,
+                               const NativeMediaStats* native) {
   const int width = decoder != nullptr && decoder->width > 0 ? decoder->width
                                                                : stats.width;
   const int height = decoder != nullptr && decoder->height > 0
@@ -151,7 +154,12 @@ flutter::EncodableMap StatsMap(const CaptureStats& stats,
   const auto frames_decoded = decoder == nullptr ? 0 : decoder->frames_decoded;
   const auto frames_rendered = decoder == nullptr ? 0 : decoder->frames_rendered;
   const auto frames_dropped =
-      stats.frames_dropped + (decoder == nullptr ? 0 : decoder->frames_dropped);
+      stats.frames_dropped + (decoder == nullptr ? 0 : decoder->frames_dropped) +
+      (native == nullptr ? 0 : native->dropped);
+  const auto queue_depth = native == nullptr ? 0 : native->queue_depth;
+  const auto queue_capacity = native == nullptr ? 3 : native->queue_capacity;
+  const auto keyframe_requests =
+      native == nullptr ? 0 : native->keyframe_requests;
   return flutter::EncodableMap{
       {flutter::EncodableValue("width"), flutter::EncodableValue(width)},
       {flutter::EncodableValue("height"), flutter::EncodableValue(height)},
@@ -165,18 +173,21 @@ flutter::EncodableMap StatsMap(const CaptureStats& stats,
        flutter::EncodableValue(static_cast<int64_t>(frames_decoded))},
       {flutter::EncodableValue("frames_rendered"),
        flutter::EncodableValue(static_cast<int64_t>(frames_rendered))},
-      // Packet-level QoS counters are populated by the shared native media
-      // owner in later platform wiring. Keep the method-channel shape stable
-      // now and report bounded zero values until that owner is attached.
+      // Packet-level transport counters remain owned by the shared WebRTC
+      // owner and are not yet exposed here. Keep the method-channel shape
+      // stable while reporting bounded zero values for those fields.
       {flutter::EncodableValue("packets_sent"), flutter::EncodableValue(0)},
       {flutter::EncodableValue("packets_received"), flutter::EncodableValue(0)},
       {flutter::EncodableValue("packets_lost"), flutter::EncodableValue(0)},
       {flutter::EncodableValue("frames_recovered"), flutter::EncodableValue(0)},
-      {flutter::EncodableValue("keyframe_requests"), flutter::EncodableValue(0)},
+      {flutter::EncodableValue("keyframe_requests"),
+       flutter::EncodableValue(static_cast<int64_t>(keyframe_requests))},
       {flutter::EncodableValue("jitter_ms"), flutter::EncodableValue(0)},
       {flutter::EncodableValue("rtt_ms"), flutter::EncodableValue(0)},
-      {flutter::EncodableValue("queue_depth"), flutter::EncodableValue(0)},
-      {flutter::EncodableValue("queue_capacity"), flutter::EncodableValue(3)},
+      {flutter::EncodableValue("queue_depth"),
+       flutter::EncodableValue(static_cast<int64_t>(queue_depth))},
+      {flutter::EncodableValue("queue_capacity"),
+       flutter::EncodableValue(static_cast<int64_t>(queue_capacity))},
   };
 }
 

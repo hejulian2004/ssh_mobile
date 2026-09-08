@@ -10,12 +10,43 @@ use crate::peer::{rtc_error, MediaDirection, WebRtcError, WebRtcPeer};
 
 use super::{
     EncodedVideoFrame, KeyframeRequestReason, RtpMediaError, RtpPacketizer, RtpReassembler,
-    VideoEnqueueResult, VideoFrameError, VideoQueue, MAX_SCREEN_VIDEO_HEIGHT,
-    MAX_SCREEN_VIDEO_WIDTH,
+    VideoEnqueueResult, VideoFrameError, VideoMediaStats, VideoQueue, MAX_SCREEN_VIDEO_HEIGHT,
+    MAX_SCREEN_VIDEO_WIDTH, SCREEN_VIDEO_QUEUE_CAPACITY,
 };
 
 const H264_RTP_PAYLOAD_TYPE: u8 = 102;
 const H264_RTP_MTU: usize = 1_200;
+
+/// Bounded queue/recovery counters for one native H.264 screen-video
+/// direction. Platform owners may expose these as low-frequency metadata; no
+/// frame payload or per-frame event crosses the native boundary.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct H264ScreenVideoStats {
+    pub enqueued: u64,
+    pub dequeued: u64,
+    pub dropped: u64,
+    pub keyframe_requests: u64,
+    pub queue_depth: u32,
+    pub queue_capacity: u32,
+}
+
+impl H264ScreenVideoStats {
+    fn from_queue(queue: &VideoQueue) -> Self {
+        let stats: VideoMediaStats = queue.stats();
+        Self {
+            enqueued: stats.enqueued,
+            dequeued: stats.dequeued,
+            dropped: stats
+                .dropped_stale
+                .saturating_add(stats.dropped_overflow)
+                .saturating_add(stats.dropped_unsafe_delta)
+                .saturating_add(stats.dropped_on_disconnect),
+            keyframe_requests: stats.keyframe_requests,
+            queue_depth: queue.len().min(SCREEN_VIDEO_QUEUE_CAPACITY) as u32,
+            queue_capacity: SCREEN_VIDEO_QUEUE_CAPACITY as u32,
+        }
+    }
+}
 
 /// Why a native sender target was selected. The value is carried only across
 /// the native owner port and is never serialized as media payload.
@@ -383,6 +414,38 @@ impl WebRtcPeer {
         self.screen_video
             .as_ref()
             .map_or(0, |video| video.outbound.len())
+    }
+
+    /// Returns bounded queue and recovery counters for one screen-video
+    /// direction. This is an observational native snapshot and never touches
+    /// the media payload path.
+    pub fn h264_screen_video_stats(
+        &self,
+        direction: MediaDirection,
+    ) -> Result<H264ScreenVideoStats, WebRtcError> {
+        let video = self
+            .screen_video
+            .as_ref()
+            .ok_or(WebRtcError::ScreenVideoNotConfigured)?;
+        let stats = match direction {
+            MediaDirection::Sendonly => H264ScreenVideoStats::from_queue(&video.outbound),
+            MediaDirection::Recvonly => H264ScreenVideoStats::from_queue(&video.inbound),
+            MediaDirection::Sendrecv => {
+                let outbound = H264ScreenVideoStats::from_queue(&video.outbound);
+                let inbound = H264ScreenVideoStats::from_queue(&video.inbound);
+                H264ScreenVideoStats {
+                    enqueued: outbound.enqueued.saturating_add(inbound.enqueued),
+                    dequeued: outbound.dequeued.saturating_add(inbound.dequeued),
+                    dropped: outbound.dropped.saturating_add(inbound.dropped),
+                    keyframe_requests: outbound
+                        .keyframe_requests
+                        .saturating_add(inbound.keyframe_requests),
+                    queue_depth: outbound.queue_depth.saturating_add(inbound.queue_depth),
+                    queue_capacity: (SCREEN_VIDEO_QUEUE_CAPACITY * 2) as u32,
+                }
+            }
+        };
+        Ok(stats)
     }
 
     pub fn reset_h264_screen_video_decoder(&mut self) -> Result<(), WebRtcError> {

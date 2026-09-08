@@ -15,8 +15,8 @@ use std::time::Instant;
 #[cfg(feature = "ffi-test-support")]
 use network_webrtc::media::RtpPacketizer;
 use network_webrtc::{
-    EncodedVideoFrame, H264AdaptationTarget, MediaDirection, RealtimeIoDriver,
-    RealtimeIoDriverHandle, VideoEnqueueResult, WebRtcError,
+    EncodedVideoFrame, H264AdaptationTarget, H264ScreenVideoStats, MediaDirection,
+    RealtimeIoDriver, RealtimeIoDriverHandle, VideoEnqueueResult, WebRtcError,
 };
 
 use crate::runtime::RuntimeState;
@@ -327,6 +327,24 @@ impl RealtimeMediaRegistry {
             driver.peer_mut().apply_h264_screen_video_adaptation(target)
         })
     }
+
+    fn stats(
+        &mut self,
+        endpoint_id: RealtimeMediaEndpointId,
+    ) -> Result<H264ScreenVideoStats, RealtimeMediaError> {
+        let direction = self
+            .endpoints
+            .get(&endpoint_id)
+            .map(|endpoint| endpoint.direction)
+            .ok_or(RealtimeMediaError::StaleEndpoint)?;
+        let media_direction = match direction {
+            RealtimeMediaDirection::Send => MediaDirection::Sendonly,
+            RealtimeMediaDirection::Receive => MediaDirection::Recvonly,
+        };
+        self.with_endpoint(endpoint_id, direction, |driver| {
+            driver.peer_mut().h264_screen_video_stats(media_direction)
+        })
+    }
 }
 
 pub(crate) async fn create_endpoint(
@@ -432,6 +450,17 @@ pub(crate) fn apply_adaptation(
         .lock()
         .map_err(|_| RealtimeMediaError::Internal)?;
     registry.apply_adaptation(endpoint_id, target)
+}
+
+pub(crate) fn stats(
+    state: &RuntimeState,
+    endpoint_id: RealtimeMediaEndpointId,
+) -> Result<H264ScreenVideoStats, RealtimeMediaError> {
+    let mut registry = state
+        .realtime_media
+        .lock()
+        .map_err(|_| RealtimeMediaError::Internal)?;
+    registry.stats(endpoint_id)
 }
 
 pub(crate) fn pop_endpoint(

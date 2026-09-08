@@ -513,7 +513,11 @@ endpoint operation, or frame that belongs to an old generation.
 ## QoS, statistics, and telemetry
 
 The first fixed profile is a maximum of 1920 by 1080, 15 FPS, and about 3 Mbps.
-Phase 7 may adapt it using loss, RTT, encoder backlog, and queue pressure:
+Phase 7 may adapt it using loss, RTT, encoder backlog, and queue pressure. The
+low-frequency Dart controller applies three-second congestion hysteresis,
+bounded 25-percent bitrate steps, a severe-loss/RTT 720p10 target, and one-level
+recovery only after ten healthy seconds; native owners remain responsible for
+the actual hardware mutation and the queue never grows beyond three frames:
 
 | Condition | Action |
 | --- | --- |
@@ -522,10 +526,13 @@ Phase 7 may adapt it using loss, RTT, encoder backlog, and queue pressure:
 | Loss at least 10 percent or RTT at least 400 ms | Move to 720p10 |
 | Ten seconds healthy with loss below 2 percent, RTT below 150 ms, and healthy queues | Recover one level only |
 
-Statistics update outside the blocking media hot path. The planned aggregate
-fields include capture, encode, sent, decode, and render FPS; resolution;
-target and actual bitrate; RTT, jitter, loss; frame and keyframe counters;
-codec; and selected ICE path.
+Statistics update outside the blocking media hot path. The current native owner
+bridge exports fixed-width enqueue/dequeue/drop, keyframe-request, and bounded
+queue depth/capacity counters into the low-frequency `RealtimeMediaStats`
+snapshot; packet transport, RTT, and jitter counters remain platform-gated.
+The planned aggregate fields include capture, encode, sent, decode, and render
+FPS; resolution; target and actual bitrate; RTT, jitter, loss; frame and
+keyframe counters; codec; and selected ICE path.
 
 Telemetry work follows ADR-033 and its contract source. It may emit outcome,
 duration, metric buckets, codec, ICE path, and error category. It may not emit

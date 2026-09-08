@@ -237,7 +237,8 @@ evidence。Windows Graphics Capture、Media Foundation hardware ingress/decode �
 - [x] 增加保持三帧 queue invariant 的 bounded bitrate/framerate/resolution
   adaptation policy；命令现在沿 generation-bound owner 传到 Windows/Android
   native owner，硬件编码器应用 bitrate/framerate，分辨率变化要求显式
-  stop/release/recreate。
+  stop/release/recreate；Dart 低频轮询可使用 3 秒拥塞降级、25% 有界步进、
+  严重拥塞 720p10 和 10 秒健康恢复一档的 stateful controller。
 - [x] generation-bound native keyframe request/decoder reset bridge 已通过
   Rust FFI、Windows/Android owner 和平台 channel 接线，并由 native owner 做
   一秒限频；发送端已接入硬件 IDR 请求，接收端由 native peer 在同一 WebRTC
@@ -312,6 +313,17 @@ evidence。Windows Graphics Capture、Media Foundation hardware ingress/decode �
   `cargo test -p network-core realtime_media --locked`（9 passed）和三个
   realtime_media Dart package analyzer 均通过；Windows Media Foundation、
   Android MediaCodec、native PLI/IDR 和设备 E2E 仍待平台门禁。
+- [x] Phase 7 bounded congestion/recovery policy（2026-09-08）：
+  `RealtimeMediaAdaptationController` 以可注入时间完成 3 秒降级、25% bitrate
+  步进、loss/RTT 严重拥塞 720p10 和 10 秒健康单档恢复；适配命令仍不改变
+  native 三帧队列，平台硬件/设备 E2E 仍待验收。
+- [x] Phase 7 native stats bridge（2026-09-08）：`owner_read_stats` 以固定宽度
+  C ABI 返回 queue depth/capacity、enqueue/dequeue/drop 和 keyframe 计数，
+  Windows/Android owner 将其合并进低频 `RealtimeMediaStats`；Rust FFI/live
+  endpoint tests 和 Dart adapter analyzer 通过，平台编译/设备 E2E 仍待验收。
+- [ ] 本轮新增的 realtime_media、Windows/Android method-channel stats tests：
+  当前 Windows 主机的离线 workspace/native-asset 阶段无法启动 Dart test
+  runner，未将其计入通过证据；CI 仍以 exact-head workflow 为准。
 
 ## 下一步
 

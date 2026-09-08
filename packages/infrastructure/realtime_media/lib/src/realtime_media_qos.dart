@@ -125,8 +125,12 @@ extension RealtimeMediaSessionQos on RealtimeMediaSessionController {
     RealtimeMediaEndpoint endpoint, {
     RealtimeMediaAdaptationPolicy policy =
         const RealtimeMediaAdaptationPolicy(),
+    RealtimeMediaAdaptationController? controller,
   }) async {
-    final decision = policy.decide(await stats(endpoint));
+    final snapshot = await stats(endpoint);
+    final decision = controller == null
+        ? policy.decide(snapshot)
+        : controller.decide(snapshot);
     final recovery = backend;
     if (recovery is RealtimeMediaRecoveryBackend) {
       await (recovery as RealtimeMediaRecoveryBackend).applyAdaptation(

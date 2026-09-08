@@ -7,8 +7,8 @@
 
 use network_core::{RealtimeMediaDirection, RealtimeMediaEndpointId};
 use network_webrtc::{
-    EncodedVideoFrame, H264AdaptationReason, H264AdaptationTarget, VideoCodec, VideoEnqueueResult,
-    MAX_ENCODED_VIDEO_FRAME_BYTES,
+    EncodedVideoFrame, H264AdaptationReason, H264AdaptationTarget, H264ScreenVideoStats,
+    VideoCodec, VideoEnqueueResult, MAX_ENCODED_VIDEO_FRAME_BYTES,
 };
 use std::collections::HashMap;
 use std::panic::catch_unwind;
@@ -18,10 +18,11 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use super::{
-    identifier, map_error, SshNetBuffer, SshNetRealtimeMediaFrameMetadata, SshNetRuntime,
-    SshNetRuntimeHandle, NATIVE_MEDIA_FRAME_MAX_AGE, SSH_NET_REALTIME_MEDIA_DIRECTION_RECEIVE,
-    SSH_NET_REALTIME_MEDIA_DIRECTION_SEND, SSH_NET_REALTIME_MEDIA_FRAME_DROPPED,
-    SSH_NET_REALTIME_MEDIA_NO_FRAME, SSH_NET_REALTIME_MEDIA_STATUS_DIRECTION_MISMATCH,
+    identifier, map_error, SshNetBuffer, SshNetRealtimeMediaFrameMetadata,
+    SshNetRealtimeMediaStats, SshNetRuntime, SshNetRuntimeHandle, NATIVE_MEDIA_FRAME_MAX_AGE,
+    SSH_NET_REALTIME_MEDIA_DIRECTION_RECEIVE, SSH_NET_REALTIME_MEDIA_DIRECTION_SEND,
+    SSH_NET_REALTIME_MEDIA_FRAME_DROPPED, SSH_NET_REALTIME_MEDIA_NO_FRAME,
+    SSH_NET_REALTIME_MEDIA_STATUS_DIRECTION_MISMATCH,
     SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE,
     SSH_NET_REALTIME_MEDIA_STATUS_DUPLICATE_ENDPOINT, SSH_NET_REALTIME_MEDIA_STATUS_INTERNAL,
     SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT, SSH_NET_REALTIME_MEDIA_STATUS_STALE_OWNER,
@@ -224,6 +225,57 @@ pub extern "C" fn ssh_net_realtime_media_owner_validate(owner: u64) -> i32 {
         validate_owner(binding)?;
         Ok(0)
     })
+}
+
+/// Reads bounded native queue/recovery counters for one valid owner.
+///
+/// This is an observational bridge: it does not pull or copy an encoded
+/// access unit and cannot revive a stopped or stale owner. Statistics remain
+/// readable while an owner is stopped so teardown and recovery code can take a
+/// final snapshot. The caller must provide writable storage for the fixed-width
+/// result structure.
+#[no_mangle]
+pub unsafe extern "C" fn ssh_net_realtime_media_owner_read_stats(
+    owner: u64,
+    out_stats: *mut SshNetRealtimeMediaStats,
+) -> i32 {
+    if owner == 0 || out_stats.is_null() {
+        return SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT;
+    }
+    let result = catch_unwind(|| {
+        unsafe { *out_stats = SshNetRealtimeMediaStats::default() };
+        owner_with_binding(owner, |binding| {
+            validate_owner(binding)?;
+            let runtime = unsafe { &*(binding.runtime as *const SshNetRuntime) };
+            let stats = runtime
+                .runtime
+                .read_realtime_media_stats(RealtimeMediaEndpointId::from_raw(binding.endpoint))
+                .map_err(map_error)?;
+            let H264ScreenVideoStats {
+                enqueued,
+                dequeued,
+                dropped,
+                keyframe_requests,
+                queue_depth,
+                queue_capacity,
+            } = stats;
+            unsafe {
+                *out_stats = SshNetRealtimeMediaStats {
+                    enqueued,
+                    dequeued,
+                    dropped,
+                    keyframe_requests,
+                    queue_depth,
+                    queue_capacity,
+                };
+            }
+            Ok(0)
+        })
+    });
+    match result {
+        Ok(value) => value,
+        Err(_) => SSH_NET_REALTIME_MEDIA_STATUS_INTERNAL,
+    }
 }
 
 /// Requests a fresh H.264 keyframe through the generation-bound owner.

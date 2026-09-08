@@ -1770,6 +1770,17 @@ impl NetworkRuntime {
         crate::realtime_media::apply_adaptation(&state, endpoint_id, target)
     }
 
+    /// Reads bounded native queue/recovery counters for one generation-bound
+    /// screen-media endpoint. The snapshot contains no media payload.
+    pub fn read_realtime_media_stats(
+        &self,
+        endpoint_id: crate::realtime_media::RealtimeMediaEndpointId,
+    ) -> Result<network_webrtc::H264ScreenVideoStats, crate::realtime_media::RealtimeMediaError>
+    {
+        let state = self.media_state()?;
+        crate::realtime_media::stats(&state, endpoint_id)
+    }
+
     /// 返回原生轮询边界使用的 Tokio handle。
     pub fn handle(&self) -> &tokio::runtime::Handle {
         self.runtime.handle()

@@ -95,3 +95,175 @@ final class RealtimeMediaAdaptationPolicy {
     return (boundedWidth, boundedHeight);
   }
 }
+
+/// Stateful, bounded adaptation controller for a low-frequency stats poll.
+///
+/// The stateless [RealtimeMediaAdaptationPolicy] is useful when a caller only
+/// needs one recommendation. Platform owners should use this controller when
+/// polling over time: congestion must be sustained for three seconds before a
+/// degradation step, and healthy conditions must be sustained for ten seconds
+/// before recovering one step. The controller stores only bounded targets and
+/// timestamps; it never queues media or retains a frame payload.
+final class RealtimeMediaAdaptationController {
+  RealtimeMediaAdaptationController({
+    this.policy = const RealtimeMediaAdaptationPolicy(),
+    this.congestionHold = const Duration(seconds: 3),
+    this.recoveryHold = const Duration(seconds: 10),
+  }) {
+    if (congestionHold <= Duration.zero) {
+      throw ArgumentError.value(congestionHold, 'congestionHold');
+    }
+    if (recoveryHold <= Duration.zero) {
+      throw ArgumentError.value(recoveryHold, 'recoveryHold');
+    }
+  }
+
+  final RealtimeMediaAdaptationPolicy policy;
+  final Duration congestionHold;
+  final Duration recoveryHold;
+
+  DateTime? _congestionSince;
+  DateTime? _healthySince;
+  DateTime? _lastCongestionStep;
+  DateTime? _lastNow;
+  int _level = 0;
+  int _bitrateKbps = 0;
+  int _nominalWidth = 0;
+  int _nominalHeight = 0;
+
+  /// Chooses one bounded target from a low-frequency snapshot.
+  ///
+  /// [now] is injectable for deterministic tests and host-clock monotonicity
+  /// is enforced by clamping backwards timestamps to the previous sample.
+  RealtimeMediaAdaptationDecision decide(
+    RealtimeMediaStats stats, {
+    DateTime? now,
+  }) {
+    final current = _monotonicNow(now ?? DateTime.now());
+    final nominal = policy.decide(
+      RealtimeMediaStats(width: stats.width, height: stats.height),
+    );
+    if (nominal.width > 0 && _level == 0) {
+      _nominalWidth = nominal.width;
+      _nominalHeight = nominal.height;
+    }
+    if (_bitrateKbps == 0) {
+      _bitrateKbps = policy.maxBitrateKbps;
+    }
+
+    final lossRatio = stats.packetsReceived > 0
+        ? stats.packetsLost * 100 / stats.packetsReceived
+        : stats.packetsLost > 0
+        ? 100
+        : 0;
+    final congested =
+        lossRatio >= 5 ||
+        stats.jitterMs >= 80 ||
+        stats.rttMs >= 250 ||
+        stats.queueDepth >= stats.queueCapacity;
+    final severe = lossRatio >= 10 || stats.rttMs >= 400;
+    final healthy =
+        lossRatio < 2 &&
+        stats.jitterMs < 80 &&
+        stats.rttMs < 150 &&
+        stats.queueDepth < stats.queueCapacity;
+
+    if (congested) {
+      _healthySince = null;
+      _congestionSince ??= current;
+      final heldLongEnough =
+          current.difference(_congestionSince!) >= congestionHold;
+      final canStep =
+          _lastCongestionStep == null ||
+          current.difference(_lastCongestionStep!) >= congestionHold;
+      if (heldLongEnough && canStep) {
+        if (severe) {
+          _level = 2;
+        } else if (_level < 2) {
+          _level += 1;
+        }
+        _bitrateKbps = _degradeBitrate(_bitrateKbps);
+        _lastCongestionStep = current;
+        return _decision(
+          reason: RealtimeMediaAdaptationReason.congestion,
+          stats: stats,
+        );
+      }
+      return _decision(
+        reason: RealtimeMediaAdaptationReason.congestion,
+        stats: stats,
+      );
+    }
+
+    _congestionSince = null;
+    _lastCongestionStep = null;
+    if (healthy) {
+      _healthySince ??= current;
+      if (current.difference(_healthySince!) >= recoveryHold && _level > 0) {
+        _level -= 1;
+        _bitrateKbps = _recoverBitrate(_bitrateKbps);
+        _healthySince = current;
+        return _decision(
+          reason: RealtimeMediaAdaptationReason.recovery,
+          stats: stats,
+        );
+      }
+    } else {
+      _healthySince = null;
+    }
+    return _decision(
+      reason: _level == 0
+          ? RealtimeMediaAdaptationReason.steady
+          : RealtimeMediaAdaptationReason.recovery,
+      stats: stats,
+    );
+  }
+
+  DateTime _monotonicNow(DateTime value) {
+    final previous = _lastNow;
+    final current = previous != null && value.isBefore(previous)
+        ? previous
+        : value;
+    _lastNow = current;
+    return current;
+  }
+
+  int _degradeBitrate(int current) =>
+      (current * 3 ~/ 4).clamp(policy.minBitrateKbps, policy.maxBitrateKbps);
+
+  int _recoverBitrate(int current) =>
+      (current * 4 ~/ 3).clamp(policy.minBitrateKbps, policy.maxBitrateKbps);
+
+  RealtimeMediaAdaptationDecision _decision({
+    required RealtimeMediaAdaptationReason reason,
+    required RealtimeMediaStats stats,
+  }) {
+    final dimensions = switch (_level) {
+      2 => (
+        _nominalWidth == 0 ? 1280 : _nominalWidth.clamp(1, 1280),
+        _nominalHeight == 0 ? 720 : _nominalHeight.clamp(1, 720),
+      ),
+      _ => (
+        _nominalWidth == 0
+            ? (stats.width <= 0 ? 0 : stats.width.clamp(1, 1920))
+            : _nominalWidth,
+        _nominalHeight == 0
+            ? (stats.height <= 0 ? 0 : stats.height.clamp(1, 1080))
+            : _nominalHeight,
+      ),
+    };
+    final framerate = _level == 0
+        ? policy.maxFramerate
+        : (policy.maxFramerate * 2 ~/ 3).clamp(
+            policy.minFramerate,
+            policy.maxFramerate,
+          );
+    return RealtimeMediaAdaptationDecision(
+      bitrateKbps: _bitrateKbps,
+      framerate: framerate,
+      width: dimensions.$1,
+      height: dimensions.$2,
+      reason: reason,
+    );
+  }
+}

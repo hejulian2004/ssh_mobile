@@ -196,7 +196,12 @@ class RealtimeMediaAndroidPlugin :
                 if (terminal != null) {
                     error(result, terminal.first, terminal.second)
                 } else {
-                    result.success(owner.stats())
+                    val snapshot = owner.stats()
+                    if (snapshot.failure != null) {
+                        error(result, snapshot.failure, "Android media statistics are unavailable.")
+                    } else {
+                        result.success(snapshot.values)
+                    }
                 }
             }
             "requestKeyframe" -> withOwner(call, result) { owner, _ ->

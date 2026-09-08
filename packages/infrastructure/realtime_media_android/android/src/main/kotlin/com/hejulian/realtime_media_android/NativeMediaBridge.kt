@@ -11,6 +11,17 @@ internal data class NativeH264Frame(
     val payload: ByteArray,
 )
 
+/** Bounded payload-free native queue/recovery counters for one owner. */
+internal data class NativeMediaStats(
+    val status: Int,
+    val enqueued: Long,
+    val dequeued: Long,
+    val dropped: Long,
+    val keyframeRequests: Long,
+    val queueDepth: Int,
+    val queueCapacity: Int,
+)
+
 /**
  * JNI facade for the native-only owner-token port.
  *
@@ -39,6 +50,30 @@ internal object NativeMediaBridge {
     fun requestKeyframe(owner: Long): Int = invoke { nativeRequestKeyframe(owner) }
 
     fun resetDecoder(owner: Long): Int = invoke { nativeResetDecoder(owner) }
+
+    fun readStats(owner: Long): NativeMediaStats {
+        val values = if (!ensureLoaded()) {
+            null
+        } else {
+            try {
+                nativeReadStats(owner)
+            } catch (_: UnsatisfiedLinkError) {
+                null
+            }
+        }
+        if (values == null || values.size < 7) {
+            return NativeMediaStats(STATUS_DRIVER_UNAVAILABLE, 0, 0, 0, 0, 0, 3)
+        }
+        return NativeMediaStats(
+            status = values[0].coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
+            enqueued = values[1].coerceAtLeast(0),
+            dequeued = values[2].coerceAtLeast(0),
+            dropped = values[3].coerceAtLeast(0),
+            keyframeRequests = values[4].coerceAtLeast(0),
+            queueDepth = values[5].coerceIn(0, Int.MAX_VALUE.toLong()).toInt(),
+            queueCapacity = values[6].coerceIn(0, Int.MAX_VALUE.toLong()).toInt(),
+        )
+    }
 
     fun applyAdaptation(
         owner: Long,
@@ -126,6 +161,9 @@ internal object NativeMediaBridge {
 
     @JvmStatic
     private external fun nativeResetDecoder(owner: Long): Int
+
+    @JvmStatic
+    private external fun nativeReadStats(owner: Long): LongArray?
 
     @JvmStatic
     private external fun nativeApplyAdaptation(

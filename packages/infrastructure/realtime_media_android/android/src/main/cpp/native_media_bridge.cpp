@@ -1,8 +1,10 @@
 #include <jni.h>
 
-#include <dlfcn.h>
 #include <cstddef>
 #include <cstdint>
+#include <dlfcn.h>
+#include <iterator>
+#include <limits>
 #include <mutex>
 #include <vector>
 
@@ -15,6 +17,26 @@ struct FrameMetadata {
   uint32_t height = 0;
   uint8_t keyframe = 0;
 };
+
+// Keep this layout identical to SshNetRealtimeMediaStats in network-ffi.
+// Counters are metadata only; no encoded frame bytes cross this ABI.
+struct NativeMediaStats {
+  uint64_t enqueued = 0;
+  uint64_t dequeued = 0;
+  uint64_t dropped = 0;
+  uint64_t keyframe_requests = 0;
+  uint32_t queue_depth = 0;
+  uint32_t queue_capacity = 3;
+};
+
+static_assert(sizeof(NativeMediaStats) == 40,
+              "NativeMediaStats must match the Rust C ABI");
+static_assert(offsetof(NativeMediaStats, enqueued) == 0);
+static_assert(offsetof(NativeMediaStats, dequeued) == 8);
+static_assert(offsetof(NativeMediaStats, dropped) == 16);
+static_assert(offsetof(NativeMediaStats, keyframe_requests) == 24);
+static_assert(offsetof(NativeMediaStats, queue_depth) == 32);
+static_assert(offsetof(NativeMediaStats, queue_capacity) == 36);
 
 // Keep this layout locked to the Rust `#[repr(C)]` frame metadata. A mismatch
 // would corrupt every native push/pull call, so fail the platform build rather
@@ -36,6 +58,7 @@ static_assert(sizeof(NativeBuffer) == sizeof(void*) + sizeof(size_t),
               "NativeBuffer must match the Rust C ABI");
 
 using OwnerStatusFunction = int (*)(uint64_t);
+using StatsFunction = int (*)(uint64_t, NativeMediaStats*);
 using OwnerAdaptationFunction = int (*)(uint64_t, uint32_t, uint32_t, uint32_t,
                                         uint32_t, uint32_t);
 using PushFunction = int (*)(uint64_t, FrameMetadata, const uint8_t*, size_t);
@@ -105,6 +128,28 @@ jobject NewFrame(JNIEnv* env, jint status, const FrameMetadata& metadata,
                         static_cast<jint>(metadata.height), keyframe, bytes);
 }
 
+jlong ToJlong(uint64_t value) {
+  constexpr auto kMax = static_cast<uint64_t>(std::numeric_limits<jlong>::max());
+  return static_cast<jlong>(value > kMax ? kMax : value);
+}
+
+jlongArray NewStats(JNIEnv* env, jint status, const NativeMediaStats& stats) {
+  if (env == nullptr) return nullptr;
+  const jlong values[] = {
+      static_cast<jlong>(status),
+      ToJlong(stats.enqueued),
+      ToJlong(stats.dequeued),
+      ToJlong(stats.dropped),
+      ToJlong(stats.keyframe_requests),
+      static_cast<jlong>(stats.queue_depth),
+      static_cast<jlong>(stats.queue_capacity),
+  };
+  auto result = env->NewLongArray(static_cast<jsize>(std::size(values)));
+  if (result == nullptr) return nullptr;
+  env->SetLongArrayRegion(result, 0, static_cast<jsize>(std::size(values)), values);
+  return env->ExceptionCheck() ? nullptr : result;
+}
+
 }  // namespace
 
 extern "C" JNIEXPORT jint JNICALL
@@ -154,6 +199,20 @@ Java_com_hejulian_realtime_1media_1android_NativeMediaBridge_nativeResetDecoder(
     JNIEnv*, jclass, jlong owner) {
   return ResolveOwnerStatus("ssh_net_realtime_media_owner_reset_decoder",
                            static_cast<uint64_t>(owner));
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_hejulian_realtime_1media_1android_NativeMediaBridge_nativeReadStats(
+    JNIEnv* env, jclass, jlong owner) {
+  NativeMediaStats stats;
+  if (env == nullptr || owner <= 0) {
+    return NewStats(env, -1, stats);
+  }
+  const auto function = Resolve<StatsFunction>(
+      "ssh_net_realtime_media_owner_read_stats");
+  if (function == nullptr) return NewStats(env, kDriverUnavailable, stats);
+  const int status = function(static_cast<uint64_t>(owner), &stats);
+  return NewStats(env, status, stats);
 }
 
 extern "C" JNIEXPORT jint JNICALL

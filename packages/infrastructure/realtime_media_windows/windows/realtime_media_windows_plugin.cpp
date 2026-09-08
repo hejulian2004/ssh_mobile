@@ -374,6 +374,19 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
       return;
     }
 
+    NativeMediaStats native_stats;
+    const NativeMediaStats* native_stats_ptr = nullptr;
+    if (native_media_api_.stats_available()) {
+      const auto native_stats_status =
+          native_media_api_.read_stats(*owner_id, &native_stats);
+      if (native_stats_status != 0) {
+        ReplyError(result, NativeStatusCode(native_stats_status),
+                   "The native media statistics are unavailable.");
+        return;
+      }
+      native_stats_ptr = &native_stats;
+    }
+
     CaptureStats stats;
     const auto capture_status = capture_manager_.ReadStats(*owner_id, &stats);
     DecoderStats decoder_stats;
@@ -389,10 +402,10 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
     }
     if (capture_status == CaptureStatus::kNotFound) {
       if (decoder_status == DecoderStatus::kOk) {
-        result->Success(StatsMap(stats, &decoder_stats));
+        result->Success(StatsMap(stats, &decoder_stats, native_stats_ptr));
       } else {
         // A receive owner may be valid before a native decoder is attached.
-        result->Success(StatsMap(stats));
+        result->Success(StatsMap(stats, nullptr, native_stats_ptr));
       }
       return;
     }
@@ -417,8 +430,8 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
       return;
     }
     result->Success(decoder_status == DecoderStatus::kOk
-                        ? StatsMap(stats, &decoder_stats)
-                        : StatsMap(stats));
+                        ? StatsMap(stats, &decoder_stats, native_stats_ptr)
+                        : StatsMap(stats, nullptr, native_stats_ptr));
   }
 
   void RequestKeyframe(

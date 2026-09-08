@@ -25,6 +25,11 @@ internal data class AndroidOwnerIdentity(
     val direction: String,
 )
 
+internal data class AndroidMediaStatsSnapshot(
+    val failure: String? = null,
+    val values: Map<String, Any> = emptyMap(),
+)
+
 internal class AndroidMediaOwner(
     private val context: Context,
     private val textureRegistry: TextureRegistry,
@@ -309,27 +314,41 @@ internal class AndroidMediaOwner(
             (captureRunning.get() || encoderThread != null || virtualDisplay != null)
     }
 
-    fun stats(): Map<String, Any> = synchronized(lock) {
-        mapOf(
-            "width" to width,
-            "height" to height,
-            "frames_captured" to framesCaptured,
-            "frames_sent" to framesSent,
-            "frames_dropped" to framesDropped,
-            "frames_decoded" to framesDecoded,
-            "frames_rendered" to framesRendered,
-            // Packet-level counters are owned by the shared native media
-            // bridge. Keep this bounded snapshot shape stable until Android
-            // transport statistics are wired into the owner.
-            "packets_sent" to 0L,
-            "packets_received" to 0L,
-            "packets_lost" to 0L,
-            "frames_recovered" to 0L,
-            "keyframe_requests" to 0L,
-            "jitter_ms" to 0L,
-            "rtt_ms" to 0L,
-            "queue_depth" to 0L,
-            "queue_capacity" to 3L,
+    fun stats(): AndroidMediaStatsSnapshot = synchronized(lock) {
+        val native = NativeMediaBridge.readStats(token)
+        if (native.status != 0) {
+            return@synchronized AndroidMediaStatsSnapshot(
+                failure = statusCode(native.status),
+            )
+        }
+        if (native.queueCapacity != 3 || native.queueDepth !in 0..3) {
+            return@synchronized AndroidMediaStatsSnapshot(
+                failure = "backend_failure",
+            )
+        }
+        AndroidMediaStatsSnapshot(
+            values = mapOf(
+                "width" to width,
+                "height" to height,
+                "frames_captured" to framesCaptured,
+                "frames_sent" to framesSent,
+                "frames_dropped" to (framesDropped + native.dropped),
+                "frames_decoded" to framesDecoded,
+                "frames_rendered" to framesRendered,
+                // Packet-level transport counters remain owned by the shared
+                // WebRTC owner. Queue and keyframe counters above are already
+                // sourced from that owner; these fields stay bounded at zero
+                // until packet telemetry is exposed by the native peer.
+                "packets_sent" to 0L,
+                "packets_received" to 0L,
+                "packets_lost" to 0L,
+                "frames_recovered" to 0L,
+                "keyframe_requests" to native.keyframeRequests,
+                "jitter_ms" to 0L,
+                "rtt_ms" to 0L,
+                "queue_depth" to native.queueDepth,
+                "queue_capacity" to native.queueCapacity,
+            ),
         )
     }
 
