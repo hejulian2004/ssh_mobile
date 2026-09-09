@@ -91,10 +91,8 @@ class RealtimeMediaAndroidPlugin :
             return true
         }
         try {
-            ScreenCaptureForegroundService.start(appContext)
             val mediaProjection = manager.getMediaProjection(resultCode, data)
             if (mediaProjection == null) {
-                ScreenCaptureForegroundService.stop(appContext)
                 pending.error("permission_denied", "MediaProjection grant is unavailable.", null)
                 return true
             }
@@ -107,10 +105,8 @@ class RealtimeMediaAndroidPlugin :
             projection = mediaProjection
             pending.success(null)
         } catch (_: SecurityException) {
-            ScreenCaptureForegroundService.stop(appContext)
             pending.error("permission_denied", "MediaProjection permission was rejected.", null)
         } catch (_: Exception) {
-            ScreenCaptureForegroundService.stop(appContext)
             pending.error("backend_failure", "MediaProjection could not be initialized.", null)
         }
         return true
@@ -122,12 +118,44 @@ class RealtimeMediaAndroidPlugin :
             "listSources" -> result.success(listSources())
             "startCapture" -> withOwner(call, result) { owner, args ->
                 val sourceId = args["source_id"] as? String
-                if (sourceId.isNullOrBlank()) {
+                val sourceKind = args["source_kind"] as? String
+                if (sourceId.isNullOrBlank() || sourceKind.isNullOrBlank()) {
                     error(result, "invalid_argument", "A source ID is required.")
                     return@withOwner
                 }
-                val failure = owner.startCapture(projection, sourceId)
-                if (failure == null) result.success(null) else error(result, failure, "Android capture could not start.")
+                val appContext = context
+                if (appContext == null) {
+                    error(result, "backend_failure", "Android capture service context is unavailable.")
+                    return@withOwner
+                }
+                try {
+                    // MediaProjection capture must have its typed foreground
+                    // service active before createVirtualDisplay is called.
+                    ScreenCaptureForegroundService.start(appContext)
+                } catch (_: SecurityException) {
+                    stopForegroundServiceIfUnused()
+                    error(
+                        result,
+                        "permission_denied",
+                        "Android capture foreground service permission was rejected.",
+                    )
+                    return@withOwner
+                } catch (_: Exception) {
+                    stopForegroundServiceIfUnused()
+                    error(
+                        result,
+                        "backend_failure",
+                        "Android capture foreground service could not start.",
+                    )
+                    return@withOwner
+                }
+                val failure = owner.startCapture(projection, sourceId, sourceKind)
+                if (failure == null) {
+                    result.success(null)
+                } else {
+                    stopForegroundServiceIfUnused()
+                    error(result, failure, "Android capture could not start.")
+                }
             }
             "attachRemoteVideoSurface" -> withOwner(call, result) { owner, _ ->
                 val failure = owner.attachDecoder()
@@ -144,7 +172,12 @@ class RealtimeMediaAndroidPlugin :
             }
             "detach" -> withOwner(call, result) { owner, _ ->
                 val failure = owner.detach()
-                if (failure == null) result.success(null) else error(result, failure, "Android media detach failed.")
+                if (failure == null) {
+                    stopForegroundServiceIfUnused()
+                    result.success(null)
+                } else {
+                    error(result, failure, "Android media detach failed.")
+                }
             }
             "release" -> releaseOwner(call, result)
             "readStats" -> withOwner(call, result) { owner, _ ->
@@ -211,7 +244,7 @@ class RealtimeMediaAndroidPlugin :
         val failure = owner?.release()
             ?: if (NativeMediaBridge.closeOwner(token) == 0) null else "backend_failure"
         if (failure == null) {
-            if (owners.isEmpty()) context?.let { ScreenCaptureForegroundService.stop(it) }
+            stopForegroundServiceIfUnused()
             result.success(null)
         } else {
             // Keep a failed owner in the map so a caller can retry cleanup.
@@ -282,15 +315,24 @@ class RealtimeMediaAndroidPlugin :
 
     private fun revokeProjection() {
         projection = null
-        owners.values.toList().forEach { it.onProjectionRevoked() }
-        context?.let { ScreenCaptureForegroundService.stop(it) }
+        owners.values
+            .filter { it.identity.direction == "send" && it.isCaptureOwnerActive() }
+            .forEach { it.onProjectionRevoked() }
+        stopForegroundServiceIfUnused()
+    }
+
+    private fun stopForegroundServiceIfUnused() {
+        if (owners.values.none { it.isCaptureOwnerActive() }) {
+            context?.let { ScreenCaptureForegroundService.stop(it) }
+        }
     }
 
     private fun disposeOwners() {
         pendingProjectionResult?.error("backend_failure", "Android media plugin detached.", null)
         pendingProjectionResult = null
-        owners.values.toList().forEach { it.release() }
-        owners.clear()
+        owners.toList().forEach { (token, owner) ->
+            if (owner.release() == null) owners.remove(token)
+        }
         projection?.let {
             try {
                 it.stop()
@@ -299,7 +341,7 @@ class RealtimeMediaAndroidPlugin :
             }
         }
         projection = null
-        context?.let { ScreenCaptureForegroundService.stop(it) }
+        stopForegroundServiceIfUnused()
     }
 
     private fun detachActivityListener() {

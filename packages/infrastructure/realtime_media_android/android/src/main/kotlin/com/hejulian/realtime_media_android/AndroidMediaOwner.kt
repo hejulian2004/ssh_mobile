@@ -12,6 +12,8 @@ import android.view.Surface
 import android.view.WindowManager
 import io.flutter.view.TextureRegistry
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 internal data class AndroidOwnerIdentity(
@@ -35,10 +37,12 @@ internal class AndroidMediaOwner(
     private var encoder: MediaCodec? = null
     private var encoderSurface: Surface? = null
     private var encoderThread: Thread? = null
+    private var encoderStopAck: CountDownLatch? = null
     private var captureRunning = AtomicBoolean(false)
     private var decoder: MediaCodec? = null
     private var decoderSurface: Surface? = null
     private var decoderThread: Thread? = null
+    private var decoderStopAck: CountDownLatch? = null
     private var decoderRunning = AtomicBoolean(false)
     private var textureEntry: TextureRegistry.SurfaceTextureEntry? = null
     private var width = 0
@@ -52,11 +56,28 @@ internal class AndroidMediaOwner(
     private var framesRendered = 0L
     private var framesDropped = 0L
 
-    fun startCapture(mediaProjection: MediaProjection?, sourceId: String): String? {
+    fun startCapture(
+        mediaProjection: MediaProjection?,
+        sourceId: String,
+        sourceKind: String,
+    ): String? {
         synchronized(lock) {
             if (identity.direction != "send") return "direction_mismatch"
-            if (captureRunning.get()) return "duplicate_endpoint"
-            if (sourceId != "display:default") return "capture_source_ended"
+            if (captureRunning.get() || encoderThread != null || encoder != null ||
+                virtualDisplay != null || encoderSurface != null
+            ) {
+                // A timed-out worker remains the owner of its codec/surface.
+                // Never start a replacement capture until the previous worker
+                // has acknowledged termination and resources were released.
+                return if (terminalCode == "cleanup_deferred") {
+                    "cleanup_deferred"
+                } else {
+                    "duplicate_endpoint"
+                }
+            }
+            if (sourceKind != "display" || sourceId != "display:default") {
+                return "capture_source_ended"
+            }
             if (mediaProjection == null) return "permission_denied"
             if (terminalCode != null) return terminalCode
             val dimensions = displaySize()
@@ -68,10 +89,13 @@ internal class AndroidMediaOwner(
             val codec = AndroidCodecFactory.createEncoder(width, height)
                 ?: return stopNativeAfterFailure("encoder_unavailable")
             try {
-                val input = codec.createInputSurface()
-                codec.start()
+                // Publish the codec and input surface before any subsequent
+                // start/configuration step can fail. The catch path then
+                // releases exactly the resources acquired here.
                 encoder = codec
+                val input = codec.createInputSurface()
                 encoderSurface = input
+                codec.start()
                 projection = mediaProjection
                 virtualDisplay = mediaProjection.createVirtualDisplay(
                     "ssh-mobile-screen-share",
@@ -84,6 +108,7 @@ internal class AndroidMediaOwner(
                     mainHandler,
                 ) ?: throw IllegalStateException("MediaProjection returned no display")
                 captureRunning.set(true)
+                encoderStopAck = CountDownLatch(1)
                 encoderThread = Thread({ drainEncoder() }, "realtime-media-android-encoder").also {
                     it.isDaemon = true
                     it.start()
@@ -102,7 +127,15 @@ internal class AndroidMediaOwner(
     fun attachDecoder(): String? {
         synchronized(lock) {
             if (identity.direction != "receive") return "direction_mismatch"
-            if (decoderRunning.get() || textureEntry != null) return "duplicate_endpoint"
+            if (decoderRunning.get() || decoderThread != null || decoder != null ||
+                decoderSurface != null || textureEntry != null
+            ) {
+                return if (terminalCode == "cleanup_deferred") {
+                    "cleanup_deferred"
+                } else {
+                    "duplicate_endpoint"
+                }
+            }
             if (terminalCode != null) return terminalCode
             val validation = NativeMediaBridge.validateOwner(token)
             if (validation != 0) return statusCode(validation)
@@ -131,6 +164,7 @@ internal class AndroidMediaOwner(
                 decoderSurface = surface
                 decoder = codec
                 decoderRunning.set(true)
+                decoderStopAck = CountDownLatch(1)
                 decoderThread = Thread({ drainDecoder() }, "realtime-media-android-decoder").also {
                     it.isDaemon = true
                     it.start()
@@ -154,8 +188,10 @@ internal class AndroidMediaOwner(
     fun surfaceId(): String? = synchronized(lock) { textureEntry?.id()?.toString() }
 
     fun detach(): String? {
-        stopCapture()
-        stopDecoder()
+        val captureFailure = stopCapture()
+        if (captureFailure != null) return captureFailure
+        val decoderFailure = stopDecoder()
+        if (decoderFailure != null) return decoderFailure
         // A send owner has no renderer capability. The native ABI correctly
         // reports direction mismatch for detachRenderer on that path, so
         // only detach a renderer that was attached to a receive owner.
@@ -169,7 +205,8 @@ internal class AndroidMediaOwner(
 
     fun release(): String? {
         val detachFailure = detach()
-        var failure = detachFailure?.takeUnless(::isTerminalReleaseFailure)
+        if (detachFailure != null) return detachFailure
+        var failure: String? = null
         val stopStatus = NativeMediaBridge.stopOwner(token)
         if (failure == null && stopStatus != 0 && stopStatus != -12) {
             failure = statusCode(stopStatus)
@@ -178,10 +215,6 @@ internal class AndroidMediaOwner(
         if (failure == null && closeStatus != 0 && closeStatus != -12) {
             failure = statusCode(closeStatus)
         }
-        // Always attempt stop/close after local resources are quiesced. A
-        // transient detach/driver error is still returned to the caller, but
-        // closing the owner prevents a plugin detach from leaking the native
-        // registry; a retry then receives the idempotent stale-owner result.
         return failure
     }
 
@@ -191,6 +224,11 @@ internal class AndroidMediaOwner(
             terminalMessage = "MediaProjection was revoked by the system."
         }
         stopCapture()
+    }
+
+    fun isCaptureOwnerActive(): Boolean = synchronized(lock) {
+        identity.direction == "send" &&
+            (captureRunning.get() || encoderThread != null || virtualDisplay != null)
     }
 
     fun stats(): Map<String, Any> = synchronized(lock) {
@@ -281,11 +319,13 @@ internal class AndroidMediaOwner(
             }
         } catch (_: IllegalStateException) {
             failFromWorker("encoder_failed", "MediaCodec stopped unexpectedly.")
+        } catch (_: Exception) {
+            failFromWorker("encoder_failed", "Android encoder worker failed.")
         } finally {
             synchronized(lock) {
                 if (Thread.currentThread() == encoderThread) encoderThread = null
+                encoderStopAck?.countDown()
             }
-            releaseEncoderResources()
         }
     }
 
@@ -340,45 +380,74 @@ internal class AndroidMediaOwner(
             Thread.currentThread().interrupt()
         } catch (_: IllegalStateException) {
             failFromWorker("decoder_failed", "MediaCodec stopped unexpectedly.")
+        } catch (_: Exception) {
+            failFromWorker("decoder_failed", "Android decoder worker failed.")
         } finally {
             synchronized(lock) {
                 if (Thread.currentThread() == decoderThread) decoderThread = null
+                decoderStopAck?.countDown()
             }
-            releaseDecoderResources()
         }
     }
 
-    private fun stopCapture() {
-        val thread = synchronized(lock) {
+    private fun stopCapture(): String? {
+        if (identity.direction != "send") return null
+        val worker = synchronized(lock) {
             captureRunning.set(false)
-            encoderThread
+            encoderThread to encoderStopAck
         }
+        val thread = worker.first
+        val ack = worker.second
         if (thread != null && thread !== Thread.currentThread()) {
             thread.interrupt()
             try {
-                thread.join(2_000)
+                if (ack == null || !ack.await(2_000, TimeUnit.MILLISECONDS)) {
+                    markCleanupDeferred("Encoder worker did not reach a safe point.")
+                    return "cleanup_deferred"
+                }
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
+                markCleanupDeferred("Encoder worker termination was interrupted.")
+                return "cleanup_deferred"
             }
+        } else if (thread === Thread.currentThread()) {
+            markCleanupDeferred("Encoder worker cannot release itself.")
+            return "cleanup_deferred"
         }
         releaseEncoderResources()
-        NativeMediaBridge.stopOwner(token)
+        val status = NativeMediaBridge.stopOwner(token)
+        if (status != 0 && status != -12) return statusCode(status)
+        clearDeferredCleanup()
+        return null
     }
 
-    private fun stopDecoder() {
-        val thread = synchronized(lock) {
+    private fun stopDecoder(): String? {
+        if (identity.direction != "receive") return null
+        val worker = synchronized(lock) {
             decoderRunning.set(false)
-            decoderThread
+            decoderThread to decoderStopAck
         }
+        val thread = worker.first
+        val ack = worker.second
         if (thread != null && thread !== Thread.currentThread()) {
             thread.interrupt()
             try {
-                thread.join(2_000)
+                if (ack == null || !ack.await(2_000, TimeUnit.MILLISECONDS)) {
+                    markCleanupDeferred("Decoder worker did not reach a safe point.")
+                    return "cleanup_deferred"
+                }
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
+                markCleanupDeferred("Decoder worker termination was interrupted.")
+                return "cleanup_deferred"
             }
+        } else if (thread === Thread.currentThread()) {
+            markCleanupDeferred("Decoder worker cannot release itself.")
+            return "cleanup_deferred"
         }
         releaseDecoderResources()
+        clearDeferredCleanup()
+        return null
     }
 
     private fun releaseEncoderResources() {
@@ -408,6 +477,7 @@ internal class AndroidMediaOwner(
             encoderSurface = null
             projection = null
             encoderThread = null
+            encoderStopAck = null
         }
     }
 
@@ -433,6 +503,7 @@ internal class AndroidMediaOwner(
             textureEntry?.release()
             textureEntry = null
             decoderThread = null
+            decoderStopAck = null
         }
     }
 
@@ -455,9 +526,21 @@ internal class AndroidMediaOwner(
         return code
     }
 
-    private fun isTerminalReleaseFailure(code: String): Boolean =
-        code == "stale_endpoint" || code == "session_released" ||
-            code == "stale_owner"
+    private fun markCleanupDeferred(message: String) {
+        synchronized(lock) {
+            terminalCode = "cleanup_deferred"
+            terminalMessage = message
+        }
+    }
+
+    private fun clearDeferredCleanup() {
+        synchronized(lock) {
+            if (terminalCode == "cleanup_deferred") {
+                terminalCode = null
+                terminalMessage = null
+            }
+        }
+    }
 
     private fun displaySize(): Pair<Int, Int> {
         val metrics = context.resources.displayMetrics

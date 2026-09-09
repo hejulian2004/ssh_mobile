@@ -195,6 +195,7 @@ final class MethodChannelAndroidRealtimeMediaPlatform
         'capture_source_ended' => RealtimeMediaErrorCode.captureSourceEnded,
         'encoder_unavailable' => RealtimeMediaErrorCode.encoderUnavailable,
         'encoder_failed' => RealtimeMediaErrorCode.encoderFailed,
+        'cleanup_deferred' => RealtimeMediaErrorCode.cleanupDeferred,
         'decoder_unavailable' => RealtimeMediaErrorCode.decoderUnavailable,
         'decoder_failed' => RealtimeMediaErrorCode.decoderFailed,
         'unsupported_codec' => RealtimeMediaErrorCode.unsupportedCodec,
