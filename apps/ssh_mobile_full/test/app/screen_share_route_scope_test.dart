@@ -810,7 +810,6 @@ final class _RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
     required RealtimeMediaEndpointIdentity identity,
     RealtimeMediaNativeOwnerToken? ownerToken,
   }) async => RealtimeMediaStats();
-
 }
 
 final class _RecordingAndroidPlatform implements AndroidRealtimeMediaPlatform {
@@ -864,5 +863,4 @@ final class _RecordingAndroidPlatform implements AndroidRealtimeMediaPlatform {
     required RealtimeMediaEndpointIdentity identity,
     RealtimeMediaNativeOwnerToken? ownerToken,
   }) async => RealtimeMediaStats();
-
 }
