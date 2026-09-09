@@ -10,17 +10,26 @@ enum ScreenCaptureSourceKind { display, window }
 
 /// A selection descriptor, not a capture implementation or image buffer.
 final class ScreenCaptureSource {
-  const ScreenCaptureSource({
+  ScreenCaptureSource({
     required this.id,
     required this.kind,
     this.label,
     this.width,
     this.height,
-  }) : assert(width == null || width > 0),
-       assert(height == null || height > 0),
-       assert(label == null || label.length <= 128),
-       assert(width == null || width <= 16_384),
-       assert(height == null || height <= 16_384);
+  }) {
+    final sourceWidth = width;
+    if (sourceWidth != null && (sourceWidth <= 0 || sourceWidth > 16_384)) {
+      throw ArgumentError.value(sourceWidth, 'width');
+    }
+    final sourceHeight = height;
+    if (sourceHeight != null && (sourceHeight <= 0 || sourceHeight > 16_384)) {
+      throw ArgumentError.value(sourceHeight, 'height');
+    }
+    final sourceLabel = label;
+    if (sourceLabel != null && sourceLabel.length > 128) {
+      throw ArgumentError.value(sourceLabel, 'label');
+    }
+  }
 
   final ScreenCaptureSourceId id;
   final ScreenCaptureSourceKind kind;
