@@ -55,6 +55,18 @@ void main() {
   );
 
   test(
+    'invalid outgoing operation IDs do not partially enter pending state',
+    () async {
+      await expectLater(
+        controller.startOutgoing(operationId: ' '),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(controller.state, ScreenShareOperationState.idle);
+      expect(consent.sent, isEmpty);
+    },
+  );
+
+  test(
     'incoming request requires explicit acceptance before viewer starts',
     () async {
       await controller.setMediaReady(true);
@@ -117,8 +129,9 @@ void main() {
     expect(controller.operationId, 'incoming-a');
   });
 
-  test('shared-session consent acceptance uses the current realtime identity',
-      () async {
+  test(
+    'shared-session consent acceptance uses the current realtime identity',
+    () async {
       await controller.setMediaReady(true);
       await controller.startOutgoing(operationId: 'operation-a');
       consent.emit(
@@ -226,6 +239,85 @@ void main() {
       expect(media.viewerStarts, isEmpty);
     },
   );
+
+  test(
+    'media readiness loss invalidates a stale capture completion and compensates',
+    () async {
+      await controller.startOutgoing(operationId: 'operation-a');
+      media.captureGate = Completer<void>();
+      await controller.setMediaReady(true);
+      consent.emit(
+        _consent(
+          issued: issued,
+          expires: issued.add(const Duration(minutes: 1)),
+          decision: RealtimeConsentDecision.accept,
+          senderPeerId: 'remote-peer',
+          actionRevision: 1,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(media.captureStarts, ['operation-a']);
+
+      await controller.setMediaReady(false);
+      media.captureGate!.complete();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.state, ScreenShareOperationState.accepted);
+      expect(controller.mediaReady, isFalse);
+      expect(media.stops, ['operation-a']);
+    },
+  );
+
+  test('cross-device consent ignores independent native generations', () async {
+    final wire = _ConsentWire();
+    final peerAMedia = _FakeMediaPort();
+    final peerBMedia = _FakeMediaPort();
+    final peerA = ScreenShareController(
+      consentPort: _WireConsentPort(wire),
+      mediaPort: peerAMedia,
+      realtimeId: realtimeId,
+      generation: 3,
+      localPeerId: 'peer-a',
+      remotePeerId: 'peer-b',
+      now: () => issued,
+    );
+    final peerB = ScreenShareController(
+      consentPort: _WireConsentPort(wire),
+      mediaPort: peerBMedia,
+      realtimeId: realtimeId,
+      generation: 17,
+      localPeerId: 'peer-b',
+      remotePeerId: 'peer-a',
+      now: () => issued,
+    );
+    try {
+      await peerA.startOutgoing(operationId: 'cross-device-operation');
+      await Future<void>.delayed(Duration.zero);
+      expect(peerB.state, ScreenShareOperationState.incomingPending);
+
+      await peerA.setMediaReady(true);
+      await peerB.setMediaReady(true);
+      await peerB.acceptIncoming();
+      await Future<void>.delayed(Duration.zero);
+      expect(peerA.state, ScreenShareOperationState.active);
+      expect(peerB.state, ScreenShareOperationState.active);
+      expect(peerAMedia.captureStarts, ['cross-device-operation']);
+      expect(peerBMedia.viewerStarts, ['cross-device-operation']);
+
+      await peerA.cancel();
+      await Future<void>.delayed(Duration.zero);
+      expect(peerA.state, ScreenShareOperationState.cancelled);
+      expect(peerB.state, ScreenShareOperationState.cancelled);
+      expect(
+        wire.sent.every((consent) => consent.realtimeId == realtimeId),
+        isTrue,
+      );
+    } finally {
+      peerA.dispose();
+      peerB.dispose();
+      await wire.close();
+    }
+  });
 }
 
 RealtimeConsent _consent({
@@ -266,12 +358,37 @@ final class _FakeConsentPort implements ScreenShareConsentPort {
   void emit(RealtimeConsent consent) => _controller.add(consent);
 }
 
+final class _ConsentWire {
+  final StreamController<RealtimeConsent> controller =
+      StreamController<RealtimeConsent>.broadcast();
+  final List<RealtimeConsent> sent = <RealtimeConsent>[];
+
+  Future<void> close() => controller.close();
+}
+
+final class _WireConsentPort implements ScreenShareConsentPort {
+  _WireConsentPort(this.wire);
+
+  final _ConsentWire wire;
+
+  @override
+  Stream<RealtimeConsent> get consents => wire.controller.stream;
+
+  @override
+  Future<SdkResult<void>> sendConsent(RealtimeConsent consent) async {
+    wire.sent.add(consent);
+    wire.controller.add(consent);
+    return const SdkSuccess<void>(null);
+  }
+}
+
 final class _FakeMediaPort implements ScreenShareMediaPort {
   final StreamController<ScreenShareMediaEvent> _controller =
       StreamController<ScreenShareMediaEvent>.broadcast();
   final List<String> captureStarts = <String>[];
   final List<String> viewerStarts = <String>[];
   final List<String> stops = <String>[];
+  Completer<void>? captureGate;
 
   @override
   Stream<ScreenShareMediaEvent> get events => _controller.stream;
@@ -281,7 +398,11 @@ final class _FakeMediaPort implements ScreenShareMediaPort {
     required String operationId,
     required String realtimeId,
     required int generation,
-  }) async => captureStarts.add(operationId);
+  }) async {
+    captureStarts.add(operationId);
+    final gate = captureGate;
+    if (gate != null) await gate.future;
+  }
 
   @override
   Future<void> startViewer({

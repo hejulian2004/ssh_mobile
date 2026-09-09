@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:network_sdk/network_sdk.dart';
@@ -78,8 +79,9 @@ final class ScreenShareController extends ChangeNotifier
   Future<void> startOutgoing({String? operationId}) async {
     _ensureUsable();
     if (state != ScreenShareOperationState.idle) return;
-    final epoch = ++_operationEpoch;
     final id = operationId ?? _newOperationId();
+    _validateIdentity(id, 'operationId');
+    final epoch = ++_operationEpoch;
     final issued = _now();
     final expires = issued.add(_requestLifetime);
     _nextLocalActionRevision = 1;
@@ -470,8 +472,12 @@ final class ScreenShareController extends ChangeNotifier
   }
 
   static void _validateIdentity(String value, String name) {
-    if (value.trim().isEmpty || value.length > 128) {
-      throw ArgumentError.value(value, name);
+    if (value.trim().isEmpty || utf8.encode(value).length > 128) {
+      throw ArgumentError.value(
+        value,
+        name,
+        'must contain 1 to 128 UTF-8 bytes',
+      );
     }
   }
 }
