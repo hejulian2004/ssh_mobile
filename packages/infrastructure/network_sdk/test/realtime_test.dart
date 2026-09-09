@@ -474,7 +474,7 @@ void main() {
   );
 
   test(
-    'consent events are generation-bound and stale values are dropped',
+    'consent events use the shared realtime identity',
     () async {
       final backend = _FakeRealtimeBackend();
       final client = RealtimeClientImpl(backend: backend);
@@ -502,7 +502,6 @@ void main() {
       final valid = RealtimeConsent(
         operationId: 'operation-a',
         realtimeId: '00112233445566778899aabbccddeeff',
-        generation: 7,
         issuedAt: issued,
         expiresAt: issued.add(const Duration(minutes: 1)),
         decision: RealtimeConsentDecision.request,
@@ -515,7 +514,6 @@ void main() {
           RealtimeConsent(
             operationId: 'operation-b',
             realtimeId: valid.realtimeId,
-            generation: 8,
             issuedAt: issued,
             expiresAt: issued.add(const Duration(minutes: 1)),
             decision: RealtimeConsentDecision.request,
@@ -525,7 +523,11 @@ void main() {
         ),
       );
       await Future<void>.delayed(Duration.zero);
-      expect(received, [valid]);
+      expect(received, hasLength(2));
+      expect(received.map((consent) => consent.operationId), [
+        'operation-a',
+        'operation-b',
+      ]);
     },
   );
 }

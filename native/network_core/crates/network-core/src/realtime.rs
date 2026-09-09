@@ -7,7 +7,7 @@
 
 use network_protocol::{
     RealtimeSessionState, RealtimeSignalKind, ScreenShareConsentDecision,
-    ScreenShareConsentPurpose, ScreenShareConsentV1, ScreenShareMediaKind,
+    ScreenShareConsentPurpose, ScreenShareConsentV2, ScreenShareMediaKind,
     SendRealtimeSignalCommand, StartRealtimeSessionCommand, StopRealtimeSessionCommand,
 };
 use network_relay::v2::{
@@ -513,9 +513,9 @@ pub(crate) async fn send_signal_command(
         )
     };
     let revision_is_valid = if kind == RealtimeSignalKind::ScreenShareConsent {
-        // Consent has its own action_revision and generation guards. The
-        // outer realtime revision is only a positive relay correlation value
-        // and must not be confused with signaling ordering.
+        // Consent has its own action_revision and shared-session freshness
+        // checks. The outer realtime revision is only a positive relay
+        // correlation value and must not be confused with signaling ordering.
         command.revision > 0
     } else if kind == RealtimeSignalKind::IceCandidate {
         command.revision == ice_revision
@@ -606,18 +606,10 @@ async fn handle_realtime_signal(
     // Screen-share consent is authenticated control metadata, not a WebRTC
     // description. Keep it on the existing Realtime control route while
     // avoiding any PeerConnection mutation or state transition. The payload
-    // carries the independent generation guard used by the business layer.
+    // carries the shared-session and action-revision guards used by the
+    // business layer.
     if kind == RealtimeSignalKind::ScreenShareConsent {
-        let consent = validate_screen_share_consent(&payload, realtime_id, Some(peer_id))?;
-        let generation = {
-            let manager = state.realtime.lock().await;
-            manager
-                .session_generation(realtime_id)
-                .ok_or_else(|| boxed_message("realtime session does not exist"))?
-        };
-        if consent.generation != generation {
-            return Err(boxed_message("stale screen-share consent generation"));
-        }
+        validate_screen_share_consent(&payload, realtime_id, Some(peer_id))?;
         emit_realtime_signal(
             &state.event_tx,
             realtime_id,
@@ -1533,7 +1525,7 @@ fn validate_signal(
     Ok(())
 }
 
-/// Validates the typed ScreenShareConsentV1 payload at the native control
+/// Validates the typed ScreenShareConsentV2 payload at the native control
 /// boundary. `expected_sender_peer_id` is supplied for inbound signals where
 /// the authenticated realtime binding is authoritative; local outgoing
 /// commands perform the structural checks without guessing the sender ID.
@@ -1541,15 +1533,15 @@ fn validate_screen_share_consent(
     payload: &[u8],
     expected_realtime_id: &str,
     expected_sender_peer_id: Option<&str>,
-) -> Result<ScreenShareConsentV1, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<ScreenShareConsentV2, Box<dyn std::error::Error + Send + Sync>> {
     if payload.is_empty() || payload.len() > 4096 {
         return Err(boxed_message(
             "screen-share consent payload is outside bounds",
         ));
     }
-    let consent = ScreenShareConsentV1::decode(payload)
+    let consent = ScreenShareConsentV2::decode(payload)
         .map_err(|error| boxed_message(format!("malformed screen-share consent: {error}")))?;
-    if consent.schema_version != 1 {
+    if consent.schema_version != 2 {
         return Err(boxed_message(
             "unsupported screen-share consent schema version",
         ));
@@ -1562,11 +1554,6 @@ fn validate_screen_share_consent(
     if consent.realtime_id != expected_realtime_id {
         return Err(boxed_message(
             "screen-share consent realtime_id does not match signal",
-        ));
-    }
-    if consent.generation == 0 {
-        return Err(boxed_message(
-            "screen-share consent generation must be positive",
         ));
     }
     if consent.issued_at_ms == 0

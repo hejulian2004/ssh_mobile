@@ -6,12 +6,15 @@ import 'package:network_sdk/network_sdk.dart';
 import 'screen_share_models.dart';
 import 'screen_share_ports.dart';
 
+part 'screen_share_controller_media.dart';
+
 /// Coordinates consent and platform-media readiness for one Realtime session.
 ///
 /// The controller owns only business state. It never starts a capture source
 /// for an incoming request until an explicit acceptance has been exchanged and
 /// the App has reported matching native media readiness.
-final class ScreenShareController extends ChangeNotifier {
+final class ScreenShareController extends ChangeNotifier
+    with _ScreenShareMediaLifecycle {
   ScreenShareController({
     required ScreenShareConsentPort consentPort,
     required ScreenShareMediaPort mediaPort,
@@ -48,6 +51,7 @@ final class ScreenShareController extends ChangeNotifier {
   Timer? _expiryTimer;
   bool _disposed = false;
   bool _mediaStartInFlight = false;
+  int _operationEpoch = 0;
   // Action revisions are monotonic per (operation_id, sender_peer_id), so a
   // local request/decision and a remote decision each have their own lane.
   int _nextLocalActionRevision = 0;
@@ -74,6 +78,7 @@ final class ScreenShareController extends ChangeNotifier {
   Future<void> startOutgoing({String? operationId}) async {
     _ensureUsable();
     if (state != ScreenShareOperationState.idle) return;
+    final epoch = ++_operationEpoch;
     final id = operationId ?? _newOperationId();
     final issued = _now();
     final expires = issued.add(_requestLifetime);
@@ -95,7 +100,6 @@ final class ScreenShareController extends ChangeNotifier {
       buildScreenShareConsent(
         operationId: id,
         realtimeId: realtimeId,
-        generation: generation,
         issuedAt: issued,
         expiresAt: expires,
         decision: RealtimeConsentDecision.request,
@@ -103,7 +107,14 @@ final class ScreenShareController extends ChangeNotifier {
         actionRevision: _nextLocalActionRevision,
       ),
     );
-    if (!result && !_disposed) {
+    if (!_isCurrent(
+      epoch,
+      id,
+      expectedState: ScreenShareOperationState.outgoingPending,
+    )) {
+      return;
+    }
+    if (!result) {
       _fail('Unable to send screen-share request.');
     }
   }
@@ -111,6 +122,7 @@ final class ScreenShareController extends ChangeNotifier {
   Future<void> acceptIncoming() async {
     _ensureUsable();
     if (state != ScreenShareOperationState.incomingPending) return;
+    final epoch = ++_operationEpoch;
     final id = _snapshot.operationId;
     final expires = _snapshot.expiresAt;
     if (id == null || expires == null || !_now().isBefore(expires)) {
@@ -122,7 +134,6 @@ final class ScreenShareController extends ChangeNotifier {
       buildScreenShareConsent(
         operationId: id,
         realtimeId: realtimeId,
-        generation: generation,
         issuedAt: _now(),
         expiresAt: expires,
         decision: RealtimeConsentDecision.accept,
@@ -130,6 +141,13 @@ final class ScreenShareController extends ChangeNotifier {
         actionRevision: _nextLocalActionRevision,
       ),
     );
+    if (!_isCurrent(
+      epoch,
+      id,
+      expectedState: ScreenShareOperationState.incomingPending,
+    )) {
+      return;
+    }
     if (!result) {
       _fail('Unable to send screen-share acceptance.');
       return;
@@ -154,6 +172,7 @@ final class ScreenShareController extends ChangeNotifier {
         current == ScreenShareOperationState.expired) {
       return;
     }
+    final epoch = ++_operationEpoch;
     final id = _snapshot.operationId;
     final expires = _snapshot.expiresAt;
     if (id != null && expires != null && _now().isBefore(expires)) {
@@ -162,7 +181,6 @@ final class ScreenShareController extends ChangeNotifier {
         buildScreenShareConsent(
           operationId: id,
           realtimeId: realtimeId,
-          generation: generation,
           issuedAt: _now(),
           expiresAt: expires,
           decision: RealtimeConsentDecision.cancel,
@@ -170,9 +188,11 @@ final class ScreenShareController extends ChangeNotifier {
           actionRevision: _nextLocalActionRevision,
         ),
       );
+      if (!_isCurrent(epoch, id)) return;
     }
+    if (!_isCurrent(epoch, id)) return;
     if (!await _stopMediaIfActive()) return;
-    _setState(ScreenShareOperationState.cancelled);
+    if (_isCurrent(epoch, id)) _setState(ScreenShareOperationState.cancelled);
   }
 
   Future<void> stop() => cancel();
@@ -181,6 +201,7 @@ final class ScreenShareController extends ChangeNotifier {
   /// capability. It is intentionally a boolean, not a handle or frame.
   Future<void> setMediaReady(bool ready) async {
     _ensureUsable();
+    ++_operationEpoch;
     _setSnapshot(
       ScreenShareOperationSnapshot(
         state: state,
@@ -194,8 +215,15 @@ final class ScreenShareController extends ChangeNotifier {
       ),
     );
     if (!ready) {
+      final id = _snapshot.operationId;
+      final epoch = _operationEpoch;
       if (state == ScreenShareOperationState.active &&
-          await _stopMediaIfActive()) {
+          await _stopMediaIfActive() &&
+          _isCurrent(
+            epoch,
+            id,
+            expectedState: ScreenShareOperationState.active,
+          )) {
         _setState(ScreenShareOperationState.accepted);
       }
       return;
@@ -213,10 +241,11 @@ final class ScreenShareController extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    ++_operationEpoch;
     _expiryTimer?.cancel();
     unawaited(_consentSubscription.cancel());
     unawaited(_mediaSubscription.cancel());
-    if (state == ScreenShareOperationState.active) {
+    if (state == ScreenShareOperationState.active || _mediaStartInFlight) {
       final id = _snapshot.operationId;
       if (id != null) {
         unawaited(
@@ -234,13 +263,13 @@ final class ScreenShareController extends ChangeNotifier {
   void _onConsent(RealtimeConsent consent) {
     if (_disposed ||
         consent.realtimeId != realtimeId ||
-        consent.generation != generation ||
         consent.senderPeerId != remotePeerId ||
         consent.isExpired(_now())) {
       return;
     }
     final currentId = _snapshot.operationId;
     if (consent.decision == RealtimeConsentDecision.request) {
+      if (consent.actionRevision != 1) return;
       if (state == ScreenShareOperationState.idle) {
         _lastRemoteActionRevision = consent.actionRevision;
         _setSnapshot(
@@ -260,6 +289,10 @@ final class ScreenShareController extends ChangeNotifier {
     }
     if (currentId == null || currentId != consent.operationId) return;
     if (consent.actionRevision <= _lastRemoteActionRevision) return;
+    if (_lastRemoteActionRevision == 0 && consent.actionRevision != 1) {
+      _fail('Screen-share consent action revision is not contiguous.');
+      return;
+    }
     if (_lastRemoteActionRevision > 0 &&
         consent.actionRevision != _lastRemoteActionRevision + 1) {
       _fail('Screen-share consent action revision is not contiguous.');
@@ -275,11 +308,13 @@ final class ScreenShareController extends ChangeNotifier {
       case RealtimeConsentDecision.reject:
         if (state == ScreenShareOperationState.outgoingPending ||
             state == ScreenShareOperationState.accepted) {
+          ++_operationEpoch;
           unawaited(_stopMediaIfActive());
           _setState(ScreenShareOperationState.rejected);
         }
       case RealtimeConsentDecision.cancel:
         if (!snapshot.isTerminal) {
+          ++_operationEpoch;
           unawaited(_stopMediaIfActive());
           _setState(ScreenShareOperationState.cancelled);
         }
@@ -298,6 +333,7 @@ final class ScreenShareController extends ChangeNotifier {
     switch (event.kind) {
       case ScreenShareMediaEventKind.stopped:
         if (state == ScreenShareOperationState.active) {
+          ++_operationEpoch;
           _setState(ScreenShareOperationState.accepted);
         }
       case ScreenShareMediaEventKind.sourceEnded:
@@ -305,6 +341,7 @@ final class ScreenShareController extends ChangeNotifier {
       case ScreenShareMediaEventKind.decoderFailed:
       case ScreenShareMediaEventKind.surfaceReleased:
       case ScreenShareMediaEventKind.transportLost:
+        ++_operationEpoch;
         _fail(event.message ?? 'Screen-share media stopped unexpectedly.');
     }
   }
@@ -327,6 +364,7 @@ final class ScreenShareController extends ChangeNotifier {
         state != ScreenShareOperationState.outgoingPending) {
       return;
     }
+    final epoch = ++_operationEpoch;
     final id = _snapshot.operationId;
     final expires = _snapshot.expiresAt;
     if (id != null && expires != null && _now().isBefore(expires)) {
@@ -335,7 +373,6 @@ final class ScreenShareController extends ChangeNotifier {
         buildScreenShareConsent(
           operationId: id,
           realtimeId: realtimeId,
-          generation: generation,
           issuedAt: _now(),
           expiresAt: expires,
           decision: decision,
@@ -343,82 +380,13 @@ final class ScreenShareController extends ChangeNotifier {
           actionRevision: _nextLocalActionRevision,
         ),
       );
+      if (!_isCurrent(epoch, id)) return;
       if (!sent) {
         _fail('Unable to send screen-share decision.');
         return;
       }
     }
-    _setState(finalState);
-  }
-
-  Future<void> _startCaptureIfReady() async {
-    if (_mediaStartInFlight ||
-        _disposed ||
-        state != ScreenShareOperationState.accepted ||
-        _snapshot.role != ScreenShareRole.sender ||
-        !_snapshot.mediaReady) {
-      return;
-    }
-    final id = _snapshot.operationId;
-    if (id == null) return;
-    _mediaStartInFlight = true;
-    try {
-      await _mediaPort.startCapture(
-        operationId: id,
-        realtimeId: realtimeId,
-        generation: generation,
-      );
-      if (!_disposed && state == ScreenShareOperationState.accepted) {
-        _setState(ScreenShareOperationState.active);
-      }
-    } on Object {
-      _fail('Screen-share capture could not start.');
-    } finally {
-      _mediaStartInFlight = false;
-    }
-  }
-
-  Future<void> _startViewerIfReady() async {
-    if (_mediaStartInFlight ||
-        _disposed ||
-        state != ScreenShareOperationState.accepted ||
-        _snapshot.role != ScreenShareRole.receiver ||
-        !_snapshot.mediaReady) {
-      return;
-    }
-    final id = _snapshot.operationId;
-    if (id == null) return;
-    _mediaStartInFlight = true;
-    try {
-      await _mediaPort.startViewer(
-        operationId: id,
-        realtimeId: realtimeId,
-        generation: generation,
-      );
-      if (!_disposed && state == ScreenShareOperationState.accepted) {
-        _setState(ScreenShareOperationState.active);
-      }
-    } on Object {
-      _fail('Screen-share viewer could not start.');
-    } finally {
-      _mediaStartInFlight = false;
-    }
-  }
-
-  Future<bool> _stopMediaIfActive() async {
-    final id = _snapshot.operationId;
-    if (id == null || state != ScreenShareOperationState.active) return true;
-    try {
-      await _mediaPort.stop(
-        operationId: id,
-        realtimeId: realtimeId,
-        generation: generation,
-      );
-      return true;
-    } on Object {
-      _fail('Screen-share media cleanup failed.');
-      return false;
-    }
+    if (_isCurrent(epoch, id)) _setState(finalState);
   }
 
   void _armExpiry(DateTime expiresAt) {
@@ -435,12 +403,14 @@ final class ScreenShareController extends ChangeNotifier {
     if (_disposed || snapshot.isTerminal || snapshot.operationId == null) {
       return;
     }
+    ++_operationEpoch;
     unawaited(_stopMediaIfActive());
     _setState(ScreenShareOperationState.expired);
   }
 
   void _fail(String message) {
     if (_disposed || state == ScreenShareOperationState.failed) return;
+    ++_operationEpoch;
     _expiryTimer?.cancel();
     _setSnapshot(
       ScreenShareOperationSnapshot(
@@ -474,6 +444,22 @@ final class ScreenShareController extends ChangeNotifier {
   void _setSnapshot(ScreenShareOperationSnapshot next) {
     _snapshot = next;
     notifyListeners();
+  }
+
+  bool _isCurrent(
+    int epoch,
+    String? operationId, {
+    ScreenShareOperationState? expectedState,
+    bool requireMediaReady = false,
+  }) {
+    if (_disposed || _operationEpoch != epoch) return false;
+    if (operationId != null && _snapshot.operationId != operationId) {
+      return false;
+    }
+    if (expectedState != null && state != expectedState) return false;
+    if (requireMediaReady && !_snapshot.mediaReady) return false;
+    return _snapshot.realtimeId == realtimeId &&
+        _snapshot.generation == generation;
   }
 
   String _newOperationId() =>

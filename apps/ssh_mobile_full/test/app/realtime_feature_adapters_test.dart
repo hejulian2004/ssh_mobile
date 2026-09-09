@@ -640,7 +640,6 @@ void main() {
     final event = await eventFuture;
 
     expect(event.consent.operationId, 'operation-a');
-    expect(event.consent.generation, 7);
     expect(event.consent.decision, RealtimeConsentDecision.request);
     expect(event.consent.purpose, RealtimeConsentPurpose.screenShare);
     expect(event.consent.media, RealtimeConsentMedia.screenVideo);
@@ -995,7 +994,6 @@ RealtimeConsent _testConsent({
   return RealtimeConsent(
     operationId: 'operation-a',
     realtimeId: '00112233445566778899aabbccddeeff',
-    generation: 7,
     issuedAt: issued,
     expiresAt: issued.add(const Duration(minutes: 1)),
     decision: decision,
@@ -1005,10 +1003,9 @@ RealtimeConsent _testConsent({
 }
 
 NativeScreenShareConsent _nativeTestConsent() => NativeScreenShareConsent(
-  schemaVersion: 1,
+  schemaVersion: 2,
   operationId: 'operation-a',
   realtimeId: '00112233445566778899aabbccddeeff',
-  generation: 7,
   issuedAtMs: DateTime.utc(2030, 1, 1, 12).millisecondsSinceEpoch,
   expiresAtMs: DateTime.utc(2030, 1, 1, 12, 1).millisecondsSinceEpoch,
   decision: NativeScreenShareConsentDecision.request,

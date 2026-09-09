@@ -8,11 +8,9 @@ void main() {
 
   RealtimeConsent consent({
     RealtimeConsentDecision decision = RealtimeConsentDecision.request,
-    int generation = 4,
   }) => RealtimeConsent(
     operationId: 'operation-a',
     realtimeId: '00112233445566778899aabbccddeeff',
-    generation: generation,
     issuedAt: issued,
     expiresAt: expires,
     decision: decision,
@@ -20,9 +18,9 @@ void main() {
     actionRevision: 1,
   );
 
-  test('consent validates independent generation and bounded expiry', () {
+  test('consent validates schema, identity and bounded expiry', () {
     final value = consent();
-    expect(value.generation, 4);
+    expect(value.schemaVersion, 2);
     expect(value.issuedAtMs, issued.millisecondsSinceEpoch);
     expect(value.isExpired(issued), isFalse);
     expect(value.isExpired(expires), isTrue);
@@ -37,7 +35,6 @@ void main() {
       () => RealtimeConsent(
         operationId: 'x',
         realtimeId: 'not-a-realtime-id',
-        generation: 1,
         issuedAt: issued,
         expiresAt: expires,
         decision: RealtimeConsentDecision.request,
@@ -50,7 +47,6 @@ void main() {
       () => RealtimeConsent(
         operationId: 'x',
         realtimeId: '00112233445566778899aabbccddeeff',
-        generation: 1,
         issuedAt: issued,
         expiresAt: issued.add(const Duration(minutes: 3)),
         decision: RealtimeConsentDecision.request,
@@ -63,7 +59,6 @@ void main() {
       () => RealtimeConsent(
         operationId: 'x',
         realtimeId: '00112233445566778899aabbccddeeff',
-        generation: 1,
         issuedAt: issued,
         expiresAt: expires,
         decision: RealtimeConsentDecision.request,
@@ -82,7 +77,6 @@ void main() {
       () => RealtimeConsent(
         operationId: valid,
         realtimeId: '00112233445566778899aabbccddeeff',
-        generation: 1,
         issuedAt: issued,
         expiresAt: expires,
         decision: RealtimeConsentDecision.request,
@@ -95,7 +89,6 @@ void main() {
       () => RealtimeConsent(
         operationId: invalid,
         realtimeId: '00112233445566778899aabbccddeeff',
-        generation: 1,
         issuedAt: issued,
         expiresAt: expires,
         decision: RealtimeConsentDecision.request,

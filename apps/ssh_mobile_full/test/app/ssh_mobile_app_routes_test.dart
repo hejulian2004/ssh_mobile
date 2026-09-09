@@ -95,7 +95,7 @@ void main() {
   }) {
     expect(
       () => navigator(tester).pushNamed(name, arguments: arguments),
-      throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
+      throwsA(anyOf(isA<StateError>(), isA<ArgumentError>())),
     );
     expect(tester.takeException(), isNull);
   }
@@ -117,9 +117,8 @@ void main() {
       await pumpApp(tester);
       expectRoute(tester, StartupScreen);
 
-      // Unknown names fail the contribution assert instead of reaching the
-      // default branch; the invalid edit arguments fail closed with
-      // ArgumentError.
+      // Unknown names fail the contribution contract instead of reaching the
+      // default branch; invalid arguments fail closed with a typed error.
       expectBlockedPush(tester, '/definitely-not-a-route');
       expectBlockedPush(
         tester,

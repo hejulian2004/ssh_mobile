@@ -212,10 +212,9 @@ void main() {
 
   test('screen-share consent encodes and decodes through realtime signal', () {
     final consent = NativeScreenShareConsent(
-      schemaVersion: 1,
+      schemaVersion: 2,
       operationId: 'operation-a',
       realtimeId: realtimeId,
-      generation: 7,
       issuedAtMs: 1_735_732_800_000,
       expiresAtMs: 1_735_732_860_000,
       decision: NativeScreenShareConsentDecision.request,
@@ -238,17 +237,15 @@ void main() {
     final event = decoded! as NativeRealtimeSignalEvent;
     expect(event.kind, NativeRealtimeSignalKind.screenShareConsent);
     expect(event.consent?.operationId, 'operation-a');
-    expect(event.consent?.generation, 7);
     expect(event.consent?.decision, NativeScreenShareConsentDecision.request);
   });
 
   test('screen-share consent rejects a realtime-id mismatch', () {
     final payload = NativeNetworkProtocol.encodeScreenShareConsent(
       const NativeScreenShareConsent(
-        schemaVersion: 1,
+        schemaVersion: 2,
         operationId: 'operation-a',
         realtimeId: realtimeId,
-        generation: 7,
         issuedAtMs: 1_735_732_800_000,
         expiresAtMs: 1_735_732_860_000,
         decision: NativeScreenShareConsentDecision.request,

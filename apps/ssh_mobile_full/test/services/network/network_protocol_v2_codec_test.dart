@@ -229,13 +229,12 @@ void main() {
   });
 
   test(
-    'screen-share consent preserves the independent generation on the App wire',
+    'screen-share consent uses the current schema on the App wire',
     () {
       final issued = DateTime.utc(2026, 1, 1, 12);
       final consent = RealtimeConsent(
         operationId: 'operation-a',
         realtimeId: '00112233445566778899aabbccddeeff',
-        generation: 9,
         issuedAt: issued,
         expiresAt: issued.add(const Duration(minutes: 1)),
         decision: RealtimeConsentDecision.request,

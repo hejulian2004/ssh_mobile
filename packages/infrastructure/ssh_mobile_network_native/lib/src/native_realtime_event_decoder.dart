@@ -128,7 +128,6 @@ final class _NativeRealtimeEventDecoder {
     var schemaVersion = 0;
     var operationId = '';
     var realtimeId = '';
-    var generation = 0;
     var issuedAtMs = 0;
     var expiresAtMs = 0;
     var decision = 0;
@@ -150,28 +149,26 @@ final class _NativeRealtimeEventDecoder {
         case 3:
           realtimeId = reader.string(field.wireType, _realtimeIdBytes);
         case 4:
-          generation = reader.varint(field.wireType);
-        case 5:
           issuedAtMs = reader.varint(field.wireType);
-        case 6:
+        case 5:
           expiresAtMs = reader.varint(field.wireType);
-        case 7:
+        case 6:
           decision = reader.varint(field.wireType);
-        case 8:
+        case 7:
           senderPeerId = reader.string(field.wireType, _maxPeerIdBytes);
-        case 9:
+        case 8:
           purpose = reader.varint(field.wireType);
-        case 10:
+        case 9:
           media = reader.varint(field.wireType);
-        case 11:
+        case 10:
           requiresAcceptance = reader.varint(field.wireType) != 0;
-        case 12:
+        case 11:
           actionRevision = reader.varint(field.wireType);
         default:
           reader.skip(field.wireType);
       }
     }
-    if (schemaVersion != 1) {
+    if (schemaVersion != 2) {
       throw const FormatException(
         'Unsupported screen-share consent schema version.',
       );
@@ -184,11 +181,6 @@ final class _NativeRealtimeEventDecoder {
     if (realtimeId != expectedRealtimeId) {
       throw const FormatException(
         'Screen-share consent realtime ID does not match signal.',
-      );
-    }
-    if (generation <= 0) {
-      throw const FormatException(
-        'Screen-share consent generation is invalid.',
       );
     }
     if (issuedAtMs <= 0 ||
@@ -213,7 +205,6 @@ final class _NativeRealtimeEventDecoder {
       schemaVersion: schemaVersion,
       operationId: operationId,
       realtimeId: realtimeId,
-      generation: generation,
       issuedAtMs: issuedAtMs,
       expiresAtMs: expiresAtMs,
       decision: NativeScreenShareConsentDecision.fromWire(decision),

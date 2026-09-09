@@ -57,10 +57,10 @@ pub struct NetworkErrorEnvelope {
     pub error: Option<NetworkError>,
 }
 
-/// Versioned screen-share consent metadata carried by the dedicated realtime
-/// consent signal.  This message never contains media, SDP, ICE or secrets.
+/// Current screen-share consent metadata carried by the dedicated realtime
+/// consent signal. This message never contains media, SDP, ICE or secrets.
 #[derive(Clone, PartialEq, Message)]
-pub struct ScreenShareConsentV1 {
+pub struct ScreenShareConsentV2 {
     #[prost(uint32, tag = "1")]
     pub schema_version: u32,
     #[prost(string, tag = "2")]
@@ -68,21 +68,19 @@ pub struct ScreenShareConsentV1 {
     #[prost(string, tag = "3")]
     pub realtime_id: String,
     #[prost(uint64, tag = "4")]
-    pub generation: u64,
-    #[prost(uint64, tag = "5")]
     pub issued_at_ms: u64,
-    #[prost(uint64, tag = "6")]
+    #[prost(uint64, tag = "5")]
     pub expires_at_ms: u64,
-    #[prost(enumeration = "ScreenShareConsentDecision", tag = "7")]
+    #[prost(enumeration = "ScreenShareConsentDecision", tag = "6")]
     pub decision: i32,
-    #[prost(string, tag = "8")]
+    #[prost(string, tag = "7")]
     pub sender_peer_id: String,
-    #[prost(enumeration = "ScreenShareConsentPurpose", tag = "9")]
+    #[prost(enumeration = "ScreenShareConsentPurpose", tag = "8")]
     pub purpose: i32,
-    #[prost(enumeration = "ScreenShareMediaKind", tag = "10")]
+    #[prost(enumeration = "ScreenShareMediaKind", tag = "9")]
     pub media: i32,
-    #[prost(bool, tag = "11")]
+    #[prost(bool, tag = "10")]
     pub requires_acceptance: bool,
-    #[prost(uint64, tag = "12")]
+    #[prost(uint64, tag = "11")]
     pub action_revision: u64,
 }

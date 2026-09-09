@@ -16,15 +16,14 @@ Uint8List _encodeScreenShareConsent(RealtimeConsent consent) {
         ..varint(1, consent.schemaVersion)
         ..string(2, consent.operationId)
         ..string(3, consent.realtimeId)
-        ..varint(4, consent.generation)
-        ..varint(5, consent.issuedAtMs)
-        ..varint(6, consent.expiresAtMs)
-        ..varint(7, consent.decision.wireValue)
-        ..string(8, consent.senderPeerId)
-        ..varint(9, consent.purpose.wireValue)
-        ..varint(10, consent.media.wireValue)
-        ..varint(11, consent.requiresAcceptance ? 1 : 0)
-        ..varint(12, consent.actionRevision))
+        ..varint(4, consent.issuedAtMs)
+        ..varint(5, consent.expiresAtMs)
+        ..varint(6, consent.decision.wireValue)
+        ..string(7, consent.senderPeerId)
+        ..varint(8, consent.purpose.wireValue)
+        ..varint(9, consent.media.wireValue)
+        ..varint(10, consent.requiresAcceptance ? 1 : 0)
+        ..varint(11, consent.actionRevision))
       .takeBytes();
 }
 
@@ -38,7 +37,6 @@ RealtimeConsent _decodeScreenShareConsent(Uint8List bytes) {
   var schemaVersion = 0;
   var operationId = '';
   var realtimeId = '';
-  var generation = 0;
   var issuedAtMs = 0;
   var expiresAtMs = 0;
   var decision = 0;
@@ -57,22 +55,20 @@ RealtimeConsent _decodeScreenShareConsent(Uint8List bytes) {
       case 3:
         realtimeId = utf8.decode(reader.bytes(field.wireType));
       case 4:
-        generation = reader.varint(field.wireType);
-      case 5:
         issuedAtMs = reader.varint(field.wireType);
-      case 6:
+      case 5:
         expiresAtMs = reader.varint(field.wireType);
-      case 7:
+      case 6:
         decision = reader.varint(field.wireType);
-      case 8:
+      case 7:
         senderPeerId = utf8.decode(reader.bytes(field.wireType));
-      case 9:
+      case 8:
         purpose = reader.varint(field.wireType);
-      case 10:
+      case 9:
         media = reader.varint(field.wireType);
-      case 11:
+      case 10:
         requiresAcceptance = reader.varint(field.wireType) != 0;
-      case 12:
+      case 11:
         actionRevision = reader.varint(field.wireType);
       default:
         reader.skip(field.wireType);
@@ -89,7 +85,6 @@ RealtimeConsent _decodeScreenShareConsent(Uint8List bytes) {
       schemaVersion: schemaVersion,
       operationId: operationId,
       realtimeId: realtimeId,
-      generation: generation,
       issuedAt: DateTime.fromMillisecondsSinceEpoch(issuedAtMs),
       expiresAt: DateTime.fromMillisecondsSinceEpoch(expiresAtMs),
       decision: decodedDecision,

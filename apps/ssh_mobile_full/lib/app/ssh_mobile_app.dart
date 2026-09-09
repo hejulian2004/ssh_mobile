@@ -29,6 +29,7 @@ import 'lan_share_feature_adapters.dart';
 import 'terminal_feature_adapters.dart';
 import 'sftp_feature_adapters.dart';
 import 'rag_feature_adapters.dart';
+import 'screen_share_route_scope.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'navigation/app_route_contributions.dart';
 

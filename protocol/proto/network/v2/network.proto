@@ -139,7 +139,7 @@ enum RealtimeSignalKind {
   REALTIME_SIGNAL_KIND_SCREEN_SHARE_CONSENT = 6;
 }
 
-/// Versioned business decision carried by ScreenShareConsentV1.
+/// Versioned business decision carried by ScreenShareConsentV2.
 enum ScreenShareConsentDecision {
   SCREEN_SHARE_CONSENT_DECISION_UNSPECIFIED = 0;
   SCREEN_SHARE_CONSENT_DECISION_REQUEST = 1;
@@ -529,19 +529,18 @@ message RealtimeSignalEvent {
 // Typed/versioned screen-share consent payload carried by the dedicated
 // REALTIME_SIGNAL_KIND_SCREEN_SHARE_CONSENT signal.  The payload is bounded
 // metadata only; it never contains SDP, media bytes, credentials or handles.
-message ScreenShareConsentV1 {
+message ScreenShareConsentV2 {
   uint32 schema_version = 1;
   string operation_id = 2;
   string realtime_id = 3;
-  uint64 generation = 4;
-  uint64 issued_at_ms = 5;
-  uint64 expires_at_ms = 6;
-  ScreenShareConsentDecision decision = 7;
-  string sender_peer_id = 8;
-  ScreenShareConsentPurpose purpose = 9;
-  ScreenShareMediaKind media = 10;
-  bool requires_acceptance = 11;
-  uint64 action_revision = 12;
+  uint64 issued_at_ms = 4;
+  uint64 expires_at_ms = 5;
+  ScreenShareConsentDecision decision = 6;
+  string sender_peer_id = 7;
+  ScreenShareConsentPurpose purpose = 8;
+  ScreenShareMediaKind media = 9;
+  bool requires_acceptance = 10;
+  uint64 action_revision = 11;
 }
 
 // Realtime Session 稳定后发布的完整状态快照。

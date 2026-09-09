@@ -80,44 +80,60 @@ void main() {
     },
   );
 
-  test(
-    'duplicate and stale consent are ignored by operation and generation',
-    () async {
+  test('duplicate and unknown-operation requests are ignored', () async {
+    consent.emit(
+      _consent(
+        issued: issued,
+        expires: issued.add(const Duration(minutes: 1)),
+        decision: RealtimeConsentDecision.request,
+        senderPeerId: 'remote-peer',
+        actionRevision: 1,
+        operationId: 'incoming-a',
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    consent.emit(
+      _consent(
+        issued: issued,
+        expires: issued.add(const Duration(minutes: 1)),
+        decision: RealtimeConsentDecision.request,
+        senderPeerId: 'remote-peer',
+        actionRevision: 1,
+        operationId: 'incoming-a',
+      ),
+    );
+    consent.emit(
+      _consent(
+        issued: issued,
+        expires: issued.add(const Duration(minutes: 1)),
+        decision: RealtimeConsentDecision.request,
+        senderPeerId: 'remote-peer',
+        actionRevision: 1,
+        operationId: 'incoming-b',
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.state, ScreenShareOperationState.incomingPending);
+    expect(controller.operationId, 'incoming-a');
+  });
+
+  test('shared-session consent acceptance uses the current realtime identity',
+      () async {
+      await controller.setMediaReady(true);
+      await controller.startOutgoing(operationId: 'operation-a');
       consent.emit(
         _consent(
           issued: issued,
           expires: issued.add(const Duration(minutes: 1)),
-          decision: RealtimeConsentDecision.request,
+          decision: RealtimeConsentDecision.accept,
           senderPeerId: 'remote-peer',
           actionRevision: 1,
-          operationId: 'incoming-a',
         ),
       );
       await Future<void>.delayed(Duration.zero);
-      consent.emit(
-        _consent(
-          issued: issued,
-          expires: issued.add(const Duration(minutes: 1)),
-          decision: RealtimeConsentDecision.request,
-          senderPeerId: 'remote-peer',
-          actionRevision: 1,
-          operationId: 'incoming-a',
-        ),
-      );
-      consent.emit(
-        _consent(
-          issued: issued,
-          expires: issued.add(const Duration(minutes: 1)),
-          decision: RealtimeConsentDecision.request,
-          senderPeerId: 'remote-peer',
-          actionRevision: 1,
-          operationId: 'incoming-b',
-          generation: 8,
-        ),
-      );
-      await Future<void>.delayed(Duration.zero);
-      expect(controller.state, ScreenShareOperationState.incomingPending);
-      expect(controller.operationId, 'incoming-a');
+
+      expect(controller.state, ScreenShareOperationState.active);
+      expect(media.captureStarts, ['operation-a']);
     },
   );
 
@@ -129,7 +145,7 @@ void main() {
         expires: issued.add(const Duration(minutes: 1)),
         decision: RealtimeConsentDecision.accept,
         senderPeerId: 'remote-peer',
-        actionRevision: 2,
+        actionRevision: 1,
         operationId: 'operation-a',
       ),
     );
@@ -142,7 +158,7 @@ void main() {
         expires: issued.add(const Duration(minutes: 1)),
         decision: RealtimeConsentDecision.cancel,
         senderPeerId: 'remote-peer',
-        actionRevision: 4,
+        actionRevision: 3,
         operationId: 'operation-a',
       ),
     );
@@ -171,6 +187,45 @@ void main() {
     expect(media.stops, ['operation-a']);
     expect(consent.sent.last.decision, RealtimeConsentDecision.cancel);
   });
+
+  test(
+    'cancel received while acceptance is in flight cannot resurrect viewer',
+    () async {
+      await controller.setMediaReady(true);
+      consent.emit(
+        _consent(
+          issued: issued,
+          expires: issued.add(const Duration(minutes: 1)),
+          decision: RealtimeConsentDecision.request,
+          senderPeerId: 'remote-peer',
+          actionRevision: 1,
+          operationId: 'incoming-a',
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final acceptance = Completer<SdkResult<void>>();
+      consent.nextSend = acceptance;
+      final acceptFuture = controller.acceptIncoming();
+      await Future<void>.delayed(Duration.zero);
+      consent.emit(
+        _consent(
+          issued: issued,
+          expires: issued.add(const Duration(minutes: 1)),
+          decision: RealtimeConsentDecision.cancel,
+          senderPeerId: 'remote-peer',
+          actionRevision: 2,
+          operationId: 'incoming-a',
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      acceptance.complete(const SdkSuccess<void>(null));
+      await acceptFuture;
+
+      expect(controller.state, ScreenShareOperationState.cancelled);
+      expect(media.viewerStarts, isEmpty);
+    },
+  );
 }
 
 RealtimeConsent _consent({
@@ -180,11 +235,9 @@ RealtimeConsent _consent({
   required String senderPeerId,
   required int actionRevision,
   String operationId = 'operation-a',
-  int generation = 7,
 }) => RealtimeConsent(
   operationId: operationId,
   realtimeId: '00112233445566778899aabbccddeeff',
-  generation: generation,
   issuedAt: issued,
   expiresAt: expires,
   decision: decision,
@@ -196,6 +249,7 @@ final class _FakeConsentPort implements ScreenShareConsentPort {
   final StreamController<RealtimeConsent> _controller =
       StreamController<RealtimeConsent>.broadcast();
   final List<RealtimeConsent> sent = <RealtimeConsent>[];
+  Completer<SdkResult<void>>? nextSend;
 
   @override
   Stream<RealtimeConsent> get consents => _controller.stream;
@@ -203,6 +257,9 @@ final class _FakeConsentPort implements ScreenShareConsentPort {
   @override
   Future<SdkResult<void>> sendConsent(RealtimeConsent consent) async {
     sent.add(consent);
+    final delayed = nextSend;
+    nextSend = null;
+    if (delayed != null) return delayed.future;
     return const SdkSuccess<void>(null);
   }
 

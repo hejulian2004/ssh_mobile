@@ -102,13 +102,11 @@ final class RealtimeClientImpl implements RealtimeClient {
     RealtimeConsent consent,
   ) async {
     _ensureUsable();
-    if (consent.realtimeId != session.realtimeId ||
-        consent.generation <= 0 ||
-        session.generation != consent.generation) {
+    if (consent.realtimeId != session.realtimeId) {
       return SdkFailure(
         NetworkError(
           code: NetworkErrorCode.staleOperation,
-          message: 'Consent does not match the active Realtime generation.',
+          message: 'Consent does not match the active Realtime session.',
           operation: NetworkOperation.send,
           peerId: session.peerId,
         ),
@@ -334,8 +332,7 @@ final class _RealtimeSession implements RealtimeSession {
 
   void _applyConsent(RealtimeConsent consent) {
     if (_disposed || consent.isExpired()) return;
-    final generation = _generation;
-    if (generation == null || generation != consent.generation) return;
+    if (consent.realtimeId != realtimeId) return;
     _consents.add(consent);
   }
 

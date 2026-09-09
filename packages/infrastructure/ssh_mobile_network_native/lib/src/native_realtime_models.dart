@@ -7,7 +7,6 @@ final class NativeScreenShareConsent {
     required this.schemaVersion,
     required this.operationId,
     required this.realtimeId,
-    required this.generation,
     required this.issuedAtMs,
     required this.expiresAtMs,
     required this.decision,
@@ -21,7 +20,6 @@ final class NativeScreenShareConsent {
   final int schemaVersion;
   final String operationId;
   final String realtimeId;
-  final int generation;
   final int issuedAtMs;
   final int expiresAtMs;
   final NativeScreenShareConsentDecision decision;

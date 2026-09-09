@@ -12,7 +12,6 @@ void main() {
   final consent = RealtimeConsent(
     operationId: 'operation-a',
     realtimeId: realtimeId,
-    generation: 7,
     issuedAt: issued,
     expiresAt: issued.add(const Duration(minutes: 1)),
     decision: RealtimeConsentDecision.request,

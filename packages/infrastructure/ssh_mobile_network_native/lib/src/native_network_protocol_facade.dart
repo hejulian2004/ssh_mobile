@@ -173,12 +173,11 @@ final class NativeNetworkProtocol {
   /// dedicated realtime signal kind. This helper emits metadata only; it has
   /// no API for frames, native pointers or credentials.
   static Uint8List encodeScreenShareConsent(NativeScreenShareConsent consent) {
-    if (consent.schemaVersion != 1 ||
+    if (consent.schemaVersion != 2 ||
         consent.operationId.isEmpty ||
         _values.utf8ByteLength(consent.operationId) >
             _maxScreenShareOperationIdBytes ||
         consent.realtimeId.isEmpty ||
-        consent.generation <= 0 ||
         consent.issuedAtMs <= 0 ||
         consent.expiresAtMs <= consent.issuedAtMs ||
         consent.expiresAtMs - consent.issuedAtMs >
@@ -197,15 +196,14 @@ final class NativeNetworkProtocol {
           ..varint(1, consent.schemaVersion)
           ..string(2, consent.operationId)
           ..string(3, consent.realtimeId)
-          ..varint(4, consent.generation)
-          ..varint(5, consent.issuedAtMs)
-          ..varint(6, consent.expiresAtMs)
-          ..varint(7, consent.decision.wireValue)
-          ..string(8, consent.senderPeerId)
-          ..varint(9, consent.purpose.wireValue)
-          ..varint(10, consent.media.wireValue)
-          ..varint(11, consent.requiresAcceptance ? 1 : 0)
-          ..varint(12, consent.actionRevision))
+          ..varint(4, consent.issuedAtMs)
+          ..varint(5, consent.expiresAtMs)
+          ..varint(6, consent.decision.wireValue)
+          ..string(7, consent.senderPeerId)
+          ..varint(8, consent.purpose.wireValue)
+          ..varint(9, consent.media.wireValue)
+          ..varint(10, consent.requiresAcceptance ? 1 : 0)
+          ..varint(11, consent.actionRevision))
         .takeBytes();
   }
 

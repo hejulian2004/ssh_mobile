@@ -407,11 +407,10 @@ fn screen_share_consent_wire_values_and_payload_round_trip() {
     assert_eq!(ScreenShareConsentPurpose::ScreenShare as i32, 1);
     assert_eq!(ScreenShareMediaKind::ScreenVideo as i32, 1);
 
-    let consent = ScreenShareConsentV1 {
-        schema_version: 1,
+    let consent = ScreenShareConsentV2 {
+        schema_version: 2,
         operation_id: "operation-a".into(),
         realtime_id: "00112233445566778899aabbccddeeff".into(),
-        generation: 7,
         issued_at_ms: 1_000,
         expires_at_ms: 61_000,
         decision: ScreenShareConsentDecision::Request as i32,
@@ -421,12 +420,11 @@ fn screen_share_consent_wire_values_and_payload_round_trip() {
         requires_acceptance: true,
         action_revision: 1,
     };
-    let decoded = ScreenShareConsentV1::decode(consent.encode_to_vec().as_slice())
+    let decoded = ScreenShareConsentV2::decode(consent.encode_to_vec().as_slice())
         .expect("decode consent payload");
-    assert_eq!(decoded.schema_version, 1);
+    assert_eq!(decoded.schema_version, 2);
     assert_eq!(decoded.operation_id, "operation-a");
     assert_eq!(decoded.realtime_id, "00112233445566778899aabbccddeeff");
-    assert_eq!(decoded.generation, 7);
     assert_eq!(decoded.decision, ScreenShareConsentDecision::Request as i32);
     assert!(decoded.requires_acceptance);
     assert_eq!(decoded.action_revision, 1);

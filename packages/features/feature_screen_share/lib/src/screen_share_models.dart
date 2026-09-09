@@ -91,7 +91,6 @@ final class ScreenShareOperationSnapshot {
 RealtimeConsent buildScreenShareConsent({
   required String operationId,
   required String realtimeId,
-  required int generation,
   required DateTime issuedAt,
   required DateTime expiresAt,
   required RealtimeConsentDecision decision,
@@ -100,7 +99,6 @@ RealtimeConsent buildScreenShareConsent({
 }) => RealtimeConsent(
   operationId: operationId,
   realtimeId: realtimeId,
-  generation: generation,
   issuedAt: issuedAt,
   expiresAt: expiresAt,
   decision: decision,

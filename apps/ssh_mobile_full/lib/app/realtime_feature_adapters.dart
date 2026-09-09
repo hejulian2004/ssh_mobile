@@ -59,7 +59,6 @@ final class AppRealtimeSessionBackend
         schemaVersion: consent.schemaVersion,
         operationId: consent.operationId,
         realtimeId: consent.realtimeId,
-        generation: consent.generation,
         issuedAtMs: consent.issuedAtMs,
         expiresAtMs: consent.expiresAtMs,
         decision: NativeScreenShareConsentDecision.values.firstWhere(
@@ -237,7 +236,6 @@ final class AppRealtimeSessionBackend
                 schemaVersion: consent.schemaVersion,
                 operationId: consent.operationId,
                 realtimeId: consent.realtimeId,
-                generation: consent.generation,
                 issuedAt: DateTime.fromMillisecondsSinceEpoch(
                   consent.issuedAtMs,
                 ),
