@@ -49,6 +49,7 @@ static_assert(offsetof(NativeMediaStats, queue_depth) == 80);
 static_assert(offsetof(NativeMediaStats, queue_capacity) == 84);
 
 using OwnerCloseFunction = int(__cdecl *)(uint64_t);
+using OwnerAbiVersionFunction = uint32_t(__cdecl *)();
 using OwnerStartFunction = int(__cdecl *)(uint64_t);
 using OwnerStopFunction = int(__cdecl *)(uint64_t);
 using OwnerValidateFunction = int(__cdecl *)(uint64_t);
@@ -62,6 +63,9 @@ using OwnerPullFunction = H264PullCallback;
 using BufferFreeFunction = H264BufferFreeCallback;
 
 struct NativeMediaApi {
+  static constexpr uint32_t kExpectedAbiVersion = 1;
+
+  OwnerAbiVersionFunction abi_version = nullptr;
   OwnerStartFunction start_owner = nullptr;
   OwnerStopFunction stop_owner = nullptr;
   OwnerValidateFunction validate_owner = nullptr;
@@ -76,7 +80,22 @@ struct NativeMediaApi {
   OwnerPullFunction pull_h264 = nullptr;
   BufferFreeFunction free_buffer = nullptr;
 
-  bool available() const { return close_owner != nullptr; }
+  bool symbol_set_available() const {
+    return abi_version != nullptr && start_owner != nullptr &&
+           stop_owner != nullptr && validate_owner != nullptr &&
+           request_keyframe != nullptr && reset_decoder != nullptr &&
+           read_stats != nullptr && apply_adaptation != nullptr &&
+           close_owner != nullptr && attach_renderer != nullptr &&
+           detach_renderer != nullptr && push_h264 != nullptr &&
+           pull_h264 != nullptr && free_buffer != nullptr;
+  }
+  bool abi_compatible() const {
+    return abi_version != nullptr && abi_version() == kExpectedAbiVersion;
+  }
+  bool available() const {
+    return symbol_set_available() && abi_compatible() &&
+           sizeof(NativeMediaStats) == 88;
+  }
   bool lifecycle_available() const {
     return start_owner != nullptr && stop_owner != nullptr &&
            close_owner != nullptr;
