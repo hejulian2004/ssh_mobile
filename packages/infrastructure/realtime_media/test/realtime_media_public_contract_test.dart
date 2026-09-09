@@ -48,7 +48,7 @@ void main() {
         kind: ScreenCaptureSourceKind.display,
         label: 'x' * 129,
       ),
-      throwsA(isA<AssertionError>()),
+      throwsA(isA<ArgumentError>()),
     );
   });
 }
