@@ -30,6 +30,11 @@ void main() {
   test(
     'new credentials replace the prior generation and clear is explicit',
     () {
+      final nextToken = const RealtimeSessionToken(
+        realtimeId: '00112233445566778899aabbccddeeff',
+        peerId: 'peer-a',
+        generation: 8,
+      );
       final credential = EphemeralTurnCredential(
         urls: const ['turns:relay.example'],
         username: '1700000001:peer-a',
@@ -38,12 +43,37 @@ void main() {
       );
       final store = RealtimeTurnCredentialStore();
       store.put(token, credential);
-      store.put(token, credential);
+      store.put(nextToken, credential);
       expect(store.length, 1);
+      expect(store.getValid(token), isNull);
+      expect(store.getValid(nextToken), same(credential));
       store.clear(token);
       expect(store.getValid(token), isNull);
     },
   );
+
+  test('production TURN endpoints require HTTPS', () {
+    expect(
+      () => JsonTurnCredentialProvider(
+        executor: _TurnExecutor(<SdkResponse>[]),
+        authSession: _TurnAuth(),
+        requestSigner: const _TurnSigner(),
+        endpoint: Uri.parse('http://relay.example'),
+      ),
+      throwsA(isA<ArgumentError>()),
+    );
+
+    expect(
+      () => JsonTurnCredentialProvider(
+        executor: _TurnExecutor(<SdkResponse>[]),
+        authSession: _TurnAuth(),
+        requestSigner: const _TurnSigner(),
+        endpoint: Uri.parse('http://127.0.0.1:8080'),
+        allowLoopbackHttp: true,
+      ),
+      returnsNormally,
+    );
+  });
 
   test('expired credential response maps to the stable issuer operation', () {
     final failure = turnUnavailable('expired', peerId: 'peer-a');
@@ -172,6 +202,163 @@ void main() {
       );
     },
   );
+
+  test(
+    'JSON provider bounds malformed responses and redacts issuer material',
+    () async {
+      final executor = _TurnExecutor(<SdkResponse>[
+        _jsonResponse(<String, dynamic>{
+          'urls': List<String>.generate(9, (index) => 'turns:relay-$index'),
+          'username': 'user',
+          'password': 'must-not-leak',
+          'expires_at':
+              DateTime.now()
+                  .toUtc()
+                  .add(const Duration(minutes: 2))
+                  .millisecondsSinceEpoch ~/
+              1000,
+        }),
+      ]);
+      final provider = JsonTurnCredentialProvider(
+        executor: executor,
+        authSession: _TurnAuth(),
+        requestSigner: const _TurnSigner(),
+        endpoint: Uri.parse('https://relay.example'),
+      );
+
+      final result = await provider.issue(token);
+
+      expect(result, isA<SdkFailure<EphemeralTurnCredential>>());
+      final failure = (result as SdkFailure<EphemeralTurnCredential>).error;
+      expect(failure.message, isNot(contains('must-not-leak')));
+      expect(failure.toString(), isNot(contains('must-not-leak')));
+    },
+  );
+
+  test('JSON provider rejects oversized and non-TURN URLs', () async {
+    final oversized = _TurnExecutor(<SdkResponse>[
+      SdkResponse(statusCode: 200, body: Uint8List(64 * 1024 + 1)),
+    ]);
+    final provider = JsonTurnCredentialProvider(
+      executor: oversized,
+      authSession: _TurnAuth(),
+      requestSigner: const _TurnSigner(),
+      endpoint: Uri.parse('https://relay.example'),
+    );
+    final oversizedResult = await provider.issue(token);
+    expect(oversizedResult, isA<SdkFailure<EphemeralTurnCredential>>());
+
+    final invalidUrlExecutor = _TurnExecutor(<SdkResponse>[
+      _jsonResponse(<String, dynamic>{
+        'urls': <String>['stun:relay.example'],
+        'username': 'user',
+        'password': 'password',
+        'expires_at':
+            DateTime.now()
+                .toUtc()
+                .add(const Duration(minutes: 2))
+                .millisecondsSinceEpoch ~/
+            1000,
+      }),
+    ]);
+    final invalidUrlProvider = JsonTurnCredentialProvider(
+      executor: invalidUrlExecutor,
+      authSession: _TurnAuth(),
+      requestSigner: const _TurnSigner(),
+      endpoint: Uri.parse('https://relay.example'),
+    );
+    final invalidUrlResult = await invalidUrlProvider.issue(token);
+    expect(invalidUrlResult, isA<SdkFailure<EphemeralTurnCredential>>());
+  });
+
+  test(
+    'TURN URL validation rejects malformed authorities and keeps byte bounds',
+    () {
+      expect(
+        () => EphemeralTurnCredential(
+          urls: const ['turn:relay.example:not-a-port'],
+          username: 'user',
+          password: 'password',
+          expiresAt: DateTime.now().add(const Duration(minutes: 1)),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+      for (final url in const <String>[
+        'stun:relay.example',
+        'turn:',
+        'turn://user:password@relay.example',
+        'turn:relay.example/path',
+        'turn:relay.example host',
+      ]) {
+        expect(
+          () => EphemeralTurnCredential(
+            urls: <String>[url],
+            username: 'user',
+            password: 'password',
+            expiresAt: DateTime.now().add(const Duration(minutes: 1)),
+          ),
+          throwsA(isA<ArgumentError>()),
+          reason: url,
+        );
+      }
+      expect(
+        () => EphemeralTurnCredential(
+          urls: <String>['turn:${'界' * 700}'],
+          username: 'user',
+          password: 'password',
+          expiresAt: DateTime.now().add(const Duration(minutes: 1)),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(
+        () => EphemeralTurnCredential(
+          urls: const ['turn:relay.example'],
+          username: '界' * 100,
+          password: 'password',
+          expiresAt: DateTime.now().add(const Duration(minutes: 1)),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+    },
+  );
+
+  test('TURN validation errors do not echo credential-bearing values', () {
+    expect(
+      () => EphemeralTurnCredential(
+        urls: const ['turn:user:password@relay.example'],
+        username: 'user',
+        password: 'secret-password',
+        expiresAt: DateTime.now().add(const Duration(minutes: 1)),
+      ),
+      throwsA(
+        predicate<Object>(
+          (error) =>
+              !error.toString().contains('password') &&
+              !error.toString().contains('secret-password'),
+        ),
+      ),
+    );
+  });
+
+  test('credential store sweeps expiry and enforces hard capacity', () {
+    final store = RealtimeTurnCredentialStore(maxEntries: 1);
+    final credential = EphemeralTurnCredential(
+      urls: const ['turns:relay.example'],
+      username: 'user',
+      password: 'password',
+      expiresAt: DateTime.now().add(const Duration(minutes: 1)),
+    );
+    store.put(token, credential);
+    final otherToken = const RealtimeSessionToken(
+      realtimeId: 'ffeeddccbbaa99887766554433221100',
+      peerId: 'peer-b',
+      generation: 1,
+    );
+    expect(() => store.put(otherToken, credential), throwsStateError);
+
+    store.clear(token);
+    expect(store.length, 0);
+  });
 }
 
 SdkResponse _jsonResponse(Map<String, dynamic> value) => SdkResponse(

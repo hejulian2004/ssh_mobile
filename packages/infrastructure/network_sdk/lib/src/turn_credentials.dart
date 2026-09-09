@@ -17,6 +17,13 @@ import 'network_requests.dart';
 import 'network_result_models.dart';
 import 'network_routes.dart';
 
+const _maxTurnResponseBytes = 64 * 1024;
+const _maxTurnUrls = 8;
+const _maxTurnUrlBytes = 2048;
+const _maxTurnUsernameBytes = 256;
+const _maxTurnPasswordBytes = 512;
+const _defaultTurnStoreCapacity = 32;
+
 /// Short-lived credential returned by the authenticated TURN issuer.
 final class EphemeralTurnCredential {
   EphemeralTurnCredential({
@@ -25,14 +32,21 @@ final class EphemeralTurnCredential {
     required this.password,
     required this.expiresAt,
   }) : urls = List.unmodifiable(urls) {
-    if (this.urls.isEmpty || this.urls.any((url) => url.trim().isEmpty)) {
-      throw ArgumentError.value(this.urls, 'urls');
+    if (this.urls.isEmpty ||
+        this.urls.length > _maxTurnUrls ||
+        this.urls.any((url) => url.trim().isEmpty)) {
+      throw ArgumentError('TURN server URLs are invalid.');
     }
-    if (username.trim().isEmpty || username.length > 256) {
-      throw ArgumentError.value(username, 'username');
+    for (final url in this.urls) {
+      _validateTurnUrl(url);
     }
-    if (password.isEmpty || password.length > 512) {
-      throw ArgumentError.value(password, 'password');
+    if (username.trim().isEmpty ||
+        utf8.encode(username).length > _maxTurnUsernameBytes) {
+      throw ArgumentError('TURN username is invalid.');
+    }
+    if (password.isEmpty ||
+        utf8.encode(password).length > _maxTurnPasswordBytes) {
+      throw ArgumentError('TURN password is invalid.');
     }
     if (!expiresAt.isAfter(DateTime.now())) {
       throw ArgumentError.value(expiresAt, 'expiresAt');
@@ -79,7 +93,8 @@ final class JsonTurnCredentialProvider implements TurnCredentialProvider {
     required this.requestSigner,
     required Uri endpoint,
     this.requestTimeout = const Duration(seconds: 10),
-  }) : endpoint = _resolveTurnEndpoint(endpoint) {
+    this.allowLoopbackHttp = false,
+  }) : endpoint = _resolveTurnEndpoint(endpoint, allowLoopbackHttp) {
     if (requestTimeout <= Duration.zero) {
       throw ArgumentError.value(requestTimeout, 'requestTimeout');
     }
@@ -90,6 +105,10 @@ final class JsonTurnCredentialProvider implements TurnCredentialProvider {
   final TurnCredentialRequestSigner requestSigner;
   final Uri endpoint;
   final Duration requestTimeout;
+
+  /// HTTP is only permitted for an explicitly opted-in local test issuer.
+  /// Production callers must use HTTPS.
+  final bool allowLoopbackHttp;
 
   @override
   Future<SdkResult<EphemeralTurnCredential>> issue(
@@ -238,6 +257,13 @@ final class JsonTurnCredentialProvider implements TurnCredentialProvider {
 
 /// In-memory credentials scoped by the native-authoritative Realtime token.
 final class RealtimeTurnCredentialStore {
+  RealtimeTurnCredentialStore({this.maxEntries = _defaultTurnStoreCapacity}) {
+    if (maxEntries <= 0) {
+      throw ArgumentError.value(maxEntries, 'maxEntries');
+    }
+  }
+
+  final int maxEntries;
   final Map<RealtimeSessionToken, EphemeralTurnCredential> _credentials =
       <RealtimeSessionToken, EphemeralTurnCredential>{};
 
@@ -245,9 +271,11 @@ final class RealtimeTurnCredentialStore {
     RealtimeSessionToken token, {
     DateTime? now,
   }) {
+    final current = now ?? DateTime.now();
+    _sweep(current);
     final credential = _credentials[token];
     if (credential == null) return null;
-    if (credential.isExpired(now)) {
+    if (credential.isExpired(current)) {
       _credentials.remove(token);
       return null;
     }
@@ -256,16 +284,36 @@ final class RealtimeTurnCredentialStore {
 
   void put(RealtimeSessionToken token, EphemeralTurnCredential credential) {
     if (credential.isExpired()) {
-      throw ArgumentError.value(credential, 'credential');
+      throw ArgumentError('TURN credential is expired.');
+    }
+    final now = DateTime.now();
+    _sweep(now);
+    _credentials.removeWhere(
+      (existing, _) =>
+          existing.realtimeId == token.realtimeId &&
+          existing.generation != token.generation,
+    );
+    if (!_credentials.containsKey(token) && _credentials.length >= maxEntries) {
+      throw StateError('TURN credential store capacity exhausted.');
     }
     _credentials[token] = credential;
   }
 
-  void clear(RealtimeSessionToken token) => _credentials.remove(token);
+  void clear(RealtimeSessionToken token) {
+    _sweep(DateTime.now());
+    _credentials.remove(token);
+  }
 
   void clearAll() => _credentials.clear();
 
-  int get length => _credentials.length;
+  int get length {
+    _sweep(DateTime.now());
+    return _credentials.length;
+  }
+
+  void _sweep(DateTime now) {
+    _credentials.removeWhere((_, credential) => credential.isExpired(now));
+  }
 }
 
 /// Maps an expired/invalid issuer result to the stable TURN error boundary.
@@ -285,7 +333,7 @@ NetworkError? _validateToken(RealtimeSessionToken token) {
   if (!RegExp(r'^[0-9a-f]{32}$').hasMatch(token.realtimeId) ||
       token.generation <= 0 ||
       token.peerId.trim().isEmpty ||
-      token.peerId.length > 128) {
+      utf8.encode(token.peerId).length > 128) {
     return const NetworkError(
       code: NetworkErrorCode.invalidArgument,
       message: 'Realtime TURN session token is invalid.',
@@ -296,6 +344,9 @@ NetworkError? _validateToken(RealtimeSessionToken token) {
 }
 
 EphemeralTurnCredential _parseCredential(Uint8List bytes) {
+  if (bytes.length > _maxTurnResponseBytes) {
+    throw const FormatException('TURN response is too large.');
+  }
   final value = jsonDecode(utf8.decode(bytes));
   if (value is! Map) {
     throw const FormatException('TURN response is not an object.');
@@ -306,7 +357,7 @@ EphemeralTurnCredential _parseCredential(Uint8List bytes) {
   final expiresAt = value['expires_at'];
   if (urlsValue is! List ||
       urlsValue.isEmpty ||
-      urlsValue.length > 8 ||
+      urlsValue.length > _maxTurnUrls ||
       urlsValue.any((url) => url is! String) ||
       username is! String ||
       password is! String ||
@@ -340,6 +391,9 @@ final class _TurnCredentialProofException implements Exception {
 NetworkError _turnHttpError(SdkResponse response) {
   Map<String, dynamic>? body;
   try {
+    if (response.body.length > _maxTurnResponseBytes) {
+      throw const FormatException('TURN error response is too large.');
+    }
     final decoded = jsonDecode(utf8.decode(response.body));
     if (decoded is Map<String, dynamic>) body = decoded;
   } on Object {
@@ -395,13 +449,87 @@ RetryDisposition _retryDisposition(Object? value) {
 
 int _positiveInt(Object? value) => value is int && value > 0 ? value : 0;
 
-Uri _resolveTurnEndpoint(Uri endpoint) {
-  if ((endpoint.scheme != 'https' && endpoint.scheme != 'http') ||
+Uri _resolveTurnEndpoint(Uri endpoint, bool allowLoopbackHttp) {
+  final https = endpoint.scheme == 'https';
+  final loopbackHttp =
+      endpoint.scheme == 'http' &&
+      allowLoopbackHttp &&
+      _isLoopbackHost(endpoint.host);
+  if ((!https && !loopbackHttp) ||
       endpoint.host.isEmpty ||
       endpoint.userInfo.isNotEmpty ||
       endpoint.query.isNotEmpty ||
       endpoint.fragment.isNotEmpty) {
-    throw ArgumentError.value(endpoint, 'endpoint', 'invalid network endpoint');
+    throw ArgumentError('TURN issuer endpoint is invalid.');
   }
   return endpoint;
+}
+
+void _validateTurnUrl(String value) {
+  if (utf8.encode(value).length > _maxTurnUrlBytes ||
+      value != value.trim() ||
+      RegExp(r'[\u0000-\u0020\u007f]').hasMatch(value)) {
+    throw ArgumentError('TURN server URL is invalid.');
+  }
+  final uri = Uri.tryParse(value);
+  if (uri == null ||
+      (uri.scheme != 'turn' && uri.scheme != 'turns') ||
+      uri.userInfo.isNotEmpty ||
+      uri.fragment.isNotEmpty) {
+    throw ArgumentError('TURN server URL is invalid.');
+  }
+
+  final authority = uri.host.isNotEmpty
+      ? (uri.path.isEmpty ? (uri.host, uri.hasPort ? uri.port : null) : null)
+      : _parseOpaqueTurnAuthority(uri.path);
+  if (authority == null ||
+      !_isValidTurnHost(authority.$1) ||
+      (authority.$2 != null &&
+          (authority.$2! <= 0 || authority.$2! > 65_535))) {
+    throw ArgumentError('TURN server URL is invalid.');
+  }
+}
+
+(String, int?)? _parseOpaqueTurnAuthority(String value) {
+  if (value.isEmpty) return null;
+  if (value.startsWith('[')) {
+    final close = value.indexOf(']');
+    if (close <= 1) return null;
+    final host = value.substring(1, close);
+    final suffix = value.substring(close + 1);
+    if (suffix.isEmpty) return (host, null);
+    if (!suffix.startsWith(':')) return null;
+    return (host, int.tryParse(suffix.substring(1)));
+  }
+  if (value.contains('[') ||
+      value.contains(']') ||
+      value.contains('/') ||
+      value.contains('\\')) {
+    return null;
+  }
+  final firstColon = value.indexOf(':');
+  if (firstColon < 0) return (value, null);
+  if (firstColon == 0 || firstColon != value.lastIndexOf(':')) return null;
+  final port = int.tryParse(value.substring(firstColon + 1));
+  if (port == null) return null;
+  return (value.substring(0, firstColon), port);
+}
+
+bool _isValidTurnHost(String host) {
+  if (host.isEmpty ||
+      host.contains('@') ||
+      host.contains('/') ||
+      host.contains('\\') ||
+      host.contains('[') ||
+      host.contains(']')) {
+    return false;
+  }
+  return !RegExp(r'[\u0000-\u0020\u007f]').hasMatch(host);
+}
+
+bool _isLoopbackHost(String host) {
+  final normalized = host.toLowerCase();
+  return normalized == 'localhost' ||
+      normalized == '127.0.0.1' ||
+      normalized == '::1';
 }
