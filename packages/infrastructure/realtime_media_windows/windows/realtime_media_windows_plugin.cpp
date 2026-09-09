@@ -121,13 +121,18 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
                     std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
     const auto owner_id = OwnerIdArgument(arguments);
     const auto source_id = StringArgument(arguments, "source_id");
+    const auto source_kind = StringArgument(arguments, "source_kind");
     const auto direction = StringArgument(arguments, "direction");
-    if (!owner_id || !source_id || !direction) {
+    if (!owner_id || !source_id || !source_kind || !direction) {
       ReplyError(result, "invalid_argument", "A native owner and source are required.");
       return;
     }
     if (*direction != "send") {
       ReplyError(result, "direction_mismatch", "Capture requires a send media owner.");
+      return;
+    }
+    if (*source_kind != "display" && *source_kind != "window") {
+      ReplyError(result, "invalid_argument", "The capture source kind is invalid.");
       return;
     }
 
@@ -143,14 +148,11 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
                  "The native media owner could not be started.");
       return;
     }
-    std::vector<CaptureSourceDescriptor> ignored_sources;
-    if (!capture_manager_.EnumerateSources(&ignored_sources)) {
-      native_media_api_.stop_owner(*owner_id);
-      ReplyError(result, kBackendFailure,
-                 "Windows capture source enumeration failed.");
-      return;
-    }
-    const auto capture_status = capture_manager_.Start(*owner_id, *source_id);
+    // Source IDs are generation-bound tokens returned by listSources. Do not
+    // re-enumerate here: replacing the catalog between selection and start
+    // could make an ordinal ID target a different window.
+    const auto capture_status =
+        capture_manager_.Start(*owner_id, *source_id, *source_kind);
     if (capture_status != CaptureStatus::kOk) {
       native_media_api_.stop_owner(*owner_id);
       ReplyError(result, CaptureStatusCode(capture_status),

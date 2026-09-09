@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 
@@ -20,9 +21,11 @@ using winrt::Windows::Graphics::Capture::GraphicsCaptureSession;
 using winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 
 struct CaptureState final {
+  ~CaptureState();
+
   uint64_t owner = 0;
   H264PushCallback push_h264 = nullptr;
-  std::shared_ptr<std::mutex> encoder_mutex;
+  std::mutex encoder_mutex;
   std::unique_ptr<HardwareH264Encoder> encoder;
   std::chrono::steady_clock::time_point started_at;
   std::atomic<bool> stopped{false};
@@ -33,6 +36,7 @@ struct CaptureState final {
   std::atomic<uint64_t> frames_dropped{0};
   std::atomic<uint64_t> sequence{0};
   std::atomic<int> terminal_status{0};
+  std::atomic<bool> resources_released{false};
   std::atomic<int> width{0};
   std::atomic<int> height{0};
 
@@ -43,7 +47,18 @@ struct CaptureState final {
   winrt::event_token frame_arrived_token{};
   winrt::event_token closed_token{};
 
-  void Stop();
+  bool Stop();
+  void EnterCallback();
+  void ExitCallback();
+
+ private:
+  bool WaitForCallbacks(std::chrono::milliseconds timeout);
+  void WaitForCallbacks();
+  bool ReleaseResources();
+
+  std::mutex callback_mutex;
+  std::condition_variable callback_cv;
+  size_t active_callbacks = 0;
 };
 
 // Installs the native FrameArrived/Closed callbacks after all capture resources

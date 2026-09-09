@@ -14,37 +14,77 @@
 
 namespace realtime_media_windows {
 
-void CaptureState::Stop() {
+CaptureState::~CaptureState() {
+  if (Stop()) return;
+  // A CaptureState can only be destroyed after its callback owner has been
+  // removed from the manager. If a bounded foreground teardown timed out,
+  // wait here before destroying codec resources so an in-flight callback can
+  // never observe a released encoder.
+  WaitForCallbacks();
+  ReleaseResources();
+}
+
+void CaptureState::EnterCallback() {
+  std::lock_guard<std::mutex> lock(callback_mutex);
+  ++active_callbacks;
+}
+
+void CaptureState::ExitCallback() {
+  std::lock_guard<std::mutex> lock(callback_mutex);
+  if (active_callbacks > 0) --active_callbacks;
+  if (active_callbacks == 0) callback_cv.notify_all();
+}
+
+bool CaptureState::WaitForCallbacks(std::chrono::milliseconds timeout) {
+  std::unique_lock<std::mutex> lock(callback_mutex);
+  return callback_cv.wait_for(lock, timeout,
+                              [this] { return active_callbacks == 0; });
+}
+
+void CaptureState::WaitForCallbacks() {
+  std::unique_lock<std::mutex> lock(callback_mutex);
+  callback_cv.wait(lock, [this] { return active_callbacks == 0; });
+}
+
+bool CaptureState::ReleaseResources() {
+  if (resources_released.load()) return true;
   stopped.store(true);
-  if (teardown_started.exchange(true)) return;
   try {
-    if (frame_pool != nullptr && frame_arrived_token.value != 0) {
-      frame_pool.FrameArrived(frame_arrived_token);
-      frame_arrived_token = {};
-    }
-    if (item != nullptr && closed_token.value != 0) {
-      item.Closed(closed_token);
-      closed_token = {};
-    }
     if (session != nullptr) session.Close();
     if (frame_pool != nullptr) frame_pool.Close();
     session = nullptr;
     frame_pool = nullptr;
     item = nullptr;
   } catch (...) {
-    session = nullptr;
-    frame_pool = nullptr;
-    item = nullptr;
+    return false;
   }
-  // Unregistering FrameArrived prevents new callbacks, while the shared mutex
-  // waits for an already-running encode/push callback before the transform is
-  // destroyed.
-  if (encoder_mutex != nullptr) {
-    std::lock_guard<std::mutex> lock(*encoder_mutex);
-    encoder.reset();
-  } else {
+  {
+    std::lock_guard<std::mutex> lock(encoder_mutex);
     encoder.reset();
   }
+  resources_released.store(true);
+  return true;
+}
+
+bool CaptureState::Stop() {
+  stopped.store(true);
+  if (!teardown_started.exchange(true)) {
+    try {
+      if (frame_pool != nullptr && frame_arrived_token.value != 0) {
+        frame_pool.FrameArrived(frame_arrived_token);
+        frame_arrived_token = {};
+      }
+      if (item != nullptr && closed_token.value != 0) {
+        item.Closed(closed_token);
+        closed_token = {};
+      }
+    } catch (...) {
+      teardown_started.store(false);
+      return false;
+    }
+  }
+  if (!WaitForCallbacks(std::chrono::seconds(2))) return false;
+  return ReleaseResources();
 }
 
 void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
@@ -53,7 +93,13 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
       [weak_state](Direct3D11CaptureFramePool const& pool,
                    winrt::Windows::Foundation::IInspectable const&) {
         const auto state = weak_state.lock();
-        if (!state || state->stopped.load()) return;
+        if (!state) return;
+        state->EnterCallback();
+        struct CallbackExit final {
+          std::shared_ptr<CaptureState> state;
+          ~CallbackExit() { state->ExitCallback(); }
+        } callback_exit{state};
+        if (state->stopped.load()) return;
         try {
           while (!state->stopped.load()) {
             auto frame = pool.TryGetNextFrame();
@@ -126,7 +172,10 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
               if (push_status == 0) {
                 state->frames_sent.fetch_add(1);
               } else if (push_status == 1) {
-                state->frames_dropped.fetch_add(1);
+                // The native queue owns queue-drop accounting. Counting this
+                // status here would make the platform/native merge report the
+                // same dropped access unit twice.
+                continue;
               } else {
                 state->frames_dropped.fetch_add(1);
                 state->terminal_status.store(push_status);
@@ -150,6 +199,11 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
                    winrt::Windows::Foundation::IInspectable const&) {
         const auto state = weak_state.lock();
         if (!state) return;
+        state->EnterCallback();
+        struct CallbackExit final {
+          std::shared_ptr<CaptureState> state;
+          ~CallbackExit() { state->ExitCallback(); }
+        } callback_exit{state};
         state->source_ended.store(true);
         state->stopped.store(true);
       });

@@ -42,6 +42,8 @@ using winrt::Windows::Graphics::DirectX::DirectXPixelFormat;
 using winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 
 constexpr int kFramePoolBufferCount = 3;
+std::atomic<uint64_t> next_source_generation{1};
+std::atomic<uint64_t> next_source_token{1};
 
 struct NativeSource {
   CaptureSourceDescriptor descriptor;
@@ -59,7 +61,21 @@ std::string Utf8FromWide(const wchar_t* value, int length) {
                           result.data(), size, nullptr, nullptr) != size) {
     return {};
   }
-  if (result.size() > 128) result.resize(128);
+  if (result.size() > 128) {
+    size_t boundary = 0;
+    while (boundary < result.size()) {
+      const auto lead = static_cast<unsigned char>(result[boundary]);
+      const size_t width =
+          lead < 0x80       ? 1
+          : (lead & 0xE0) == 0xC0 ? 2
+          : (lead & 0xF0) == 0xE0 ? 3
+          : (lead & 0xF8) == 0xF0 ? 4
+                                  : 1;
+      if (boundary + width > 128) break;
+      boundary += width;
+    }
+    result.resize(boundary);
+  }
   return result;
 }
 
@@ -83,7 +99,6 @@ struct WindowsCaptureManager::Impl final {
   winrt::com_ptr<ID3D11Device> d3d_device;
   winrt::com_ptr<ID3D11DeviceContext> d3d_context;
   IDirect3DDevice winrt_device{nullptr};
-  std::shared_ptr<std::mutex> encoder_mutex = std::make_shared<std::mutex>();
   H264PushCallback push_h264 = nullptr;
   bool com_initialized = false;
   bool mf_initialized = false;
@@ -175,10 +190,12 @@ struct WindowsCaptureManager::Impl final {
     }
   }
 
-  std::optional<NativeSource> FindSource(const std::string& source_id) {
+  std::optional<NativeSource> FindSource(const std::string& source_id,
+                                         const std::string& source_kind) {
     const auto source = std::find_if(
         sources.begin(), sources.end(), [&](const NativeSource& candidate) {
-          return candidate.descriptor.id == source_id;
+          return candidate.descriptor.id == source_id &&
+                 candidate.descriptor.kind == source_kind;
         });
     if (source == sources.end()) return std::nullopt;
     if ((source->descriptor.kind == "display" && !IsLiveMonitor(source->monitor)) ||
@@ -202,17 +219,21 @@ bool WindowsCaptureManager::EnumerateSources(
     std::vector<CaptureSourceDescriptor>* output) {
   if (output == nullptr) return false;
   std::vector<NativeSource> sources;
+  const uint64_t generation = next_source_generation.fetch_add(1);
   struct MonitorContext {
     std::vector<NativeSource>* sources;
+    uint64_t generation;
     int ordinal = 0;
-  } monitor_context{&sources};
+  } monitor_context{&sources, generation};
   EnumDisplayMonitors(
       nullptr, nullptr,
       [](HMONITOR monitor, HDC, LPRECT rect, LPARAM data) -> BOOL {
         auto* context = reinterpret_cast<MonitorContext*>(data);
         NativeSource source;
         const int ordinal = context->ordinal++;
-        source.descriptor.id = "display:" + std::to_string(ordinal);
+        source.descriptor.id = "display:source-" +
+                               std::to_string(context->generation) + "-" +
+                               std::to_string(next_source_token.fetch_add(1));
         source.descriptor.kind = "display";
         source.descriptor.label = "Display " + std::to_string(ordinal + 1);
         source.descriptor.width = rect->right - rect->left;
@@ -225,8 +246,9 @@ bool WindowsCaptureManager::EnumerateSources(
 
   struct WindowContext {
     std::vector<NativeSource>* sources;
+    uint64_t generation;
     int ordinal = 0;
-  } window_context{&sources};
+  } window_context{&sources, generation};
   EnumWindows(
       [](HWND window, LPARAM data) -> BOOL {
         auto* context = reinterpret_cast<WindowContext*>(data);
@@ -236,7 +258,9 @@ bool WindowsCaptureManager::EnumerateSources(
         if (length <= 0) return TRUE;
         NativeSource source;
         const int ordinal = context->ordinal++;
-        source.descriptor.id = "window:" + std::to_string(ordinal);
+        source.descriptor.id = "window:source-" +
+                               std::to_string(context->generation) + "-" +
+                               std::to_string(next_source_token.fetch_add(1));
         source.descriptor.kind = "window";
         source.descriptor.label = Utf8FromWide(title, length);
         if (source.descriptor.label.empty()) {
@@ -266,8 +290,12 @@ bool WindowsCaptureManager::EnumerateSources(
 }
 
 CaptureStatus WindowsCaptureManager::Start(uint64_t owner,
-                                           const std::string& source_id) {
-  if (owner == 0 || source_id.empty()) return CaptureStatus::kBackendFailure;
+                                           const std::string& source_id,
+                                           const std::string& source_kind) {
+  if (owner == 0 || source_id.empty() ||
+      (source_kind != "display" && source_kind != "window")) {
+    return CaptureStatus::kBackendFailure;
+  }
   std::lock_guard<std::mutex> lock(impl_->mutex);
   if (impl_->captures.find(owner) != impl_->captures.end()) {
     return CaptureStatus::kDuplicate;
@@ -278,7 +306,7 @@ CaptureStatus WindowsCaptureManager::Start(uint64_t owner,
   if (!GraphicsCaptureSession::IsSupported() || !impl_->EnsureDevice()) {
     return CaptureStatus::kUnsupported;
   }
-  const auto source = impl_->FindSource(source_id);
+  const auto source = impl_->FindSource(source_id, source_kind);
   if (!source) return CaptureStatus::kSourceEnded;
   const auto item = Impl::CreateCaptureItem(*source);
   if (!item) return CaptureStatus::kBackendFailure;
@@ -298,7 +326,6 @@ CaptureStatus WindowsCaptureManager::Start(uint64_t owner,
     auto state = std::make_shared<CaptureState>();
     state->owner = owner;
     state->push_h264 = impl_->push_h264;
-    state->encoder_mutex = impl_->encoder_mutex;
     state->encoder = std::move(encoder);
     state->started_at = std::chrono::steady_clock::now();
     state->device = impl_->winrt_device;
@@ -324,7 +351,7 @@ CaptureStatus WindowsCaptureManager::Stop(uint64_t owner) {
     if (it == impl_->captures.end()) return CaptureStatus::kOk;
     capture = it->second;
   }
-  capture->Stop();
+  if (!capture->Stop()) return CaptureStatus::kNativeFailure;
   return capture->source_ended.load() ? CaptureStatus::kSourceEnded
                                       : CaptureStatus::kOk;
 }
@@ -336,9 +363,15 @@ CaptureStatus WindowsCaptureManager::Release(uint64_t owner) {
     const auto it = impl_->captures.find(owner);
     if (it == impl_->captures.end()) return CaptureStatus::kOk;
     capture = it->second;
-    impl_->captures.erase(it);
   }
-  capture->Stop();
+  if (!capture->Stop()) return CaptureStatus::kNativeFailure;
+  {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    const auto it = impl_->captures.find(owner);
+    if (it != impl_->captures.end() && it->second == capture) {
+      impl_->captures.erase(it);
+    }
+  }
   return CaptureStatus::kOk;
 }
 

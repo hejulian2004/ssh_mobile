@@ -84,7 +84,9 @@ class WindowsCaptureManager final {
 
   void SetPushCallback(H264PushCallback callback);
   bool EnumerateSources(std::vector<CaptureSourceDescriptor>* sources);
-  CaptureStatus Start(uint64_t owner, const std::string& source_id);
+  CaptureStatus Start(uint64_t owner,
+                      const std::string& source_id,
+                      const std::string& source_kind);
   CaptureStatus Stop(uint64_t owner);
   CaptureStatus Release(uint64_t owner);
   CaptureStatus ReadStats(uint64_t owner, CaptureStats* stats);
