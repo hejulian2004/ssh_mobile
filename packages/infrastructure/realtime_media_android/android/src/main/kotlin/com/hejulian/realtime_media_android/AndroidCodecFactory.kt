@@ -17,7 +17,7 @@ internal object AndroidCodecFactory {
             MediaFormat.KEY_COLOR_FORMAT,
             MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface,
         )
-        format.setInteger(MediaFormat.KEY_BIT_RATE, bitrate(width, height))
+        format.setInteger(MediaFormat.KEY_BIT_RATE, initialBitrateKbps(width, height) * 1_000)
         format.setInteger(MediaFormat.KEY_FRAME_RATE, 30)
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
         return try {
@@ -61,8 +61,8 @@ internal object AndroidCodecFactory {
             !name.startsWith("omx.ffmpeg.")
     }
 
-    private fun bitrate(width: Int, height: Int): Int {
+    fun initialBitrateKbps(width: Int, height: Int): Int {
         val raw = width.toLong() * height.toLong() * 4L
-        return raw.coerceIn(1_500_000L, 12_000_000L).toInt()
+        return (raw / 1_000L).coerceIn(1_500L, 3 * 1024L).toInt()
     }
 }

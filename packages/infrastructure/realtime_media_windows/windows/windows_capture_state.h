@@ -39,6 +39,7 @@ struct CaptureState final {
   std::atomic<bool> resources_released{false};
   std::atomic<int> width{0};
   std::atomic<int> height{0};
+  std::atomic<uint32_t> target_bitrate_kbps{3 * 1024};
   std::atomic<uint32_t> target_framerate{30};
   std::atomic<uint64_t> next_encode_timestamp{0};
 

@@ -34,6 +34,12 @@ fn packetize(frame: &EncodedVideoFrame, initial_sequence: u16) -> Vec<Packet> {
         .expect("valid screen access unit packetizes")
 }
 
+fn jitter_access_unit(sequence: u64, timestamp: u64) -> EncodedVideoFrame {
+    let mut frame = access_unit(sequence, timestamp);
+    frame.payload.extend(std::iter::repeat_n(0x41, 2_000));
+    frame
+}
+
 #[test]
 fn screen_video_offer_keeps_generic_codecs_while_advertising_h264() {
     let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("peer");
@@ -207,6 +213,19 @@ fn bounded_adaptation_is_native_sender_state_and_keeps_queue_capacity_fixed() {
 }
 
 #[test]
+fn sendrecv_stats_keep_the_legacy_queue_capacity_at_three() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("peer");
+    peer.configure_h264_screen_video(MediaDirection::Sendrecv, Some(SCREEN_SSRC))
+        .expect("sendrecv config");
+
+    let stats = peer
+        .h264_screen_video_stats(MediaDirection::Sendrecv)
+        .expect("native stats");
+    assert!(stats.queue_depth <= stats.queue_capacity);
+    assert_eq!(stats.queue_capacity, 3);
+}
+
+#[test]
 fn packet_loss_reorder_and_duplicate_are_media_local_recovery_events() {
     let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
     peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
@@ -286,6 +305,57 @@ fn screen_video_stats_report_rtp_loss_recovery_and_jitter_without_payloads() {
     assert!(stats.jitter_ms > 0, "timestamp/arrival skew is observable");
     assert!(stats.queue_depth <= stats.queue_capacity);
     assert_eq!(stats.queue_capacity, 3);
+}
+
+#[test]
+fn inbound_jitter_ewma_can_decrease_after_a_transient_arrival_burst() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let base = Instant::now();
+    let mut packetizer = RtpPacketizer::new(96, 102, SCREEN_SSRC, 10_000);
+
+    for packet in packetizer
+        .packetize(&jitter_access_unit(1, 90_000))
+        .expect("first frame packetizes")
+    {
+        peer.receive_h264_screen_video_rtp(&packet, base)
+            .expect("first frame accepted");
+    }
+    for packet in packetizer
+        .packetize(&jitter_access_unit(2, 96_000))
+        .expect("burst frame packetizes")
+    {
+        peer.receive_h264_screen_video_rtp(&packet, base + Duration::from_secs(1))
+            .expect("burst frame accepted");
+    }
+    let burst = peer
+        .h264_screen_video_stats(MediaDirection::Recvonly)
+        .expect("burst stats")
+        .jitter_ms;
+    assert!(burst > 0);
+
+    for sequence in 3_u64..=100 {
+        let arrival =
+            base + Duration::from_secs(1) + Duration::from_nanos(66_666_667 * (sequence - 2));
+        let timestamp = 90_000 + sequence * 6_000;
+        for packet in packetizer
+            .packetize(&jitter_access_unit(sequence, timestamp))
+            .expect("stable frame packetizes")
+        {
+            peer.receive_h264_screen_video_rtp(&packet, arrival)
+                .expect("stable frame accepted");
+        }
+    }
+
+    let settled = peer
+        .h264_screen_video_stats(MediaDirection::Recvonly)
+        .expect("settled stats")
+        .jitter_ms;
+    assert!(
+        settled < burst,
+        "jitter EWMA must recover: {burst} -> {settled}"
+    );
 }
 
 #[test]

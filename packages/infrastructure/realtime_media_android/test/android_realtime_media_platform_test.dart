@@ -105,6 +105,74 @@ void main() {
     );
   });
 
+  test(
+    'maps failed adaptation rollback to a recreate-required error',
+    () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        throw PlatformException(
+          code: 'recreate_required',
+          message: 'adaptation rollback failed',
+        );
+      });
+
+      const platform = MethodChannelAndroidRealtimeMediaPlatform();
+      await expectLater(
+        platform.applyAdaptation(
+          endpointId: RealtimeMediaEndpointId('endpoint-1'),
+          identity: RealtimeMediaEndpointIdentity(
+            realtimeId: 'realtime-1',
+            peerId: 'peer-1',
+            generation: 1,
+            direction: RealtimeMediaDirection.send,
+          ),
+          decision: const RealtimeMediaAdaptationDecision(
+            bitrateKbps: 1536,
+            framerate: 7,
+            width: 1280,
+            height: 720,
+            reason: RealtimeMediaAdaptationReason.congestion,
+          ),
+        ),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.recreateRequired,
+          ),
+        ),
+      );
+    },
+  );
+
+  test('maps deferred worker cleanup to a retryable typed error', () async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      throw PlatformException(
+        code: 'cleanup_deferred',
+        message: 'encoder worker has not acknowledged stop',
+      );
+    });
+
+    const platform = MethodChannelAndroidRealtimeMediaPlatform();
+    await expectLater(
+      platform.detach(
+        endpointId: RealtimeMediaEndpointId('endpoint-1'),
+        identity: RealtimeMediaEndpointIdentity(
+          realtimeId: 'realtime-1',
+          peerId: 'peer-1',
+          generation: 1,
+          direction: RealtimeMediaDirection.send,
+        ),
+      ),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.cleanupDeferred,
+        ),
+      ),
+    );
+  });
+
   test('forwards generation-bound recovery commands', () async {
     final calls = <MethodCall>[];
     messenger.setMockMethodCallHandler(channel, (call) async {

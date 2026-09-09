@@ -58,6 +58,7 @@ static_assert(sizeof(NativeH264FrameMetadata) == 32,
 // encoder errors when a low-frequency stats read observes the failure.
 constexpr int kCaptureTerminalEncoderFailed = -1001;
 constexpr int kCaptureTerminalResolutionChanged = -1002;
+constexpr int kCaptureTerminalRecreateRequired = -1003;
 
 enum class CaptureStatus {
   kOk,
@@ -68,6 +69,7 @@ enum class CaptureStatus {
   kBackendFailure,
   kEncoderUnavailable,
   kEncoderFailed,
+  kRecreateRequired,
   kNativeFailure,
 };
 
@@ -94,6 +96,13 @@ class WindowsCaptureManager final {
                                 uint32_t framerate,
                                 uint32_t width,
                                 uint32_t height);
+  CaptureStatus CurrentAdaptation(uint64_t owner,
+                                  uint32_t* bitrate_kbps,
+                                  uint32_t* framerate);
+  CaptureStatus RestoreAdaptation(uint64_t owner,
+                                  uint32_t bitrate_kbps,
+                                  uint32_t framerate);
+  void MarkAdaptationRecreateRequired(uint64_t owner);
   CaptureStatus RequestKeyframe(uint64_t owner);
   CaptureStatus ReadStats(uint64_t owner, CaptureStats* stats);
 

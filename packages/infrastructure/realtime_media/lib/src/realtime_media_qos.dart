@@ -127,14 +127,20 @@ extension RealtimeMediaSessionQos on RealtimeMediaSessionController {
   /// apply it without changing queue capacity.
   Future<RealtimeMediaAdaptationDecision> adapt(
     RealtimeMediaEndpoint endpoint, {
-    RealtimeMediaAdaptationPolicy policy =
-        const RealtimeMediaAdaptationPolicy(),
+    RealtimeMediaAdaptationPolicy? policy,
     RealtimeMediaAdaptationController? controller,
+    DateTime? now,
   }) async {
     final snapshot = await stats(endpoint);
-    final decision = controller == null
-        ? policy.decide(snapshot)
-        : controller.decide(snapshot);
+    final statefulController =
+        controller ??
+        adaptationControllerForEndpoint(endpoint.id, policy: policy);
+    final decision = statefulController.decide(snapshot, now: now);
+
+    // Resolution changes are an explicit restart intent. The live actuator
+    // may only apply bitrate/framerate and must not claim a resize succeeded.
+    if (decision.requiresRestart) return decision;
+
     final recovery = backend;
     if (recovery is RealtimeMediaRecoveryBackend) {
       await (recovery as RealtimeMediaRecoveryBackend).applyAdaptation(

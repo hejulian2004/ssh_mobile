@@ -95,7 +95,7 @@ void main() {
   );
 
   test('statistics remain low-frequency and payload-free', () async {
-    platform.stats = const RealtimeMediaStats(
+    platform.stats = RealtimeMediaStats(
       width: 1920,
       height: 1080,
       framesCaptured: 4,
@@ -275,6 +275,36 @@ void main() {
   });
 
   test(
+    'duplicate native endpoint start releases the replacement owner',
+    () async {
+      final first = await backend.start(identity);
+      endpointBackend._nextEndpoint = 0;
+
+      await expectLater(
+        backend.start(identity),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.duplicateEndpoint,
+          ),
+        ),
+      );
+
+      expect(first.value, '1');
+      expect(endpointBackend.operations, <String>[
+        'start:realtime-1:7:send',
+        'owner-open:1',
+        'start:realtime-1:7:send',
+        'owner-open:1',
+        'owner-close:1',
+        'release:1',
+      ]);
+      await backend.release(endpointId: first, identity: identity);
+    },
+  );
+
+  test(
     'rejects platform operations from another endpoint generation',
     () async {
       final endpoint = await backend.start(identity);
@@ -415,7 +445,7 @@ final class EndpointBackendWithoutOwner implements RealtimeMediaBackend {
 final class RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
   final List<String> operations = <String>[];
   RealtimeMediaException? failure;
-  RealtimeMediaStats stats = const RealtimeMediaStats();
+  RealtimeMediaStats stats = RealtimeMediaStats();
   List<ScreenCaptureSource> sources = const <ScreenCaptureSource>[];
 
   @override

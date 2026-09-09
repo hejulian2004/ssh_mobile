@@ -62,10 +62,6 @@ final class WindowsRealtimeMediaBackend
       );
       if (_owners.containsKey(endpointId)) {
         await ownerBackend.closeNativeOwner(token: token, identity: identity);
-        await endpointBackend.release(
-          endpointId: endpointId,
-          identity: identity,
-        );
         throw const RealtimeMediaException(
           RealtimeMediaErrorCode.duplicateEndpoint,
           'Windows media already owns this endpoint ID.',

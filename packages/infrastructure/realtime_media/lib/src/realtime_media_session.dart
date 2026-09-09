@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'realtime_media_adaptation.dart';
 import 'realtime_media_endpoint.dart';
 import 'realtime_media_error.dart';
 import 'realtime_media_state.dart';
@@ -70,6 +71,25 @@ final class RealtimeMediaSessionController {
       <RealtimeMediaEndpointId, Future<void>>{};
   final Set<RealtimeMediaEndpointId> _pendingAttachments =
       <RealtimeMediaEndpointId>{};
+  final Map<RealtimeMediaEndpointId, RealtimeMediaAdaptationController>
+  _adaptationControllers =
+      <RealtimeMediaEndpointId, RealtimeMediaAdaptationController>{};
+
+  /// Returns the stateful QoS controller owned by one endpoint lease.
+  ///
+  /// The controller stores only bounded counters/timestamps. It is kept on
+  /// the session so repeated stats polls use interval deltas instead of
+  /// restarting a cumulative-loss policy on every call.
+  RealtimeMediaAdaptationController adaptationControllerForEndpoint(
+    RealtimeMediaEndpointId endpointId, {
+    RealtimeMediaAdaptationPolicy? policy,
+  }) => _adaptationControllers[endpointId] ??=
+      RealtimeMediaAdaptationController(policy: policy);
+
+  /// Drops QoS state once the native endpoint lease is finalized.
+  void discardAdaptationController(RealtimeMediaEndpointId endpointId) {
+    _adaptationControllers.remove(endpointId);
+  }
 
   Future<void>? _terminalRelease;
   Completer<void>? _pendingStartsSettled;

@@ -82,6 +82,101 @@ void main() {
     },
   );
 
+  test(
+    'maps failed adaptation rollback to a recreate-required error',
+    () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        throw PlatformException(
+          code: 'recreate_required',
+          message: 'adaptation rollback failed',
+        );
+      });
+
+      const platform = MethodChannelWindowsRealtimeMediaPlatform();
+      await expectLater(
+        platform.applyAdaptation(
+          endpointId: RealtimeMediaEndpointId('endpoint-1'),
+          identity: RealtimeMediaEndpointIdentity(
+            realtimeId: 'realtime-1',
+            peerId: 'peer-1',
+            generation: 1,
+            direction: RealtimeMediaDirection.send,
+          ),
+          decision: const RealtimeMediaAdaptationDecision(
+            bitrateKbps: 1536,
+            framerate: 7,
+            width: 1280,
+            height: 720,
+            reason: RealtimeMediaAdaptationReason.congestion,
+          ),
+        ),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.recreateRequired,
+          ),
+        ),
+      );
+    },
+  );
+
+  test('maps deferred worker cleanup to a retryable typed error', () async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      throw PlatformException(
+        code: 'cleanup_deferred',
+        message: 'capture callback has not quiesced',
+      );
+    });
+
+    const platform = MethodChannelWindowsRealtimeMediaPlatform();
+    await expectLater(
+      platform.detach(
+        endpointId: RealtimeMediaEndpointId('endpoint-1'),
+        identity: RealtimeMediaEndpointIdentity(
+          realtimeId: 'realtime-1',
+          peerId: 'peer-1',
+          generation: 1,
+          direction: RealtimeMediaDirection.send,
+        ),
+      ),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.cleanupDeferred,
+        ),
+      ),
+    );
+  });
+
+  test('forwards an opaque source token and its type', () async {
+    MethodCall? captured;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      captured = call;
+      return null;
+    });
+
+    const platform = MethodChannelWindowsRealtimeMediaPlatform();
+    await platform.startCapture(
+      endpointId: RealtimeMediaEndpointId('endpoint-1'),
+      identity: RealtimeMediaEndpointIdentity(
+        realtimeId: 'realtime-1',
+        peerId: 'peer-1',
+        generation: 1,
+        direction: RealtimeMediaDirection.send,
+      ),
+      source: ScreenCaptureSource(
+        id: ScreenCaptureSourceId('window:source-4-9'),
+        kind: ScreenCaptureSourceKind.window,
+      ),
+    );
+
+    final arguments = captured?.arguments as Map;
+    expect(arguments['source_id'], 'window:source-4-9');
+    expect(arguments['source_kind'], 'window');
+  });
+
   test('forwards generation-bound recovery commands', () async {
     final calls = <MethodCall>[];
     messenger.setMockMethodCallHandler(channel, (call) async {

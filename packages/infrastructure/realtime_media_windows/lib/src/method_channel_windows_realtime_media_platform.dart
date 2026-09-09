@@ -115,24 +115,33 @@ final class MethodChannelWindowsRealtimeMediaPlatform
       'readStats',
       _identityArguments(endpointId, identity, ownerToken),
     );
-    return RealtimeMediaStats(
-      width: _nonNegativeInt(result['width']),
-      height: _nonNegativeInt(result['height']),
-      framesCaptured: _nonNegativeInt(result['frames_captured']),
-      framesSent: _nonNegativeInt(result['frames_sent']),
-      framesDropped: _nonNegativeInt(result['frames_dropped']),
-      framesDecoded: _nonNegativeInt(result['frames_decoded']),
-      framesRendered: _nonNegativeInt(result['frames_rendered']),
-      packetsSent: _nonNegativeInt(result['packets_sent']),
-      packetsReceived: _nonNegativeInt(result['packets_received']),
-      packetsLost: _nonNegativeInt(result['packets_lost']),
-      framesRecovered: _nonNegativeInt(result['frames_recovered']),
-      keyframeRequests: _nonNegativeInt(result['keyframe_requests']),
-      jitterMs: _nonNegativeInt(result['jitter_ms']),
-      rttMs: _nonNegativeInt(result['rtt_ms']),
-      queueDepth: _boundedQueueDepth(result['queue_depth']),
-      queueCapacity: _queueCapacity(result['queue_capacity']),
-    );
+    try {
+      return RealtimeMediaStats(
+        width: _nonNegativeInt(result['width']),
+        height: _nonNegativeInt(result['height']),
+        framesCaptured: _nonNegativeInt(result['frames_captured']),
+        framesSent: _nonNegativeInt(result['frames_sent']),
+        framesDropped: _nonNegativeInt(result['frames_dropped']),
+        framesDecoded: _nonNegativeInt(result['frames_decoded']),
+        framesRendered: _nonNegativeInt(result['frames_rendered']),
+        packetsSent: _nonNegativeInt(result['packets_sent']),
+        packetsReceived: _nonNegativeInt(result['packets_received']),
+        packetsLost: _nonNegativeInt(result['packets_lost']),
+        framesRecovered: _nonNegativeInt(result['frames_recovered']),
+        keyframeRequests: _nonNegativeInt(result['keyframe_requests']),
+        jitterMs: _nonNegativeInt(result['jitter_ms']),
+        rttMs: _nonNegativeInt(result['rtt_ms']),
+        queueDepth: _boundedQueueDepth(result['queue_depth']),
+        queueCapacity: _queueCapacity(result['queue_capacity']),
+      );
+    } on RealtimeMediaException {
+      rethrow;
+    } on Object {
+      throw const RealtimeMediaException(
+        RealtimeMediaErrorCode.backendFailure,
+        'Windows media statistics violated the fixed ABI contract.',
+      );
+    }
   }
 
   @override
@@ -277,6 +286,8 @@ final class MethodChannelWindowsRealtimeMediaPlatform
         'capture_source_ended' => RealtimeMediaErrorCode.captureSourceEnded,
         'encoder_unavailable' => RealtimeMediaErrorCode.encoderUnavailable,
         'encoder_failed' => RealtimeMediaErrorCode.encoderFailed,
+        'recreate_required' => RealtimeMediaErrorCode.recreateRequired,
+        'cleanup_deferred' => RealtimeMediaErrorCode.cleanupDeferred,
         'decoder_unavailable' => RealtimeMediaErrorCode.decoderUnavailable,
         'decoder_failed' => RealtimeMediaErrorCode.decoderFailed,
         'unsupported_codec' => RealtimeMediaErrorCode.unsupportedCodec,

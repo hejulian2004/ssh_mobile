@@ -2,11 +2,11 @@ import 'package:realtime_media/realtime_media.dart';
 import 'package:test/test.dart';
 
 void main() {
-  const policy = RealtimeMediaAdaptationPolicy();
+  final policy = RealtimeMediaAdaptationPolicy();
 
   test('steady state keeps bounded full target and dimensions', () {
     final decision = policy.decide(
-      const RealtimeMediaStats(width: 1920, height: 1080),
+      RealtimeMediaStats(width: 1920, height: 1080),
     );
     expect(decision.reason, RealtimeMediaAdaptationReason.steady);
     expect(decision.bitrateKbps, 3 * 1024);
@@ -17,7 +17,7 @@ void main() {
 
   test('loss, jitter and full queue select a bounded congestion target', () {
     final decision = policy.decide(
-      const RealtimeMediaStats(
+      RealtimeMediaStats(
         width: 3840,
         height: 2160,
         packetsLost: 2,
@@ -31,11 +31,12 @@ void main() {
     expect(decision.framerate, 7);
     expect(decision.width, 1920);
     expect(decision.height, 1080);
+    expect(decision.requiresRestart, isTrue);
   });
 
   test('recovery target remains finite and never changes queue capacity', () {
     final decision = policy.decide(
-      const RealtimeMediaStats(
+      RealtimeMediaStats(
         width: 1280,
         height: 720,
         framesRecovered: 1,
@@ -45,11 +46,38 @@ void main() {
     expect(decision.reason, RealtimeMediaAdaptationReason.recovery);
     expect(decision.bitrateKbps, 2304);
     expect(decision.framerate, 11);
-    expect(const RealtimeMediaStats().queueCapacity, 3);
+    expect(RealtimeMediaStats().queueCapacity, 3);
     expect(
       () => RealtimeMediaStats(queueDepth: 4),
-      throwsA(isA<AssertionError>()),
+      throwsA(isA<ArgumentError>()),
     );
+  });
+
+  test('stats contract validates bounds in release mode', () {
+    expect(
+      () => RealtimeMediaStats(packetsLost: -1),
+      throwsA(isA<ArgumentError>()),
+    );
+    expect(
+      () => RealtimeMediaStats(queueCapacity: 4),
+      throwsA(isA<ArgumentError>()),
+    );
+  });
+
+  test('unknown RTT stays zero and does not create synthetic congestion', () {
+    final stats = RealtimeMediaStats(
+      width: 1920,
+      height: 1080,
+      packetsReceived: 100,
+      rttMs: 0,
+    );
+
+    final decision = policy.decide(stats);
+
+    expect(stats.rttMs, 0);
+    expect(decision.reason, RealtimeMediaAdaptationReason.steady);
+    expect(decision.bitrateKbps, 3 * 1024);
+    expect(decision.framerate, 15);
   });
 
   test('keyframe limiter bounds a burst without mutating the media queue', () {
@@ -71,17 +99,22 @@ void main() {
     () {
       final controller = RealtimeMediaAdaptationController();
       final first = DateTime.utc(2026, 9, 8, 12);
-      const healthy = RealtimeMediaStats(width: 1920, height: 1080);
-      const congested = RealtimeMediaStats(
+      final healthy = RealtimeMediaStats(width: 1920, height: 1080);
+      final congested = RealtimeMediaStats(
         width: 1920,
         height: 1080,
         packetsReceived: 100,
-        packetsLost: 5,
+        packetsLost: 6,
+        rttMs: 300,
       );
 
       final steady = controller.decide(healthy, now: first);
       expect(steady.bitrateKbps, 3 * 1024);
       expect(steady.framerate, 15);
+
+      // The hold window starts when congestion is first observed, not when
+      // the previous healthy sample was recorded.
+      controller.decide(congested, now: first);
 
       final held = controller.decide(
         congested,
@@ -117,7 +150,7 @@ void main() {
     () {
       final controller = RealtimeMediaAdaptationController();
       final first = DateTime.utc(2026, 9, 8, 12);
-      const severe = RealtimeMediaStats(
+      final severe = RealtimeMediaStats(
         width: 1920,
         height: 1080,
         packetsReceived: 100,
@@ -132,8 +165,9 @@ void main() {
       expect(degraded.width, 1280);
       expect(degraded.height, 720);
       expect(degraded.framerate, 10);
+      expect(degraded.requiresRestart, isTrue);
 
-      const healthy = RealtimeMediaStats(
+      final healthy = RealtimeMediaStats(
         width: 1920,
         height: 1080,
         packetsReceived: 100,
@@ -155,6 +189,7 @@ void main() {
       expect(recovered.height, 1080);
       expect(recovered.framerate, 10);
       expect(recovered.bitrateKbps, greaterThan(1_296));
+      expect(recovered.requiresRestart, isFalse);
     },
   );
 
@@ -162,11 +197,11 @@ void main() {
     final controller = RealtimeMediaAdaptationController();
     final now = DateTime.utc(2026, 9, 8, 12);
     final first = controller.decide(
-      const RealtimeMediaStats(width: 1920, height: 1080),
+      RealtimeMediaStats(width: 1920, height: 1080),
       now: now,
     );
     final backwards = controller.decide(
-      const RealtimeMediaStats(width: 1920, height: 1080),
+      RealtimeMediaStats(width: 1920, height: 1080),
       now: now.subtract(const Duration(hours: 1)),
     );
     expect(backwards.bitrateKbps, first.bitrateKbps);
@@ -179,7 +214,7 @@ void main() {
   test('controller learns dimensions after an early metadata-only sample', () {
     final controller = RealtimeMediaAdaptationController();
     final first = DateTime.utc(2026, 9, 8, 12);
-    const severeWithoutDimensions = RealtimeMediaStats(
+    final severeWithoutDimensions = RealtimeMediaStats(
       packetsReceived: 100,
       packetsLost: 10,
       rttMs: 400,
@@ -193,7 +228,7 @@ void main() {
     expect(degraded.height, 720);
 
     final dimensionsArrived = controller.decide(
-      const RealtimeMediaStats(
+      RealtimeMediaStats(
         width: 1920,
         height: 1080,
         packetsReceived: 100,
@@ -205,11 +240,43 @@ void main() {
     expect(dimensionsArrived.width, 1280);
     expect(dimensionsArrived.height, 720);
 
+    // Start the recovery hold when the first healthy sample is observed.
+    controller.decide(
+      RealtimeMediaStats(width: 1920, height: 1080, packetsReceived: 100),
+      now: first.add(const Duration(seconds: 4)),
+    );
+
     final healthy = controller.decide(
-      const RealtimeMediaStats(width: 1920, height: 1080, packetsReceived: 100),
+      RealtimeMediaStats(width: 1920, height: 1080, packetsReceived: 100),
       now: first.add(const Duration(seconds: 14)),
     );
     expect(healthy.width, 1920);
     expect(healthy.height, 1080);
   });
+
+  test(
+    'controller uses interval loss deltas instead of cumulative history',
+    () {
+      final controller = RealtimeMediaAdaptationController();
+      final first = DateTime.utc(2026, 9, 8, 12);
+
+      final earlyLoss = RealtimeMediaStats(
+        width: 1920,
+        height: 1080,
+        packetsReceived: 100,
+        packetsLost: 10,
+      );
+      final firstDecision = controller.decide(earlyLoss, now: first);
+      expect(firstDecision.reason, RealtimeMediaAdaptationReason.congestion);
+
+      // The cumulative lost counter did not move during this interval. The
+      // earlier burst must not keep adaptation in congestion forever.
+      final healthy = controller.decide(
+        earlyLoss.copyWith(packetsReceived: 200),
+        now: first.add(const Duration(seconds: 1)),
+      );
+      expect(healthy.reason, RealtimeMediaAdaptationReason.steady);
+      expect(healthy.bitrateKbps, 3 * 1024);
+    },
+  );
 }

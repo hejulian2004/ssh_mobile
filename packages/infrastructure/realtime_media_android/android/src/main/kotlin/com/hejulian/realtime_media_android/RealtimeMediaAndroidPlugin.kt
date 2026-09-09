@@ -400,6 +400,16 @@ class RealtimeMediaAndroidPlugin :
         }
     }
 
+    private fun cleanupCaptureAfterForegroundFailure(owner: AndroidMediaOwner): String? {
+        val failure = try {
+            owner.detach()
+        } catch (_: Exception) {
+            "backend_failure"
+        }
+        stopForegroundServiceIfUnused()
+        return failure
+    }
+
     private fun disposeOwners() {
         pendingProjectionResult?.error("backend_failure", "Android media plugin detached.", null)
         pendingProjectionResult = null
@@ -414,7 +424,9 @@ class RealtimeMediaAndroidPlugin :
             }
         }
         projection = null
-        stopForegroundServiceIfUnused()
+        if (owners.values.none { it.isCaptureOwnerActive() }) {
+            context?.let { ScreenCaptureForegroundService.stop(it) }
+        }
     }
 
     private fun detachActivityListener() {

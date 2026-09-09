@@ -315,6 +315,36 @@ void main() {
       );
     },
   );
+
+  test(
+    'duplicate native endpoint start releases the replacement owner',
+    () async {
+      final first = await backend.start(sendIdentity);
+      endpointBackend._nextEndpoint = 1;
+
+      await expectLater(
+        backend.start(sendIdentity),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.duplicateEndpoint,
+          ),
+        ),
+      );
+
+      expect(first.value, '1');
+      expect(endpointBackend.operations, <String>[
+        'start:realtime-1:7:send',
+        'owner-open:1',
+        'start:realtime-1:7:send',
+        'owner-open:1',
+        'owner-close:1',
+        'release:1',
+      ]);
+      await backend.release(endpointId: first, identity: sendIdentity);
+    },
+  );
 }
 
 final class RecordingEndpointBackend
@@ -500,7 +530,7 @@ final class RecordingAndroidPlatform implements AndroidRealtimeMediaPlatform {
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
     RealtimeMediaNativeOwnerToken? ownerToken,
-  }) async => const RealtimeMediaStats(framesRendered: 3);
+  }) async => RealtimeMediaStats(framesRendered: 3);
 
   @override
   Future<void> requestKeyframe({

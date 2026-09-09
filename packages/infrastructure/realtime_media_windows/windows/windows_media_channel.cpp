@@ -14,9 +14,11 @@ constexpr char kDecoderUnavailable[] = "decoder_unavailable";
 constexpr char kDecoderFailed[] = "decoder_failed";
 constexpr char kEncoderUnavailable[] = "encoder_unavailable";
 constexpr char kEncoderFailed[] = "encoder_failed";
+constexpr char kRecreateRequired[] = "recreate_required";
 
 int64_t BoundedInt64(uint64_t value) {
-  constexpr auto kMax = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  constexpr auto kMax =
+      static_cast<uint64_t>((std::numeric_limits<int64_t>::max)());
   return static_cast<int64_t>(value > kMax ? kMax : value);
 }
 
@@ -26,6 +28,8 @@ NativeMediaApi NativeMediaApi::Resolve() {
   NativeMediaApi api;
   const HMODULE module = GetModuleHandleW(L"network_ffi.dll");
   if (module == nullptr) return api;
+  api.abi_version = reinterpret_cast<OwnerAbiVersionFunction>(
+      GetProcAddress(module, "ssh_net_abi_version"));
   api.start_owner = reinterpret_cast<OwnerStartFunction>(
       GetProcAddress(module, "ssh_net_realtime_media_owner_start"));
   api.stop_owner = reinterpret_cast<OwnerStopFunction>(
@@ -122,6 +126,8 @@ const char* CaptureStatusCode(CaptureStatus status) {
       return kEncoderUnavailable;
     case CaptureStatus::kEncoderFailed:
       return kEncoderFailed;
+    case CaptureStatus::kRecreateRequired:
+      return kRecreateRequired;
     case CaptureStatus::kUnsupported:
     case CaptureStatus::kBackendFailure:
     case CaptureStatus::kNativeFailure:

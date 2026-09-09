@@ -402,15 +402,49 @@ CaptureStatus WindowsCaptureManager::ApplyAdaptation(uint64_t owner,
   if ((width != 0 && (width != current_width || height != current_height))) {
     return CaptureStatus::kUnsupported;
   }
-  if (capture->encoder_mutex == nullptr) return CaptureStatus::kEncoderUnavailable;
-  std::lock_guard<std::mutex> encoder_lock(*capture->encoder_mutex);
+  std::lock_guard<std::mutex> encoder_lock(capture->encoder_mutex);
   if (capture->encoder == nullptr ||
       !capture->encoder->ApplyAdaptation(bitrate_kbps)) {
+    capture->terminal_status.store(kCaptureTerminalEncoderFailed);
+    capture->stopped.store(true);
     return CaptureStatus::kEncoderFailed;
   }
+  capture->target_bitrate_kbps.store(bitrate_kbps);
   capture->target_framerate.store(framerate);
   capture->next_encode_timestamp.store(0);
   return CaptureStatus::kOk;
+}
+
+CaptureStatus WindowsCaptureManager::CurrentAdaptation(uint64_t owner,
+                                                       uint32_t* bitrate_kbps,
+                                                       uint32_t* framerate) {
+  if (owner == 0 || bitrate_kbps == nullptr || framerate == nullptr) {
+    return CaptureStatus::kBackendFailure;
+  }
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  const auto it = impl_->captures.find(owner);
+  if (it == impl_->captures.end()) return CaptureStatus::kNotFound;
+  const auto& capture = it->second;
+  if (capture == nullptr || capture->stopped.load()) {
+    return CaptureStatus::kSourceEnded;
+  }
+  *bitrate_kbps = capture->target_bitrate_kbps.load();
+  *framerate = capture->target_framerate.load();
+  return CaptureStatus::kOk;
+}
+
+CaptureStatus WindowsCaptureManager::RestoreAdaptation(uint64_t owner,
+                                                       uint32_t bitrate_kbps,
+                                                       uint32_t framerate) {
+  return ApplyAdaptation(owner, bitrate_kbps, framerate, 0, 0);
+}
+
+void WindowsCaptureManager::MarkAdaptationRecreateRequired(uint64_t owner) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  const auto it = impl_->captures.find(owner);
+  if (it == impl_->captures.end() || it->second == nullptr) return;
+  it->second->terminal_status.store(kCaptureTerminalRecreateRequired);
+  it->second->stopped.store(true);
 }
 
 CaptureStatus WindowsCaptureManager::RequestKeyframe(uint64_t owner) {
@@ -425,8 +459,7 @@ CaptureStatus WindowsCaptureManager::RequestKeyframe(uint64_t owner) {
   if (capture == nullptr || capture->stopped.load()) {
     return CaptureStatus::kSourceEnded;
   }
-  if (capture->encoder_mutex == nullptr) return CaptureStatus::kEncoderUnavailable;
-  std::lock_guard<std::mutex> encoder_lock(*capture->encoder_mutex);
+  std::lock_guard<std::mutex> encoder_lock(capture->encoder_mutex);
   if (capture->encoder == nullptr) return CaptureStatus::kEncoderUnavailable;
   return capture->encoder->RequestKeyframe() ? CaptureStatus::kOk
                                               : CaptureStatus::kEncoderFailed;

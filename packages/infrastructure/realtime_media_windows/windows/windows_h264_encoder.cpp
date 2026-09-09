@@ -6,6 +6,7 @@
 #include <mferror.h>
 #include <mftransform.h>
 #include <oleauto.h>
+#include <strmif.h>
 
 #include <algorithm>
 #include <cstring>
@@ -18,7 +19,7 @@ namespace {
 
 constexpr uint32_t kFrameRateNumerator = 30;
 constexpr uint32_t kFrameRateDenominator = 1;
-constexpr uint32_t kBitrate = 4'000'000;
+constexpr uint32_t kBitrate = 3 * 1024 * 1'000;
 
 uint8_t ClampByte(int value) {
   return static_cast<uint8_t>(std::clamp(value, 0, 255));

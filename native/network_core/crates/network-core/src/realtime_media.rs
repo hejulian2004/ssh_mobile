@@ -83,6 +83,7 @@ struct SessionBinding {
     driver: Weak<Mutex<RealtimeIoDriver>>,
 }
 
+#[derive(Clone)]
 struct EndpointLease {
     realtime_id: String,
     peer_id: String,
@@ -189,35 +190,6 @@ impl RealtimeMediaRegistry {
         generation
     }
 
-    fn release(&mut self, endpoint_id: RealtimeMediaEndpointId) -> Result<(), RealtimeMediaError> {
-        let Some((driver_weak, direction)) = self
-            .endpoints
-            .get(&endpoint_id)
-            .map(|endpoint| (endpoint.driver.clone(), endpoint.direction))
-        else {
-            return Ok(());
-        };
-        let Some(driver) = driver_weak.upgrade() else {
-            self.endpoints.remove(&endpoint_id);
-            return Ok(());
-        };
-        let mut driver = driver
-            .lock()
-            .map_err(|_| RealtimeMediaError::DriverUnavailable)?;
-        let direction = match direction {
-            RealtimeMediaDirection::Send => MediaDirection::Sendonly,
-            RealtimeMediaDirection::Receive => MediaDirection::Recvonly,
-        };
-        driver
-            .peer_mut()
-            .clear_h264_screen_video(direction)
-            .map_err(|_| RealtimeMediaError::DriverUnavailable)?;
-        // Keep the lease visible until native queue/order cleanup succeeds so
-        // a caller can retry a transient driver failure deterministically.
-        self.endpoints.remove(&endpoint_id);
-        Ok(())
-    }
-
     fn invalidate_realtime(&mut self, realtime_id: &str) {
         self.session_bindings.remove(realtime_id);
         self.endpoints
@@ -229,12 +201,22 @@ impl RealtimeMediaRegistry {
         self.endpoints.clear();
     }
 
-    fn with_endpoint<T>(
-        &mut self,
+    fn snapshot_endpoint(
+        &self,
         endpoint_id: RealtimeMediaEndpointId,
         direction: RealtimeMediaDirection,
-        operation: impl FnOnce(&mut RealtimeIoDriver) -> Result<T, WebRtcError>,
-    ) -> Result<T, RealtimeMediaError> {
+    ) -> Result<EndpointLease, RealtimeMediaError> {
+        let endpoint = self.endpoint_lease(endpoint_id)?;
+        if endpoint.direction != direction {
+            return Err(RealtimeMediaError::DirectionMismatch);
+        }
+        Ok(endpoint)
+    }
+
+    fn endpoint_lease(
+        &self,
+        endpoint_id: RealtimeMediaEndpointId,
+    ) -> Result<EndpointLease, RealtimeMediaError> {
         let endpoint = self
             .endpoints
             .get(&endpoint_id)
@@ -242,17 +224,7 @@ impl RealtimeMediaRegistry {
         if endpoint.runtime_generation != self.runtime_generation {
             return Err(RealtimeMediaError::StaleEndpoint);
         }
-        if endpoint.direction != direction {
-            return Err(RealtimeMediaError::DirectionMismatch);
-        }
-        let driver = endpoint
-            .driver
-            .upgrade()
-            .ok_or(RealtimeMediaError::StaleEndpoint)?;
-        let mut driver = driver
-            .lock()
-            .map_err(|_| RealtimeMediaError::DriverUnavailable)?;
-        operation(&mut driver).map_err(|_| RealtimeMediaError::FrameRejected)
+        Ok(endpoint.clone())
     }
 
     #[cfg(test)]
@@ -289,62 +261,98 @@ impl RealtimeMediaRegistry {
         Ok(())
     }
 
-    fn request_keyframe(
-        &mut self,
+    // These registry-only helpers keep the deterministic unit tests focused
+    // on lease semantics without reintroducing a registry lock around the
+    // production hot path. Runtime callers use the free functions below,
+    // which snapshot the lease and acquire only the driver's owner lock.
+    #[cfg(test)]
+    fn with_endpoint<T>(
+        &self,
         endpoint_id: RealtimeMediaEndpointId,
-    ) -> Result<(), RealtimeMediaError> {
-        let direction = self
-            .endpoints
-            .get(&endpoint_id)
-            .map(|endpoint| endpoint.direction)
+        direction: RealtimeMediaDirection,
+        operation: impl FnOnce(&mut RealtimeIoDriver) -> Result<T, WebRtcError>,
+    ) -> Result<T, RealtimeMediaError> {
+        let endpoint = self.snapshot_endpoint(endpoint_id, direction)?;
+        with_endpoint_lease(endpoint, operation)
+    }
+
+    #[cfg(test)]
+    fn release(&mut self, endpoint_id: RealtimeMediaEndpointId) -> Result<(), RealtimeMediaError> {
+        let Some(endpoint) = self.endpoints.get(&endpoint_id).cloned() else {
+            return Ok(());
+        };
+        let driver = endpoint
+            .driver
+            .upgrade()
             .ok_or(RealtimeMediaError::StaleEndpoint)?;
-        let media_direction = match direction {
+        let direction = match endpoint.direction {
             RealtimeMediaDirection::Send => MediaDirection::Sendonly,
             RealtimeMediaDirection::Receive => MediaDirection::Recvonly,
         };
-        self.with_endpoint(endpoint_id, direction, |driver| {
+        let mut driver = driver
+            .lock()
+            .map_err(|_| RealtimeMediaError::DriverUnavailable)?;
+        driver
+            .peer_mut()
+            .clear_h264_screen_video(direction)
+            .map_err(|_| RealtimeMediaError::DriverUnavailable)?;
+        self.endpoints.remove(&endpoint_id);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn request_keyframe(
+        &self,
+        endpoint_id: RealtimeMediaEndpointId,
+    ) -> Result<(), RealtimeMediaError> {
+        let endpoint = self.endpoint_lease(endpoint_id)?;
+        let direction = match endpoint.direction {
+            RealtimeMediaDirection::Send => MediaDirection::Sendonly,
+            RealtimeMediaDirection::Receive => MediaDirection::Recvonly,
+        };
+        with_endpoint_lease(endpoint, |driver| {
             driver
                 .peer_mut()
-                .request_h264_screen_video_keyframe(media_direction)
+                .request_h264_screen_video_keyframe(direction)
         })
     }
 
+    #[cfg(test)]
     fn reset_decoder(
-        &mut self,
+        &self,
         endpoint_id: RealtimeMediaEndpointId,
     ) -> Result<(), RealtimeMediaError> {
-        self.with_endpoint(endpoint_id, RealtimeMediaDirection::Receive, |driver| {
+        let endpoint = self.snapshot_endpoint(endpoint_id, RealtimeMediaDirection::Receive)?;
+        with_endpoint_lease(endpoint, |driver| {
             driver.peer_mut().reset_h264_screen_video_decoder()
         })
     }
 
+    #[cfg(test)]
     fn apply_adaptation(
-        &mut self,
+        &self,
         endpoint_id: RealtimeMediaEndpointId,
         target: H264AdaptationTarget,
     ) -> Result<(), RealtimeMediaError> {
-        self.with_endpoint(endpoint_id, RealtimeMediaDirection::Send, |driver| {
+        let endpoint = self.snapshot_endpoint(endpoint_id, RealtimeMediaDirection::Send)?;
+        with_endpoint_lease(endpoint, |driver| {
             driver.peer_mut().apply_h264_screen_video_adaptation(target)
         })
     }
+}
 
-    fn stats(
-        &mut self,
-        endpoint_id: RealtimeMediaEndpointId,
-    ) -> Result<H264ScreenVideoStats, RealtimeMediaError> {
-        let direction = self
-            .endpoints
-            .get(&endpoint_id)
-            .map(|endpoint| endpoint.direction)
-            .ok_or(RealtimeMediaError::StaleEndpoint)?;
-        let media_direction = match direction {
-            RealtimeMediaDirection::Send => MediaDirection::Sendonly,
-            RealtimeMediaDirection::Receive => MediaDirection::Recvonly,
-        };
-        self.with_endpoint(endpoint_id, direction, |driver| {
-            driver.peer_mut().h264_screen_video_stats(media_direction)
-        })
-    }
+fn with_endpoint_lease<T>(
+    endpoint: EndpointLease,
+    operation: impl FnOnce(&mut RealtimeIoDriver) -> Result<T, WebRtcError>,
+) -> Result<T, RealtimeMediaError> {
+    let driver = endpoint
+        .driver
+        .upgrade()
+        .ok_or(RealtimeMediaError::StaleEndpoint)?;
+    let mut driver = driver
+        .lock()
+        .map_err(|_| RealtimeMediaError::DriverUnavailable)?;
+    operation(&mut driver).map_err(|_| RealtimeMediaError::FrameRejected)
 }
 
 pub(crate) async fn create_endpoint(
@@ -381,11 +389,45 @@ pub(crate) fn release_endpoint(
     state: &RuntimeState,
     endpoint_id: RealtimeMediaEndpointId,
 ) -> Result<(), RealtimeMediaError> {
+    let endpoint = {
+        let registry = state
+            .realtime_media
+            .lock()
+            .map_err(|_| RealtimeMediaError::Internal)?;
+        registry.endpoints.get(&endpoint_id).cloned()
+    };
+    let Some(endpoint) = endpoint else {
+        return Ok(());
+    };
+    let Some(driver) = endpoint.driver.upgrade() else {
+        let mut registry = state
+            .realtime_media
+            .lock()
+            .map_err(|_| RealtimeMediaError::Internal)?;
+        registry.endpoints.remove(&endpoint_id);
+        return Ok(());
+    };
+    let direction = match endpoint.direction {
+        RealtimeMediaDirection::Send => MediaDirection::Sendonly,
+        RealtimeMediaDirection::Receive => MediaDirection::Recvonly,
+    };
+    {
+        let mut driver = driver
+            .lock()
+            .map_err(|_| RealtimeMediaError::DriverUnavailable)?;
+        driver
+            .peer_mut()
+            .clear_h264_screen_video(direction)
+            .map_err(|_| RealtimeMediaError::DriverUnavailable)?;
+    }
+    // Keep the lease visible until native queue/order cleanup succeeds so a
+    // caller can retry a transient driver failure deterministically.
     let mut registry = state
         .realtime_media
         .lock()
         .map_err(|_| RealtimeMediaError::Internal)?;
-    registry.release(endpoint_id)
+    registry.endpoints.remove(&endpoint_id);
+    Ok(())
 }
 
 pub(crate) fn validate_endpoint(
@@ -408,12 +450,15 @@ pub(crate) fn push_endpoint(
     endpoint_id: RealtimeMediaEndpointId,
     frame: EncodedVideoFrame,
 ) -> Result<VideoEnqueueResult, RealtimeMediaError> {
-    let mut registry = state
-        .realtime_media
-        .lock()
-        .map_err(|_| RealtimeMediaError::Internal)?;
+    let endpoint = {
+        let registry = state
+            .realtime_media
+            .lock()
+            .map_err(|_| RealtimeMediaError::Internal)?;
+        registry.snapshot_endpoint(endpoint_id, RealtimeMediaDirection::Send)?
+    };
     let now = Instant::now();
-    registry.with_endpoint(endpoint_id, RealtimeMediaDirection::Send, |driver| {
+    with_endpoint_lease(endpoint, |driver| {
         driver.peer_mut().enqueue_h264_screen_video(frame, now)
     })
 }
@@ -422,22 +467,38 @@ pub(crate) fn request_keyframe(
     state: &RuntimeState,
     endpoint_id: RealtimeMediaEndpointId,
 ) -> Result<(), RealtimeMediaError> {
-    let mut registry = state
-        .realtime_media
-        .lock()
-        .map_err(|_| RealtimeMediaError::Internal)?;
-    registry.request_keyframe(endpoint_id)
+    let endpoint = {
+        let registry = state
+            .realtime_media
+            .lock()
+            .map_err(|_| RealtimeMediaError::Internal)?;
+        registry.endpoint_lease(endpoint_id)?
+    };
+    let direction = match endpoint.direction {
+        RealtimeMediaDirection::Send => MediaDirection::Sendonly,
+        RealtimeMediaDirection::Receive => MediaDirection::Recvonly,
+    };
+    with_endpoint_lease(endpoint, |driver| {
+        driver
+            .peer_mut()
+            .request_h264_screen_video_keyframe(direction)
+    })
 }
 
 pub(crate) fn reset_decoder(
     state: &RuntimeState,
     endpoint_id: RealtimeMediaEndpointId,
 ) -> Result<(), RealtimeMediaError> {
-    let mut registry = state
-        .realtime_media
-        .lock()
-        .map_err(|_| RealtimeMediaError::Internal)?;
-    registry.reset_decoder(endpoint_id)
+    let endpoint = {
+        let registry = state
+            .realtime_media
+            .lock()
+            .map_err(|_| RealtimeMediaError::Internal)?;
+        registry.snapshot_endpoint(endpoint_id, RealtimeMediaDirection::Receive)?
+    };
+    with_endpoint_lease(endpoint, |driver| {
+        driver.peer_mut().reset_h264_screen_video_decoder()
+    })
 }
 
 pub(crate) fn apply_adaptation(
@@ -445,34 +506,51 @@ pub(crate) fn apply_adaptation(
     endpoint_id: RealtimeMediaEndpointId,
     target: H264AdaptationTarget,
 ) -> Result<(), RealtimeMediaError> {
-    let mut registry = state
-        .realtime_media
-        .lock()
-        .map_err(|_| RealtimeMediaError::Internal)?;
-    registry.apply_adaptation(endpoint_id, target)
+    let endpoint = {
+        let registry = state
+            .realtime_media
+            .lock()
+            .map_err(|_| RealtimeMediaError::Internal)?;
+        registry.snapshot_endpoint(endpoint_id, RealtimeMediaDirection::Send)?
+    };
+    with_endpoint_lease(endpoint, |driver| {
+        driver.peer_mut().apply_h264_screen_video_adaptation(target)
+    })
 }
 
 pub(crate) fn stats(
     state: &RuntimeState,
     endpoint_id: RealtimeMediaEndpointId,
 ) -> Result<H264ScreenVideoStats, RealtimeMediaError> {
-    let mut registry = state
-        .realtime_media
-        .lock()
-        .map_err(|_| RealtimeMediaError::Internal)?;
-    registry.stats(endpoint_id)
+    let endpoint = {
+        let registry = state
+            .realtime_media
+            .lock()
+            .map_err(|_| RealtimeMediaError::Internal)?;
+        registry.endpoint_lease(endpoint_id)?
+    };
+    let direction = match endpoint.direction {
+        RealtimeMediaDirection::Send => MediaDirection::Sendonly,
+        RealtimeMediaDirection::Receive => MediaDirection::Recvonly,
+    };
+    with_endpoint_lease(endpoint, |driver| {
+        driver.peer_mut().h264_screen_video_stats(direction)
+    })
 }
 
 pub(crate) fn pop_endpoint(
     state: &RuntimeState,
     endpoint_id: RealtimeMediaEndpointId,
 ) -> Result<Option<EncodedVideoFrame>, RealtimeMediaError> {
-    let mut registry = state
-        .realtime_media
-        .lock()
-        .map_err(|_| RealtimeMediaError::Internal)?;
+    let endpoint = {
+        let registry = state
+            .realtime_media
+            .lock()
+            .map_err(|_| RealtimeMediaError::Internal)?;
+        registry.snapshot_endpoint(endpoint_id, RealtimeMediaDirection::Receive)?
+    };
     let now = Instant::now();
-    registry.with_endpoint(endpoint_id, RealtimeMediaDirection::Receive, |driver| {
+    with_endpoint_lease(endpoint, |driver| {
         Ok(driver.peer_mut().pop_remote_h264_screen_video(now))
     })
 }
@@ -489,12 +567,15 @@ pub(crate) fn inject_test_endpoint_frame(
     let packets = RtpPacketizer::new(1_200, 102, 0x1357_2468, 1)
         .packetize(&frame)
         .map_err(|_| RealtimeMediaError::FrameRejected)?;
-    let mut registry = state
-        .realtime_media
-        .lock()
-        .map_err(|_| RealtimeMediaError::Internal)?;
+    let endpoint = {
+        let registry = state
+            .realtime_media
+            .lock()
+            .map_err(|_| RealtimeMediaError::Internal)?;
+        registry.snapshot_endpoint(endpoint_id, RealtimeMediaDirection::Receive)?
+    };
     let now = Instant::now();
-    registry.with_endpoint(endpoint_id, RealtimeMediaDirection::Receive, |driver| {
+    with_endpoint_lease(endpoint, |driver| {
         for packet in &packets {
             driver
                 .peer_mut()

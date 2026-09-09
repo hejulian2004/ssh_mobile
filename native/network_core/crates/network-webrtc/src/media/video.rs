@@ -16,6 +16,7 @@ use super::{
 
 const H264_RTP_PAYLOAD_TYPE: u8 = 102;
 const H264_RTP_MTU: usize = 1_200;
+const MIN_PLI_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Bounded queue/recovery counters for one native H.264 screen-video
 /// direction. Platform owners may expose these as low-frequency metadata; no
@@ -126,6 +127,7 @@ pub(crate) struct H264ScreenVideo {
     last_inbound_timestamp: Option<u32>,
     last_inbound_arrival: Option<Instant>,
     jitter_rtp_units: u64,
+    last_pli_emit: Option<Instant>,
 }
 
 impl H264ScreenVideo {
@@ -163,6 +165,7 @@ impl H264ScreenVideo {
             last_inbound_timestamp: None,
             last_inbound_arrival: None,
             jitter_rtp_units: 0,
+            last_pli_emit: None,
         }
     }
 
@@ -180,6 +183,7 @@ impl H264ScreenVideo {
         self.inbound_media_ssrc = None;
         self.reset_inbound_timing();
         self.recovery_pending = self.accepts_inbound;
+        self.last_pli_emit = None;
     }
 
     fn observe_inbound_packet(&mut self, packet: &rtc::rtp::Packet, now: Instant) {
@@ -218,8 +222,12 @@ impl H264ScreenVideo {
                     (-transit_delta) as u64
                 };
                 let jitter = self.jitter_rtp_units;
-                self.jitter_rtp_units =
-                    jitter.saturating_add(absolute_delta.saturating_sub(jitter) / 16);
+                self.jitter_rtp_units = if absolute_delta >= jitter {
+                    jitter.saturating_add((absolute_delta - jitter) / 16)
+                } else {
+                    let decrease = (jitter - absolute_delta).saturating_add(15) / 16;
+                    jitter.saturating_sub(decrease)
+                };
                 self.last_inbound_timestamp = Some(packet.header.timestamp);
                 self.last_inbound_arrival = Some(now);
             }
@@ -563,8 +571,12 @@ impl WebRtcPeer {
                     frames_recovered: inbound.frames_recovered,
                     jitter_ms: outbound.jitter_ms.max(inbound.jitter_ms),
                     rtt_ms: outbound.rtt_ms.max(inbound.rtt_ms),
-                    queue_depth: outbound.queue_depth.saturating_add(inbound.queue_depth),
-                    queue_capacity: (SCREEN_VIDEO_QUEUE_CAPACITY * 2) as u32,
+                    // Sendrecv owns two independent bounded queues, but the
+                    // legacy stats ABI describes one queue contract. Report
+                    // the worst occupancy and keep the frozen capacity at
+                    // three rather than inventing a six-frame queue.
+                    queue_depth: outbound.queue_depth.max(inbound.queue_depth),
+                    queue_capacity: SCREEN_VIDEO_QUEUE_CAPACITY as u32,
                 }
             }
         };
@@ -623,6 +635,7 @@ impl WebRtcPeer {
     /// and the peer can accept an RTCP packet. A missing receiver is expected
     /// during early negotiation and is therefore not a fatal peer error.
     pub fn flush_h264_screen_video_keyframe_requests(&mut self) {
+        let now = Instant::now();
         let pending = self.screen_video.as_mut().and_then(|video| {
             video
                 .inbound
@@ -632,6 +645,23 @@ impl WebRtcPeer {
         let Some((reason, receiver_id, media_ssrc)) = pending else {
             return;
         };
+        let Some(media_ssrc) = media_ssrc else {
+            if let Some(video) = self.screen_video.as_mut() {
+                video.inbound.request_keyframe(reason);
+            }
+            return;
+        };
+        if self
+            .screen_video
+            .as_ref()
+            .and_then(|video| video.last_pli_emit)
+            .is_some_and(|last| now.saturating_duration_since(last) < MIN_PLI_INTERVAL)
+        {
+            if let Some(video) = self.screen_video.as_mut() {
+                video.inbound.request_keyframe(reason);
+            }
+            return;
+        }
         let Some(receiver_id) = receiver_id else {
             if let Some(video) = self.screen_video.as_mut() {
                 video.inbound.request_keyframe(reason);
@@ -646,11 +676,18 @@ impl WebRtcPeer {
         };
         let pli = PictureLossIndication {
             sender_ssrc: 0,
-            media_ssrc: media_ssrc.unwrap_or_default(),
+            media_ssrc,
         };
-        if receiver.write_rtcp(vec![Box::new(pli)]).is_err() {
-            if let Some(video) = self.screen_video.as_mut() {
-                video.inbound.request_keyframe(reason);
+        match receiver.write_rtcp(vec![Box::new(pli)]) {
+            Ok(()) => {
+                if let Some(video) = self.screen_video.as_mut() {
+                    video.last_pli_emit = Some(now);
+                }
+            }
+            Err(_) => {
+                if let Some(video) = self.screen_video.as_mut() {
+                    video.inbound.request_keyframe(reason);
+                }
             }
         }
     }
