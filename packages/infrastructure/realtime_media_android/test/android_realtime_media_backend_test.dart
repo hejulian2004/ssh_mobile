@@ -70,6 +70,43 @@ void main() {
     expect(platform.rendererDetachCalls, 0);
   });
 
+  test('keeps receive owners outside projection capture ownership', () async {
+    final sendEndpoint = await backend.start(sendIdentity);
+    final receiveEndpoint = await backend.start(receiveIdentity);
+
+    await backend.attachCaptureSource(
+      endpointId: sendEndpoint,
+      identity: sendIdentity,
+      source: ScreenCaptureSource(
+        id: ScreenCaptureSourceId('display:default'),
+        kind: ScreenCaptureSourceKind.display,
+      ),
+    );
+    await backend.attachRemoteVideoSurface(
+      endpointId: receiveEndpoint,
+      identity: receiveIdentity,
+    );
+
+    await backend.detach(
+      endpointId: receiveEndpoint,
+      identity: receiveIdentity,
+    );
+    expect(platform.operations, <String>[
+      'projection:start:1',
+      'surface:2',
+      'detach:2',
+    ]);
+    expect(platform.rendererDetachCalls, 1);
+
+    await backend.detach(endpointId: sendEndpoint, identity: sendIdentity);
+    expect(platform.operations, <String>[
+      'projection:start:1',
+      'surface:2',
+      'detach:2',
+      'detach:1',
+    ]);
+  });
+
   test(
     'maps hardware and projection failures without losing endpoint ownership',
     () async {

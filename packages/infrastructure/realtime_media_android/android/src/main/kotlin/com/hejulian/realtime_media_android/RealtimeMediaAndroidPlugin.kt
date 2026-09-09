@@ -128,32 +128,43 @@ class RealtimeMediaAndroidPlugin :
                     error(result, "backend_failure", "Android capture service context is unavailable.")
                     return@withOwner
                 }
-                try {
-                    // MediaProjection capture must have its typed foreground
-                    // service active before createVirtualDisplay is called.
-                    ScreenCaptureForegroundService.start(appContext)
-                } catch (_: SecurityException) {
-                    stopForegroundServiceIfUnused()
-                    error(
-                        result,
-                        "permission_denied",
-                        "Android capture foreground service permission was rejected.",
-                    )
-                    return@withOwner
-                } catch (_: Exception) {
-                    stopForegroundServiceIfUnused()
-                    error(
-                        result,
-                        "backend_failure",
-                        "Android capture foreground service could not start.",
-                    )
-                    return@withOwner
+                val needsForegroundService = owners.values.none {
+                    it.isCaptureOwnerActive()
                 }
-                val failure = owner.startCapture(projection, sourceId, sourceKind)
+                if (needsForegroundService) {
+                    try {
+                        // MediaProjection capture must have its typed foreground
+                        // service active before createVirtualDisplay is called.
+                        ScreenCaptureForegroundService.start(appContext)
+                    } catch (_: SecurityException) {
+                        stopForegroundServiceIfUnused()
+                        error(
+                            result,
+                            "permission_denied",
+                            "Android capture foreground service permission was rejected.",
+                        )
+                        return@withOwner
+                    } catch (_: Exception) {
+                        stopForegroundServiceIfUnused()
+                        error(
+                            result,
+                            "backend_failure",
+                            "Android capture foreground service could not start.",
+                        )
+                        return@withOwner
+                    }
+                }
+                val failure = try {
+                    owner.startCapture(projection, sourceId, sourceKind)
+                } catch (_: Exception) {
+                    "backend_failure"
+                }
                 if (failure == null) {
                     result.success(null)
                 } else {
-                    stopForegroundServiceIfUnused()
+                    // A failed first capture must compensate the service
+                    // request, while another active capture owner keeps it.
+                    if (needsForegroundService) stopForegroundServiceIfUnused()
                     error(result, failure, "Android capture could not start.")
                 }
             }
