@@ -145,7 +145,7 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
                           1'000'000'000ULL;
             bool encoded = false;
             {
-              std::lock_guard<std::mutex> encode_lock(*state->encoder_mutex);
+              std::lock_guard<std::mutex> encode_lock(state->encoder_mutex);
               if (!state->stopped.load() && state->encoder != nullptr) {
                 encoded = state->encoder->Encode(texture.get(), timestamp_90khz,
                                                  &access_units);
