@@ -1,6 +1,9 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:realtime_media_android/realtime_media_android.dart';
+import 'package:realtime_media_windows/realtime_media_windows.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'package:realtime_media/realtime_media.dart';
 import 'package:feature_screen_share/feature_screen_share.dart';
@@ -32,6 +35,7 @@ void main() {
       peerId: 'peer-remote',
       generation: 7,
     );
+    addTearDown(session.close);
   });
 
   test('prepares capture and releases the endpoint in owner order', () async {
@@ -242,7 +246,326 @@ void main() {
     expect(backend.operations, isEmpty);
     await coordinator.dispose();
   });
+
+  test(
+    'prepare rejects missing generation and missing capture source',
+    () async {
+      session.mediaToken = null;
+      final missingGeneration = _coordinator(backend, capabilities, session);
+      await expectLater(
+        missingGeneration.prepare(capture: false),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.backendFailure,
+          ),
+        ),
+      );
+
+      session.replaceGeneration(7);
+      final missingSource = _coordinator(backend, capabilities, session);
+      await expectLater(
+        missingSource.prepare(capture: true),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.invalidArgument,
+          ),
+        ),
+      );
+      await missingGeneration.dispose();
+      await missingSource.dispose();
+    },
+  );
+
+  test('capture fails closed when the selected source disappears', () async {
+    final coordinator = _coordinator(
+      backend,
+      capabilities,
+      session,
+      source: source,
+    );
+    await coordinator.prepare(capture: true);
+    capabilities.sources = const <ScreenCaptureSource>[];
+
+    await expectLater(
+      coordinator.port.startCapture(
+        operationId: 'operation-a',
+        realtimeId: realtimeId,
+        generation: 7,
+      ),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.driverUnavailable,
+        ),
+      ),
+    );
+    expect(backend.operations, isEmpty);
+    await coordinator.dispose();
+  });
+
+  test('stop rejects a different operation identity', () async {
+    final coordinator = _coordinator(
+      backend,
+      capabilities,
+      session,
+      source: source,
+    );
+    await coordinator.prepare(capture: true);
+    await coordinator.port.startCapture(
+      operationId: 'operation-a',
+      realtimeId: realtimeId,
+      generation: 7,
+    );
+
+    await expectLater(
+      coordinator.port.stop(
+        operationId: 'operation-b',
+        realtimeId: realtimeId,
+        generation: 7,
+      ),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.staleEndpoint,
+        ),
+      ),
+    );
+    await coordinator.port.stop(
+      operationId: 'operation-a',
+      realtimeId: realtimeId,
+      generation: 7,
+    );
+    await coordinator.dispose();
+  });
+
+  test(
+    'late viewer start releases its endpoint after generation replacement',
+    () async {
+      final gate = Completer<void>();
+      backend.startGate = gate;
+      final coordinator = _coordinator(backend, capabilities, session);
+      await coordinator.prepare(capture: false);
+
+      final start = coordinator.port.startViewer(
+        operationId: 'operation-a',
+        realtimeId: realtimeId,
+        generation: 7,
+      );
+      await Future<void>.delayed(Duration.zero);
+      session.replaceGeneration(8);
+      gate.complete();
+
+      await expectLater(
+        start,
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.staleEndpoint,
+          ),
+        ),
+      );
+      expect(backend.operations, contains('release:1'));
+      await coordinator.dispose();
+    },
+  );
+
+  testWidgets('receive route initializes and disposes its borrowed scope', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_routeApp(backend, session, capabilities));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Screen sharing'), findsOneWidget);
+    expect(find.text('Screen sharing idle'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(backend.operations, isEmpty);
+  });
+
+  testWidgets('send route can start an outgoing consent operation', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _routeApp(
+        backend,
+        session,
+        capabilities,
+        arguments: AppScreenShareRouteArguments(
+          session: session,
+          localPeerId: 'peer-local',
+          source: source,
+          mode: AppScreenShareRouteMode.send,
+          startOutgoing: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Waiting for acceptance'), findsOneWidget);
+    expect(
+      session.sentConsents.single.decision,
+      RealtimeConsentDecision.request,
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('route renders typed initialization failures', (tester) async {
+    await tester.pumpWidget(
+      _routeApp(
+        backend,
+        session,
+        capabilities,
+        arguments: AppScreenShareRouteArguments(
+          session: session,
+          localPeerId: 'peer-local',
+          mode: AppScreenShareRouteMode.receive,
+          startOutgoing: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Screen sharing unavailable (invalidArgument).'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('route renders a missing native token as a typed failure', (
+    tester,
+  ) async {
+    final noTokenSession = _FakeRealtimeSession(
+      realtimeId: realtimeId,
+      peerId: 'peer-remote',
+      generation: 7,
+    )..mediaToken = null;
+    addTearDown(noTokenSession.close);
+
+    await tester.pumpWidget(_routeApp(backend, noTokenSession, capabilities));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('backendFailure'), findsOneWidget);
+  });
+
+  testWidgets('route fails closed when platform ownership is unsupported', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_routeApp(backend, session, null));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('driverUnavailable'), findsOneWidget);
+  });
+
+  testWidgets('incoming route exposes explicit accept and reject actions', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_routeApp(backend, session, capabilities));
+    await tester.pumpAndSettle();
+
+    session.emitConsent(_incomingConsent());
+    await tester.pumpAndSettle();
+    expect(find.text('Accept screen share'), findsOneWidget);
+    expect(find.text('Reject'), findsOneWidget);
+
+    await tester.tap(find.text('Accept screen share'));
+    await tester.pumpAndSettle();
+    expect(find.text('Screen sharing active'), findsOneWidget);
+    expect(session.sentConsents.last.decision, RealtimeConsentDecision.accept);
+    expect(backend.operations, contains('start:receive'));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(backend.operations, contains('release:1'));
+  });
+
+  testWidgets('incoming route can reject without creating media', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_routeApp(backend, session, capabilities));
+    await tester.pumpAndSettle();
+
+    session.emitConsent(_incomingConsent());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reject'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Screen-share request rejected'), findsOneWidget);
+    expect(session.sentConsents.last.decision, RealtimeConsentDecision.reject);
+    expect(backend.operations, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  test('platform capability factory preserves platform ownership', () async {
+    final windowsPlatform = _RecordingWindowsPlatform(
+      sources: <ScreenCaptureSource>[source],
+    );
+    final windows = WindowsRealtimeMediaBackend(
+      endpointBackend: backend,
+      platform: windowsPlatform,
+    );
+    final windowsCapabilities = appScreenSharePlatformCapabilitiesFor(windows);
+    await windowsCapabilities.prepareCapture();
+    expect(
+      await windowsCapabilities.listCaptureSources(),
+      <ScreenCaptureSource>[source],
+    );
+
+    final androidPlatform = _RecordingAndroidPlatform(
+      sources: <ScreenCaptureSource>[source],
+    );
+    final android = AndroidRealtimeMediaBackend(
+      endpointBackend: backend,
+      platform: androidPlatform,
+    );
+    final androidCapabilities = appScreenSharePlatformCapabilitiesFor(android);
+    await androidCapabilities.prepareCapture();
+    expect(androidPlatform.projectionCalls, 1);
+    expect(
+      await androidCapabilities.listCaptureSources(),
+      <ScreenCaptureSource>[source],
+    );
+
+    expect(
+      () => appScreenSharePlatformCapabilitiesFor(backend),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.driverUnavailable,
+        ),
+      ),
+    );
+  });
 }
+
+Widget _routeApp(
+  _RecordingMediaBackend backend,
+  _FakeRealtimeSession session,
+  _RecordingCapabilities? capabilities, {
+  AppScreenShareRouteArguments? arguments,
+}) => MaterialApp(
+  home: AppScreenShareRouteScope(
+    arguments:
+        arguments ??
+        AppScreenShareRouteArguments(
+          session: session,
+          localPeerId: 'peer-local',
+        ),
+    resources: AppRealtimeMediaResources(
+      backend: backend,
+      sessionFactory: AppRealtimeMediaSessionFactory(backend: backend),
+    ),
+    capabilities: capabilities,
+  ),
+);
 
 AppScreenShareMediaCoordinator _coordinator(
   _RecordingMediaBackend backend,
@@ -282,7 +605,7 @@ final class _RecordingCapabilities
     implements AppScreenSharePlatformCapabilities {
   _RecordingCapabilities({required this.sources});
 
-  final List<ScreenCaptureSource> sources;
+  List<ScreenCaptureSource> sources;
   int prepareCalls = 0;
   int listCalls = 0;
   Completer<void>? prepareGate;
@@ -304,11 +627,14 @@ final class _RecordingCapabilities
 final class _RecordingMediaBackend implements RealtimeMediaBackend {
   final List<String> operations = <String>[];
   int _nextEndpoint = 0;
+  Completer<void>? startGate;
 
   @override
   Future<RealtimeMediaEndpointId> start(
     RealtimeMediaEndpointIdentity identity,
   ) async {
+    final gate = startGate;
+    if (gate != null) await gate.future;
     final id = RealtimeMediaEndpointId('${++_nextEndpoint}');
     operations.add('start:${identity.direction.name}');
     return id;
@@ -368,7 +694,8 @@ final class _FakeRealtimeSession implements RealtimeSession {
          realtimeId: realtimeId,
          peerId: peerId,
          generation: generation,
-       );
+       ),
+       _consents = StreamController<RealtimeConsent>.broadcast();
 
   @override
   final String realtimeId;
@@ -377,7 +704,7 @@ final class _FakeRealtimeSession implements RealtimeSession {
   final String peerId;
 
   @override
-  RealtimeSessionToken mediaToken;
+  RealtimeSessionToken? mediaToken;
 
   @override
   RealtimeSessionState state = RealtimeSessionState.connected;
@@ -386,18 +713,23 @@ final class _FakeRealtimeSession implements RealtimeSession {
   int revision = 1;
 
   @override
-  int? get generation => mediaToken.generation;
+  int? get generation => mediaToken?.generation;
 
   @override
   RealtimeAudioState audioState = RealtimeAudioState.unavailable;
 
-  @override
-  final Stream<RealtimeConsent> consentEvents =
-      const Stream<RealtimeConsent>.empty();
+  final StreamController<RealtimeConsent> _consents;
 
   @override
-  Future<SdkResult<void>> sendConsent(RealtimeConsent consent) async =>
-      const SdkSuccess<void>(null);
+  Stream<RealtimeConsent> get consentEvents => _consents.stream;
+
+  final List<RealtimeConsent> sentConsents = <RealtimeConsent>[];
+
+  @override
+  Future<SdkResult<void>> sendConsent(RealtimeConsent consent) async {
+    sentConsents.add(consent);
+    return const SdkSuccess<void>(null);
+  }
 
   @override
   Future<SdkResult<void>> start() async => const SdkSuccess<void>(null);
@@ -412,4 +744,167 @@ final class _FakeRealtimeSession implements RealtimeSession {
       generation: generation,
     );
   }
+
+  void emitConsent(RealtimeConsent consent) => _consents.add(consent);
+
+  Future<void> close() => _consents.close();
+}
+
+RealtimeConsent _incomingConsent() {
+  final issued = DateTime.now().toUtc();
+  return RealtimeConsent(
+    operationId: 'operation-a',
+    realtimeId: '00112233445566778899aabbccddeeff',
+    issuedAt: issued,
+    expiresAt: issued.add(const Duration(minutes: 1)),
+    decision: RealtimeConsentDecision.request,
+    senderPeerId: 'peer-remote',
+    actionRevision: 1,
+  );
+}
+
+final class _RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
+  _RecordingWindowsPlatform({required this.sources});
+
+  final List<ScreenCaptureSource> sources;
+
+  @override
+  Future<List<ScreenCaptureSource>> listCaptureSources() async => sources;
+
+  @override
+  Future<void> startCapture({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    required ScreenCaptureSource source,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {}
+
+  @override
+  Future<RemoteVideoSurface> attachRemoteVideoSurface({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async => RemoteVideoSurface(
+    id: RemoteVideoSurfaceId('surface:${endpointId.value}'),
+    endpointId: endpointId,
+    identity: identity,
+  );
+
+  @override
+  Future<void> detach({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {}
+
+  @override
+  Future<void> release({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {}
+
+  @override
+  Future<RealtimeMediaStats> readStats({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async => RealtimeMediaStats();
+
+  @override
+  Future<void> requestKeyframe({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {}
+
+  @override
+  Future<void> resetDecoder({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {}
+
+  @override
+  Future<void> applyAdaptation({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    required RealtimeMediaAdaptationDecision decision,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {}
+}
+
+final class _RecordingAndroidPlatform implements AndroidRealtimeMediaPlatform {
+  _RecordingAndroidPlatform({required this.sources});
+
+  final List<ScreenCaptureSource> sources;
+  int projectionCalls = 0;
+
+  @override
+  Future<void> requestProjection() async => projectionCalls++;
+
+  @override
+  Future<List<ScreenCaptureSource>> listCaptureSources() async => sources;
+
+  @override
+  Future<void> startCapture({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    required ScreenCaptureSource source,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {}
+
+  @override
+  Future<RemoteVideoSurface> attachRemoteVideoSurface({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async => RemoteVideoSurface(
+    id: RemoteVideoSurfaceId('surface:${endpointId.value}'),
+    endpointId: endpointId,
+    identity: identity,
+  );
+
+  @override
+  Future<void> detach({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {}
+
+  @override
+  Future<void> release({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {}
+
+  @override
+  Future<RealtimeMediaStats> readStats({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async => RealtimeMediaStats();
+
+  @override
+  Future<void> requestKeyframe({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {}
+
+  @override
+  Future<void> resetDecoder({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {}
+
+  @override
+  Future<void> applyAdaptation({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    required RealtimeMediaAdaptationDecision decision,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {}
 }

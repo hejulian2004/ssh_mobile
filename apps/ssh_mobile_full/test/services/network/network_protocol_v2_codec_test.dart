@@ -228,39 +228,36 @@ void main() {
     expect(event.peers.last.state, PeerPresenceState.updated);
   });
 
-  test(
-    'screen-share consent uses the current schema on the App wire',
-    () {
-      final issued = DateTime.utc(2026, 1, 1, 12);
-      final consent = RealtimeConsent(
-        operationId: 'operation-a',
-        realtimeId: '00112233445566778899aabbccddeeff',
-        issuedAt: issued,
-        expiresAt: issued.add(const Duration(minutes: 1)),
-        decision: RealtimeConsentDecision.request,
-        senderPeerId: 'peer-a',
-        actionRevision: 1,
-      );
-      final payload = codec.encodeScreenShareConsent(consent);
-      expect(codec.decodeScreenShareConsent(payload), consent);
+  test('screen-share consent uses the current schema on the App wire', () {
+    final issued = DateTime.utc(2026, 1, 1, 12);
+    final consent = RealtimeConsent(
+      operationId: 'operation-a',
+      realtimeId: '00112233445566778899aabbccddeeff',
+      issuedAt: issued,
+      expiresAt: issued.add(const Duration(minutes: 1)),
+      decision: RealtimeConsentDecision.request,
+      senderPeerId: 'peer-a',
+      actionRevision: 1,
+    );
+    final payload = codec.encodeScreenShareConsent(consent);
+    expect(codec.decodeScreenShareConsent(payload), consent);
 
-      final signal = <int>[
-        ..._stringField(1, consent.realtimeId),
-        ..._stringField(2, 'peer-a'),
-        ..._varintField(3, 6),
-        ..._varintField(4, 1),
-        ..._bytesField(5, payload),
-      ];
-      final frame = codec.decodeEvent(
-        Uint8List.fromList(<int>[
-          ..._stringField(1, 'event-a'),
-          ..._varintField(3, 2),
-          ..._bytesField(22, signal),
-        ]),
-      );
-      expect(frame.screenShareConsent, consent);
-    },
-  );
+    final signal = <int>[
+      ..._stringField(1, consent.realtimeId),
+      ..._stringField(2, 'peer-a'),
+      ..._varintField(3, 6),
+      ..._varintField(4, 1),
+      ..._bytesField(5, payload),
+    ];
+    final frame = codec.decodeEvent(
+      Uint8List.fromList(<int>[
+        ..._stringField(1, 'event-a'),
+        ..._varintField(3, 2),
+        ..._bytesField(22, signal),
+      ]),
+    );
+    expect(frame.screenShareConsent, consent);
+  });
 }
 
 List<int> _stringField(int number, String value) =>

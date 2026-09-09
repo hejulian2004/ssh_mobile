@@ -473,63 +473,60 @@ void main() {
     },
   );
 
-  test(
-    'consent events use the shared realtime identity',
-    () async {
-      final backend = _FakeRealtimeBackend();
-      final client = RealtimeClientImpl(backend: backend);
-      final session = client.createSession(
+  test('consent events use the shared realtime identity', () async {
+    final backend = _FakeRealtimeBackend();
+    final client = RealtimeClientImpl(backend: backend);
+    final session = client.createSession(
+      realtimeId: '00112233445566778899aabbccddeeff',
+      peerId: 'peer-a',
+    );
+    addTearDown(client.dispose);
+    await session.start();
+    backend.emit(
+      const RealtimeSessionStateChangedEvent(
         realtimeId: '00112233445566778899aabbccddeeff',
         peerId: 'peer-a',
-      );
-      addTearDown(client.dispose);
-      await session.start();
-      backend.emit(
-        const RealtimeSessionStateChangedEvent(
-          realtimeId: '00112233445566778899aabbccddeeff',
-          peerId: 'peer-a',
-          state: RealtimeSessionState.connected,
-          generation: 7,
+        state: RealtimeSessionState.connected,
+        generation: 7,
+      ),
+    );
+    final received = <RealtimeConsent>[];
+    final subscription = session.consentEvents.listen(received.add);
+    addTearDown(subscription.cancel);
+    // Keep the fixed fixture in the future so the validity assertion is
+    // stable when the test suite runs after the original implementation
+    // date. Expiry is covered independently by the validation tests.
+    final issued = DateTime.utc(2030, 1, 1, 12);
+    final valid = RealtimeConsent(
+      operationId: 'operation-a',
+      realtimeId: '00112233445566778899aabbccddeeff',
+      issuedAt: issued,
+      expiresAt: issued.add(const Duration(minutes: 1)),
+      decision: RealtimeConsentDecision.request,
+      senderPeerId: 'peer-a',
+      actionRevision: 1,
+    );
+    backend.emit(RealtimeConsentBackendEvent(valid));
+    backend.emit(
+      RealtimeConsentBackendEvent(
+        RealtimeConsent(
+          operationId: 'operation-b',
+          realtimeId: valid.realtimeId,
+          issuedAt: issued,
+          expiresAt: issued.add(const Duration(minutes: 1)),
+          decision: RealtimeConsentDecision.request,
+          senderPeerId: 'peer-a',
+          actionRevision: 1,
         ),
-      );
-      final received = <RealtimeConsent>[];
-      final subscription = session.consentEvents.listen(received.add);
-      addTearDown(subscription.cancel);
-      // Keep the fixed fixture in the future so the validity assertion is
-      // stable when the test suite runs after the original implementation
-      // date. Expiry is covered independently by the validation tests.
-      final issued = DateTime.utc(2030, 1, 1, 12);
-      final valid = RealtimeConsent(
-        operationId: 'operation-a',
-        realtimeId: '00112233445566778899aabbccddeeff',
-        issuedAt: issued,
-        expiresAt: issued.add(const Duration(minutes: 1)),
-        decision: RealtimeConsentDecision.request,
-        senderPeerId: 'peer-a',
-        actionRevision: 1,
-      );
-      backend.emit(RealtimeConsentBackendEvent(valid));
-      backend.emit(
-        RealtimeConsentBackendEvent(
-          RealtimeConsent(
-            operationId: 'operation-b',
-            realtimeId: valid.realtimeId,
-            issuedAt: issued,
-            expiresAt: issued.add(const Duration(minutes: 1)),
-            decision: RealtimeConsentDecision.request,
-            senderPeerId: 'peer-a',
-            actionRevision: 1,
-          ),
-        ),
-      );
-      await Future<void>.delayed(Duration.zero);
-      expect(received, hasLength(2));
-      expect(received.map((consent) => consent.operationId), [
-        'operation-a',
-        'operation-b',
-      ]);
-    },
-  );
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(received, hasLength(2));
+    expect(received.map((consent) => consent.operationId), [
+      'operation-a',
+      'operation-b',
+    ]);
+  });
 }
 
 /// Facade 测试使用的空 SessionClient 替身；Facade 仅把 Realtime 委托给注入的

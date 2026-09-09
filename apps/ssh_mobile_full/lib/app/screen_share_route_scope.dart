@@ -40,11 +40,13 @@ final class AppScreenShareRouteScope extends StatefulWidget {
   const AppScreenShareRouteScope({
     required this.arguments,
     required this.resources,
+    this.capabilities,
     super.key,
   });
 
   final AppScreenShareRouteArguments arguments;
   final AppRealtimeMediaResources resources;
+  final AppScreenSharePlatformCapabilities? capabilities;
 
   @override
   State<AppScreenShareRouteScope> createState() =>
@@ -65,9 +67,9 @@ final class _AppScreenShareRouteScopeState
       _mediaCoordinator = AppScreenShareMediaCoordinator(
         session: widget.arguments.session,
         resources: widget.resources,
-        capabilities: appScreenSharePlatformCapabilitiesFor(
-          widget.resources.backend,
-        ),
+        capabilities:
+            widget.capabilities ??
+            appScreenSharePlatformCapabilitiesFor(widget.resources.backend),
         source: widget.arguments.source,
       );
       _initialization = _initialize();
