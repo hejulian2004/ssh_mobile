@@ -561,6 +561,11 @@ shared secret only in its secret environment; the client retains the issued
 credential only in session memory, never exposes it to Feature, and never
 persists or logs it.
 
+The current device-proof transcript remains `METHOD`, `PATH`, `TIMESTAMP`, and
+`NONCE`. Consider binding `BODY_SHA256` to the proof transcript before
+production security certification; that change requires an approved protocol
+migration across the source schema and generated Go/Rust/Dart clients.
+
 ## Platform rendering and capture
 
 The first platform matrix is:
