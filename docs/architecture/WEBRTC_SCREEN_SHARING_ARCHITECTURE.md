@@ -1,4 +1,4 @@
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 
 # WebRTC Screen Sharing Architecture
 
@@ -254,7 +254,7 @@ The existing protobuf command/event ABI remains the low-frequency control plane:
 
 - current start, stop, state, signaling, command completion, errors, and bounded
   statistics;
-- the typed `ScreenShareConsentV1` message and media endpoint/state extension,
+- the typed `ScreenShareConsentV2` message and media endpoint/state extension,
   authored in the protocol source schema before generated artifacts;
 - surface-ready, resolution-change, paused, resumed, and endpoint lifecycle
   notifications once the planned media contract exists;
@@ -377,19 +377,18 @@ logged.
 Existing authenticated signaling carries offer, answer, ICE candidate, ICE
 restart, and close. Phase 5 adds the dedicated
 `REALTIME_SIGNAL_KIND_SCREEN_SHARE_CONSENT` signal and its authenticated
-`ScreenShareConsentV1` control payload through the protocol source of truth. It
+`ScreenShareConsentV2` control payload through the protocol source of truth. It
 is not a `RelayDataFrame` or a video payload; the existing Relay `RealtimeSignal`
 still carries `realtime_id` + `target_device_id` + `kind` + `revision` + bounded
 `payload`, with no sender field on that wire. The typed consent payload is:
 
 ~~~text
-schema_version = 1                  # payload schema version, not Relay v2
+schema_version = 2                  # payload schema version, not Relay v2
 decision = REQUEST | ACCEPT | REJECT | CANCEL
 purpose = SCREEN_SHARE               # typed enum, not free-form text
 operation_id                         # non-empty, <= 128 bytes
 sender_peer_id                       # non-empty, <= 128 bytes
-realtime_id                          # canonical 32-char session identity
-generation                           # native-authoritative, > 0
+realtime_id                          # canonical 32-char shared session identity
 media = SCREEN_VIDEO                 # typed enum
 requires_acceptance = true
 issued_at_ms
@@ -417,11 +416,13 @@ fails closed.
 Authentication and binding checks are mandatory: the outer authenticated source
 and target must match the expected peers; `sender_peer_id` must match the
 authenticated content sender and the pending operation; `realtime_id` must map
-to that peer and the current session generation; REQUEST alone creates
-provisional state; ACCEPT/REJECT only acts on a matching, non-terminal,
-non-expired REQUEST. `schema_version`, action replay, and the local generation
-guard are separate checks. The Relay routes this bounded control message but
-does not trust, rewrite, parse, store, or forward media payload.
+to the current shared session. REQUEST alone creates provisional state;
+ACCEPT/REJECT only acts on a matching, non-terminal, non-expired REQUEST.
+`schema_version`, action replay, and the local native-generation guard are
+separate checks. Native generation is process-local media-lease freshness and
+never appears in the consent wire payload. The Relay routes this bounded
+control message but does not trust, rewrite, parse, store, or forward media
+payload.
 
 The accepted receiving flow is:
 
@@ -443,9 +444,10 @@ The accepted sending flow is:
 
 ~~~text
 User explicitly starts sharing
-  -> select peer and source, obtain OS permission
+  -> select peer and source metadata
   -> create ScreenShareOperation and outgoing intent
   -> receiver explicitly accepts
+  -> validate consent and obtain OS permission
   -> WebRTC answer, ICE, DTLS-SRTP, and native media endpoint are ready
   -> begin actual capture and H.264 encoding
 ~~~

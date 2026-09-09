@@ -1,4 +1,4 @@
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 
 # WebRTC Screen Share TODO
 
@@ -81,9 +81,11 @@ ADR-034 或原始技术架构文档。
 
 - [x] Phase 5 typed consent contract/state-machine implementation：协议源 schema
   增加独立 `REALTIME_SIGNAL_KIND_SCREEN_SHARE_CONSENT` 与
-  `ScreenShareConsentV1`；Rust/native/Dart/App codec parity、generation/replay
-  guard、`feature_screen_share` explicit accept/reject/timeout/cancel 状态机和
-  media-ready gate 已落地。真实双端 UI/transport acceptance 仍待完成。
+  `ScreenShareConsentV2`；Rust/native/Dart/App codec parity、shared-session
+  identity/action-revision replay guard、`feature_screen_share` explicit
+  accept/reject/timeout/cancel 状态机和 media-ready gate 已落地。native
+  generation 仍只用于本地 media lease，未进入 consent wire。真实双端
+  UI/transport acceptance 仍待完成。
 - [x] Phase 6 credential foundation：Relay 增加 device-authenticated、短时
   `/v2/turn/credentials` issuer，SDK 增加 bounded parser、in-memory
   `RealtimeTurnCredentialStore` 与 App provider；生产部署、secret scan 和
