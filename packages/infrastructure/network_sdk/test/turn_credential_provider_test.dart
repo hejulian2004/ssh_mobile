@@ -5,46 +5,49 @@ import 'package:network_sdk/network_sdk.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('provider keeps bearer and device proof in the injected request', () async {
-    final executor = _Executor(
-      SdkResponse(
-        statusCode: 200,
-        body: Uint8List.fromList(
-          utf8.encode(
-            jsonEncode(<String, dynamic>{
-              'urls': <String>['turns:relay.example'],
-              'username': 'device-user',
-              'password': 'opaque-password',
-              'expires_at':
-                  DateTime.now()
-                      .toUtc()
-                      .add(const Duration(minutes: 1))
-                      .millisecondsSinceEpoch ~/
-                  1000,
-            }),
+  test(
+    'provider keeps bearer and device proof in the injected request',
+    () async {
+      final executor = _Executor(
+        SdkResponse(
+          statusCode: 200,
+          body: Uint8List.fromList(
+            utf8.encode(
+              jsonEncode(<String, dynamic>{
+                'urls': <String>['turns:relay.example'],
+                'username': 'device-user',
+                'password': 'opaque-password',
+                'expires_at':
+                    DateTime.now()
+                        .toUtc()
+                        .add(const Duration(minutes: 1))
+                        .millisecondsSinceEpoch ~/
+                    1000,
+              }),
+            ),
           ),
         ),
-      ),
-    );
-    final provider = JsonTurnCredentialProvider(
-      executor: executor,
-      authSession: const _Auth(),
-      requestSigner: const _Signer(),
-      endpoint: Uri.parse('https://relay.example'),
-    );
+      );
+      final provider = JsonTurnCredentialProvider(
+        executor: executor,
+        authSession: const _Auth(),
+        requestSigner: const _Signer(),
+        endpoint: Uri.parse('https://relay.example'),
+      );
 
-    final result = await provider.issue(
-      const RealtimeSessionToken(
-        realtimeId: '00112233445566778899aabbccddeeff',
-        peerId: 'peer-a',
-        generation: 3,
-      ),
-    );
+      final result = await provider.issue(
+        const RealtimeSessionToken(
+          realtimeId: '00112233445566778899aabbccddeeff',
+          peerId: 'peer-a',
+          generation: 3,
+        ),
+      );
 
-    expect(result, isA<SdkSuccess<EphemeralTurnCredential>>());
-    expect(executor.request.headers['authorization'], 'Bearer access-token');
-    expect(executor.request.headers['X-Relay-Signature'], 'signature');
-  });
+      expect(result, isA<SdkSuccess<EphemeralTurnCredential>>());
+      expect(executor.request.headers['authorization'], 'Bearer access-token');
+      expect(executor.request.headers['X-Relay-Signature'], 'signature');
+    },
+  );
 }
 
 final class _Executor implements SdkRequestExecutor {
