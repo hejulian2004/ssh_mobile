@@ -364,6 +364,9 @@ void main() {
       0x07,
       0x30,
       0x01,
+      0x3a,
+      0x20,
+      ...'00112233445566778899aabbccddeeff'.codeUnits,
     ];
     final frame = Uint8List.fromList(<int>[
       0x0a,
@@ -387,6 +390,10 @@ void main() {
     expect(snapshot.state, NativeRealtimeSessionState.connected);
     expect(snapshot.revision, 7);
     expect(snapshot.generation, 1);
+    expect(
+      snapshot.sharedSessionInstanceId,
+      '00112233445566778899aabbccddeeff',
+    );
     expect(snapshot.error, isNull);
   });
 
@@ -415,6 +422,9 @@ void main() {
       0x03,
       0x30,
       0x01,
+      0x3a,
+      0x20,
+      ...'00112233445566778899aabbccddeeff'.codeUnits,
       0x2a,
       errorNested.length,
       ...errorNested,
@@ -438,6 +448,10 @@ void main() {
     expect(snapshot.state, NativeRealtimeSessionState.failed);
     expect(snapshot.revision, 3);
     expect(snapshot.generation, 1);
+    expect(
+      snapshot.sharedSessionInstanceId,
+      '00112233445566778899aabbccddeeff',
+    );
     expect(snapshot.error, isNotNull);
     expect(snapshot.error!.code, 12);
     expect(
