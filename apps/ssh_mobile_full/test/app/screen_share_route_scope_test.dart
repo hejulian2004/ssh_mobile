@@ -816,28 +816,6 @@ final class _RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
     required RealtimeMediaEndpointIdentity identity,
     RealtimeMediaNativeOwnerToken? ownerToken,
   }) async => RealtimeMediaStats();
-
-  @override
-  Future<void> requestKeyframe({
-    required RealtimeMediaEndpointId endpointId,
-    required RealtimeMediaEndpointIdentity identity,
-    RealtimeMediaNativeOwnerToken? ownerToken,
-  }) async {}
-
-  @override
-  Future<void> resetDecoder({
-    required RealtimeMediaEndpointId endpointId,
-    required RealtimeMediaEndpointIdentity identity,
-    RealtimeMediaNativeOwnerToken? ownerToken,
-  }) async {}
-
-  @override
-  Future<void> applyAdaptation({
-    required RealtimeMediaEndpointId endpointId,
-    required RealtimeMediaEndpointIdentity identity,
-    required RealtimeMediaAdaptationDecision decision,
-    RealtimeMediaNativeOwnerToken? ownerToken,
-  }) async {}
 }
 
 final class _RecordingAndroidPlatform implements AndroidRealtimeMediaPlatform {
@@ -891,26 +869,4 @@ final class _RecordingAndroidPlatform implements AndroidRealtimeMediaPlatform {
     required RealtimeMediaEndpointIdentity identity,
     RealtimeMediaNativeOwnerToken? ownerToken,
   }) async => RealtimeMediaStats();
-
-  @override
-  Future<void> requestKeyframe({
-    required RealtimeMediaEndpointId endpointId,
-    required RealtimeMediaEndpointIdentity identity,
-    RealtimeMediaNativeOwnerToken? ownerToken,
-  }) async {}
-
-  @override
-  Future<void> resetDecoder({
-    required RealtimeMediaEndpointId endpointId,
-    required RealtimeMediaEndpointIdentity identity,
-    RealtimeMediaNativeOwnerToken? ownerToken,
-  }) async {}
-
-  @override
-  Future<void> applyAdaptation({
-    required RealtimeMediaEndpointId endpointId,
-    required RealtimeMediaEndpointIdentity identity,
-    required RealtimeMediaAdaptationDecision decision,
-    RealtimeMediaNativeOwnerToken? ownerToken,
-  }) async {}
 }
