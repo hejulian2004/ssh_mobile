@@ -488,8 +488,10 @@ void main() {
         peerId: 'peer-a',
         state: RealtimeSessionState.connected,
         generation: 7,
+        sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
       ),
     );
+    expect(session.sharedSessionInstanceId, '00112233445566778899aabbccddeeff');
     final received = <RealtimeConsent>[];
     final subscription = session.consentEvents.listen(received.add);
     addTearDown(subscription.cancel);
@@ -500,6 +502,7 @@ void main() {
     final valid = RealtimeConsent(
       operationId: 'operation-a',
       realtimeId: '00112233445566778899aabbccddeeff',
+      sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
       issuedAt: issued,
       expiresAt: issued.add(const Duration(minutes: 1)),
       decision: RealtimeConsentDecision.request,
@@ -512,6 +515,21 @@ void main() {
         RealtimeConsent(
           operationId: 'operation-b',
           realtimeId: valid.realtimeId,
+          sharedSessionInstanceId: valid.sharedSessionInstanceId,
+          issuedAt: issued,
+          expiresAt: issued.add(const Duration(minutes: 1)),
+          decision: RealtimeConsentDecision.request,
+          senderPeerId: 'peer-a',
+          actionRevision: 1,
+        ),
+      ),
+    );
+    backend.emit(
+      RealtimeConsentBackendEvent(
+        RealtimeConsent(
+          operationId: 'operation-stale',
+          realtimeId: valid.realtimeId,
+          sharedSessionInstanceId: 'ffffffffffffffffffffffffffffffff',
           issuedAt: issued,
           expiresAt: issued.add(const Duration(minutes: 1)),
           decision: RealtimeConsentDecision.request,

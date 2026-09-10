@@ -3,10 +3,10 @@ import 'dart:convert';
 /// Typed, versioned screen-share consent metadata.
 ///
 /// Consent is a low-frequency authenticated control message. It contains no
-/// SDP, ICE, encoded frames, native handles or credentials. The independent
-/// Cross-device freshness is bound by [realtimeId], sender, operation and
-/// action revision; native generations remain process-local media leases and
-/// never appear in this wire value.
+/// SDP, ICE, encoded frames, native handles or credentials. Cross-device
+/// freshness is bound by [realtimeId], [sharedSessionInstanceId], sender,
+/// operation and action revision; native generations remain process-local
+/// media leases and never appear in this wire value.
 enum RealtimeConsentDecision {
   request(1),
   accept(2),
@@ -46,6 +46,7 @@ final class RealtimeConsent {
   RealtimeConsent({
     required this.operationId,
     required this.realtimeId,
+    required this.sharedSessionInstanceId,
     required this.issuedAt,
     required this.expiresAt,
     required this.decision,
@@ -62,6 +63,7 @@ final class RealtimeConsent {
   final int schemaVersion;
   final String operationId;
   final String realtimeId;
+  final String sharedSessionInstanceId;
   final DateTime issuedAt;
   final DateTime expiresAt;
   final RealtimeConsentDecision decision;
@@ -87,6 +89,7 @@ final class RealtimeConsent {
     schemaVersion: schemaVersion,
     operationId: operationId,
     realtimeId: realtimeId,
+    sharedSessionInstanceId: sharedSessionInstanceId,
     issuedAt: issuedAt ?? this.issuedAt,
     expiresAt: expiresAt ?? this.expiresAt,
     decision: decision ?? this.decision,
@@ -103,6 +106,7 @@ final class RealtimeConsent {
       other.schemaVersion == schemaVersion &&
       other.operationId == operationId &&
       other.realtimeId == realtimeId &&
+      other.sharedSessionInstanceId == sharedSessionInstanceId &&
       other.issuedAtMs == issuedAtMs &&
       other.expiresAtMs == expiresAtMs &&
       other.decision == decision &&
@@ -117,6 +121,7 @@ final class RealtimeConsent {
     schemaVersion,
     operationId,
     realtimeId,
+    sharedSessionInstanceId,
     issuedAtMs,
     expiresAtMs,
     decision,
@@ -134,6 +139,12 @@ final class RealtimeConsent {
     _validateText(operationId, 'operationId');
     if (!RegExp(r'^[0-9a-f]{32}$').hasMatch(realtimeId)) {
       throw ArgumentError.value(realtimeId, 'realtimeId');
+    }
+    if (!RegExp(r'^[0-9a-f]{32}$').hasMatch(sharedSessionInstanceId)) {
+      throw ArgumentError.value(
+        sharedSessionInstanceId,
+        'sharedSessionInstanceId',
+      );
     }
     if (issuedAt.millisecondsSinceEpoch <= 0 ||
         !expiresAt.isAfter(issuedAt) ||

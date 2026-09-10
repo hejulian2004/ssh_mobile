@@ -93,10 +93,19 @@ final class _AppScreenShareRouteScopeState
         'Native Realtime generation is not available.',
       );
     }
+    final sharedSessionInstanceId =
+        widget.arguments.session.sharedSessionInstanceId;
+    if (sharedSessionInstanceId == null) {
+      throw const RealtimeMediaException(
+        RealtimeMediaErrorCode.backendFailure,
+        'Shared Realtime session instance is not available.',
+      );
+    }
     _controller = ScreenShareController(
       consentPort: AppScreenShareConsentPort(widget.arguments.session),
       mediaPort: _mediaCoordinator!.port,
       realtimeId: token.realtimeId,
+      sharedSessionInstanceId: sharedSessionInstanceId,
       generation: token.generation,
       localPeerId: widget.arguments.localPeerId,
       remotePeerId: widget.arguments.session.peerId,

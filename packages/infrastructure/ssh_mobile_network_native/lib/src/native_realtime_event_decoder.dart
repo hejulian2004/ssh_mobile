@@ -16,6 +16,7 @@ final class _NativeRealtimeEventDecoder {
     var state = 0;
     var revision = 0;
     var generation = 0;
+    var sharedSessionInstanceId = '';
     NativeNetworkError? error;
     while (!reader.isDone) {
       final field = reader.field();
@@ -32,6 +33,11 @@ final class _NativeRealtimeEventDecoder {
           error = _values.decodeError(reader.bytes(field.wireType));
         case 6:
           generation = reader.varint(field.wireType);
+        case 7:
+          sharedSessionInstanceId = reader.string(
+            field.wireType,
+            _sharedSessionInstanceIdBytes,
+          );
         default:
           reader.skip(field.wireType);
       }
@@ -43,6 +49,7 @@ final class _NativeRealtimeEventDecoder {
         'Realtime session generation must be positive.',
       );
     }
+    _values.validateDecodedSharedSessionInstanceId(sharedSessionInstanceId);
     return NativeRealtimeStateChangedEvent(
       eventId: eventId,
       timestampMs: timestampMs,
@@ -52,6 +59,7 @@ final class _NativeRealtimeEventDecoder {
       state: NativeRealtimeSessionState.fromWire(state),
       revision: revision,
       generation: generation,
+      sharedSessionInstanceId: sharedSessionInstanceId,
       error: error,
     );
   }
@@ -136,6 +144,7 @@ final class _NativeRealtimeEventDecoder {
     var media = 0;
     var requiresAcceptance = false;
     var actionRevision = 0;
+    var sharedSessionInstanceId = '';
     while (!reader.isDone) {
       final field = reader.field();
       switch (field.number) {
@@ -164,6 +173,11 @@ final class _NativeRealtimeEventDecoder {
           requiresAcceptance = reader.varint(field.wireType) != 0;
         case 11:
           actionRevision = reader.varint(field.wireType);
+        case 12:
+          sharedSessionInstanceId = reader.string(
+            field.wireType,
+            _sharedSessionInstanceIdBytes,
+          );
         default:
           reader.skip(field.wireType);
       }
@@ -191,6 +205,7 @@ final class _NativeRealtimeEventDecoder {
       );
     }
     if (senderPeerId.isEmpty ||
+        sharedSessionInstanceId.isEmpty ||
         NativeScreenShareConsentDecision.fromWire(decision) ==
             NativeScreenShareConsentDecision.unspecified ||
         NativeScreenShareConsentPurpose.fromWire(purpose) !=
@@ -201,10 +216,12 @@ final class _NativeRealtimeEventDecoder {
         actionRevision <= 0) {
       throw const FormatException('Screen-share consent fields are invalid.');
     }
+    _values.validateDecodedSharedSessionInstanceId(sharedSessionInstanceId);
     return NativeScreenShareConsent(
       schemaVersion: schemaVersion,
       operationId: operationId,
       realtimeId: realtimeId,
+      sharedSessionInstanceId: sharedSessionInstanceId,
       issuedAtMs: issuedAtMs,
       expiresAtMs: expiresAtMs,
       decision: NativeScreenShareConsentDecision.fromWire(decision),
@@ -228,6 +245,7 @@ final class _NativeRealtimeEventDecoder {
     var state = 0;
     var revision = 0;
     var generation = 0;
+    var sharedSessionInstanceId = '';
     NativeNetworkError? error;
     while (!reader.isDone) {
       final field = reader.field();
@@ -244,6 +262,11 @@ final class _NativeRealtimeEventDecoder {
           error = _values.decodeError(reader.bytes(field.wireType));
         case 6:
           generation = reader.varint(field.wireType);
+        case 7:
+          sharedSessionInstanceId = reader.string(
+            field.wireType,
+            _sharedSessionInstanceIdBytes,
+          );
         default:
           reader.skip(field.wireType);
       }
@@ -255,6 +278,7 @@ final class _NativeRealtimeEventDecoder {
         'Realtime session generation must be positive.',
       );
     }
+    _values.validateDecodedSharedSessionInstanceId(sharedSessionInstanceId);
     return NativeRealtimeSnapshotEvent(
       eventId: eventId,
       timestampMs: timestampMs,
@@ -264,6 +288,7 @@ final class _NativeRealtimeEventDecoder {
       state: NativeRealtimeSessionState.fromWire(state),
       revision: revision,
       generation: generation,
+      sharedSessionInstanceId: sharedSessionInstanceId,
       error: error,
     );
   }

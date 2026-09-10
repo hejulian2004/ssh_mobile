@@ -31,6 +31,7 @@ final class RealtimeSessionStateChangedEvent extends RealtimeBackendEvent {
     this.error,
     this.revision = 0,
     this.generation,
+    this.sharedSessionInstanceId,
   });
 
   final String realtimeId;
@@ -45,6 +46,11 @@ final class RealtimeSessionStateChangedEvent extends RealtimeBackendEvent {
   /// omit it, but a production native adapter must always provide it; it must
   /// never be derived from [revision].
   final int? generation;
+
+  /// Cross-device session instance identity. It is independent from the
+  /// process-local native generation and is required for consent replay
+  /// isolation.
+  final String? sharedSessionInstanceId;
 }
 
 /// A complete Realtime session state snapshot published by native.
@@ -56,6 +62,7 @@ final class RealtimeSnapshot {
     required this.revision,
     this.error,
     this.generation,
+    this.sharedSessionInstanceId,
   });
 
   final String realtimeId;
@@ -67,6 +74,10 @@ final class RealtimeSnapshot {
   /// Native-authoritative media/session generation, independent of signaling
   /// revision. A production native snapshot always carries this value.
   final int? generation;
+
+  /// Cross-device session instance identity, independent from native
+  /// generation.
+  final String? sharedSessionInstanceId;
 }
 
 /// Immutable token required to bind a media endpoint to one native session.
@@ -165,6 +176,10 @@ abstract interface class RealtimeSession {
   /// Native-authoritative generation for the current session, when the
   /// adapter has delivered its first state/snapshot event.
   int? get generation;
+
+  /// Cross-device session instance identity for the current native session.
+  /// It is null until native has established the current session binding.
+  String? get sharedSessionInstanceId;
 
   /// Token used by the media adapter; null until native reports a generation.
   RealtimeSessionToken? get mediaToken;

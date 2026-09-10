@@ -11,6 +11,7 @@ void main() {
   }) => RealtimeConsent(
     operationId: 'operation-a',
     realtimeId: '00112233445566778899aabbccddeeff',
+    sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
     issuedAt: issued,
     expiresAt: expires,
     decision: decision,
@@ -35,6 +36,7 @@ void main() {
       () => RealtimeConsent(
         operationId: 'x',
         realtimeId: 'not-a-realtime-id',
+        sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
         issuedAt: issued,
         expiresAt: expires,
         decision: RealtimeConsentDecision.request,
@@ -47,6 +49,7 @@ void main() {
       () => RealtimeConsent(
         operationId: 'x',
         realtimeId: '00112233445566778899aabbccddeeff',
+        sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
         issuedAt: issued,
         expiresAt: issued.add(const Duration(minutes: 3)),
         decision: RealtimeConsentDecision.request,
@@ -59,6 +62,7 @@ void main() {
       () => RealtimeConsent(
         operationId: 'x',
         realtimeId: '00112233445566778899aabbccddeeff',
+        sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
         issuedAt: issued,
         expiresAt: expires,
         decision: RealtimeConsentDecision.request,
@@ -77,6 +81,7 @@ void main() {
       () => RealtimeConsent(
         operationId: valid,
         realtimeId: '00112233445566778899aabbccddeeff',
+        sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
         issuedAt: issued,
         expiresAt: expires,
         decision: RealtimeConsentDecision.request,
@@ -89,6 +94,7 @@ void main() {
       () => RealtimeConsent(
         operationId: invalid,
         realtimeId: '00112233445566778899aabbccddeeff',
+        sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
         issuedAt: issued,
         expiresAt: expires,
         decision: RealtimeConsentDecision.request,

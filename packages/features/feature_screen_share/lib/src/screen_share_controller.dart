@@ -20,6 +20,7 @@ final class ScreenShareController extends ChangeNotifier
     required ScreenShareConsentPort consentPort,
     required ScreenShareMediaPort mediaPort,
     required this.realtimeId,
+    required this.sharedSessionInstanceId,
     required this.generation,
     required this.localPeerId,
     required this.remotePeerId,
@@ -34,6 +35,12 @@ final class ScreenShareController extends ChangeNotifier
     _validateIdentity(remotePeerId, 'remotePeerId');
     if (generation <= 0) {
       throw ArgumentError.value(generation, 'generation');
+    }
+    if (!RegExp(r'^[0-9a-f]{32}$').hasMatch(sharedSessionInstanceId)) {
+      throw ArgumentError.value(
+        sharedSessionInstanceId,
+        'sharedSessionInstanceId',
+      );
     }
     if (requestLifetime <= Duration.zero ||
         requestLifetime > const Duration(minutes: 2)) {
@@ -64,6 +71,7 @@ final class ScreenShareController extends ChangeNotifier
       );
 
   final String realtimeId;
+  final String sharedSessionInstanceId;
   final int generation;
   final String localPeerId;
   final String remotePeerId;
@@ -102,6 +110,7 @@ final class ScreenShareController extends ChangeNotifier
       buildScreenShareConsent(
         operationId: id,
         realtimeId: realtimeId,
+        sharedSessionInstanceId: sharedSessionInstanceId,
         issuedAt: issued,
         expiresAt: expires,
         decision: RealtimeConsentDecision.request,
@@ -136,6 +145,7 @@ final class ScreenShareController extends ChangeNotifier
       buildScreenShareConsent(
         operationId: id,
         realtimeId: realtimeId,
+        sharedSessionInstanceId: sharedSessionInstanceId,
         issuedAt: _now(),
         expiresAt: expires,
         decision: RealtimeConsentDecision.accept,
@@ -183,6 +193,7 @@ final class ScreenShareController extends ChangeNotifier
         buildScreenShareConsent(
           operationId: id,
           realtimeId: realtimeId,
+          sharedSessionInstanceId: sharedSessionInstanceId,
           issuedAt: _now(),
           expiresAt: expires,
           decision: RealtimeConsentDecision.cancel,
@@ -265,6 +276,7 @@ final class ScreenShareController extends ChangeNotifier
   void _onConsent(RealtimeConsent consent) {
     if (_disposed ||
         consent.realtimeId != realtimeId ||
+        consent.sharedSessionInstanceId != sharedSessionInstanceId ||
         consent.senderPeerId != remotePeerId ||
         consent.isExpired(_now())) {
       return;
@@ -375,6 +387,7 @@ final class ScreenShareController extends ChangeNotifier
         buildScreenShareConsent(
           operationId: id,
           realtimeId: realtimeId,
+          sharedSessionInstanceId: sharedSessionInstanceId,
           issuedAt: _now(),
           expiresAt: expires,
           decision: decision,

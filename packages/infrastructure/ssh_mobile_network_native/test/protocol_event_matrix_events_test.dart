@@ -83,6 +83,7 @@ void main() {
         _varintField(4, 3),
         _bytesField(5, error),
         _varintField(6, 1),
+        _stringField(7, realtimeId),
       ]),
       22: _message(<List<int>>[
         _stringField(1, realtimeId),
@@ -98,6 +99,7 @@ void main() {
         _varintField(4, 5),
         _bytesField(5, error),
         _varintField(6, 1),
+        _stringField(7, realtimeId),
       ]),
       24: _message(<List<int>>[
         _stringField(1, 'peer-a'),
@@ -204,8 +206,10 @@ void main() {
     expect(signal.payload, orderedEquals(<int>[6, 7]));
     final realtimeState = decoded[21]! as NativeRealtimeStateChangedEvent;
     expect(realtimeState.generation, 1);
+    expect(realtimeState.sharedSessionInstanceId, realtimeId);
     final realtimeSnapshot = decoded[23]! as NativeRealtimeSnapshotEvent;
     expect(realtimeSnapshot.generation, 1);
+    expect(realtimeSnapshot.sharedSessionInstanceId, realtimeId);
     final presenceSnapshot = decoded[25]! as NativePeerPresenceSnapshotEvent;
     expect(presenceSnapshot.peers.single.generation, 4);
   });
@@ -215,6 +219,7 @@ void main() {
       schemaVersion: 2,
       operationId: 'operation-a',
       realtimeId: realtimeId,
+      sharedSessionInstanceId: realtimeId,
       issuedAtMs: 1_735_732_800_000,
       expiresAtMs: 1_735_732_860_000,
       decision: NativeScreenShareConsentDecision.request,
@@ -237,6 +242,7 @@ void main() {
     final event = decoded! as NativeRealtimeSignalEvent;
     expect(event.kind, NativeRealtimeSignalKind.screenShareConsent);
     expect(event.consent?.operationId, 'operation-a');
+    expect(event.consent?.sharedSessionInstanceId, realtimeId);
     expect(event.consent?.decision, NativeScreenShareConsentDecision.request);
   });
 
@@ -246,6 +252,7 @@ void main() {
         schemaVersion: 2,
         operationId: 'operation-a',
         realtimeId: realtimeId,
+        sharedSessionInstanceId: realtimeId,
         issuedAtMs: 1_735_732_800_000,
         expiresAtMs: 1_735_732_860_000,
         decision: NativeScreenShareConsentDecision.request,

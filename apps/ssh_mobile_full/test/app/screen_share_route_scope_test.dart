@@ -139,6 +139,7 @@ void main() {
         consentPort: consent,
         mediaPort: coordinator.port,
         realtimeId: realtimeId,
+        sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
         generation: 7,
         localPeerId: 'peer-local',
         remotePeerId: 'peer-remote',
@@ -152,6 +153,7 @@ void main() {
         RealtimeConsent(
           operationId: 'operation-a',
           realtimeId: realtimeId,
+          sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
           issuedAt: DateTime.utc(2030, 1, 1, 12),
           expiresAt: DateTime.utc(2030, 1, 1, 12, 1),
           decision: RealtimeConsentDecision.accept,
@@ -704,6 +706,9 @@ final class _FakeRealtimeSession implements RealtimeSession {
   final String peerId;
 
   @override
+  String? get sharedSessionInstanceId => '00112233445566778899aabbccddeeff';
+
+  @override
   RealtimeSessionToken? mediaToken;
 
   @override
@@ -755,6 +760,7 @@ RealtimeConsent _incomingConsent() {
   return RealtimeConsent(
     operationId: 'operation-a',
     realtimeId: '00112233445566778899aabbccddeeff',
+    sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
     issuedAt: issued,
     expiresAt: issued.add(const Duration(minutes: 1)),
     decision: RealtimeConsentDecision.request,

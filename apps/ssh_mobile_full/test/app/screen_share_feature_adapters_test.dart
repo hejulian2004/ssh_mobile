@@ -12,6 +12,7 @@ void main() {
   final consent = RealtimeConsent(
     operationId: 'operation-a',
     realtimeId: realtimeId,
+    sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
     issuedAt: issued,
     expiresAt: issued.add(const Duration(minutes: 1)),
     decision: RealtimeConsentDecision.request,
@@ -123,6 +124,9 @@ final class _FakeRealtimeSession implements RealtimeSession {
 
   @override
   final String peerId;
+
+  @override
+  String? get sharedSessionInstanceId => '00112233445566778899aabbccddeeff';
 
   final Stream<RealtimeConsent> consentStream;
   final Future<SdkResult<void>> Function(RealtimeConsent) onSendConsent;

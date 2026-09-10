@@ -7,6 +7,7 @@ final class NativeScreenShareConsent {
     required this.schemaVersion,
     required this.operationId,
     required this.realtimeId,
+    required this.sharedSessionInstanceId,
     required this.issuedAtMs,
     required this.expiresAtMs,
     required this.decision,
@@ -20,6 +21,7 @@ final class NativeScreenShareConsent {
   final int schemaVersion;
   final String operationId;
   final String realtimeId;
+  final String sharedSessionInstanceId;
   final int issuedAtMs;
   final int expiresAtMs;
   final NativeScreenShareConsentDecision decision;
@@ -42,6 +44,7 @@ final class NativeRealtimeStateChangedEvent extends NativeNetworkEvent {
     required this.state,
     required this.revision,
     required this.generation,
+    this.sharedSessionInstanceId,
     this.error,
   });
 
@@ -61,6 +64,10 @@ final class NativeRealtimeStateChangedEvent extends NativeNetworkEvent {
   /// [revision] and is the only value accepted by media endpoint creation.
   final int generation;
 
+  /// Cross-device session instance identity used for consent replay
+  /// isolation. This is distinct from the process-local native generation.
+  final String? sharedSessionInstanceId;
+
   /// Structured failure, when [state] is failed.
   final NativeNetworkError? error;
 }
@@ -77,6 +84,7 @@ final class NativeRealtimeSnapshotEvent extends NativeNetworkEvent {
     required this.state,
     required this.revision,
     required this.generation,
+    this.sharedSessionInstanceId,
     this.error,
   });
 
@@ -95,6 +103,10 @@ final class NativeRealtimeSnapshotEvent extends NativeNetworkEvent {
   /// Native-authoritative media/session generation. This is independent from
   /// [revision] and is the only value accepted by media endpoint creation.
   final int generation;
+
+  /// Cross-device session instance identity used for consent replay
+  /// isolation. This is distinct from the process-local native generation.
+  final String? sharedSessionInstanceId;
 
   /// Structured failure, when [state] is failed.
   final NativeNetworkError? error;

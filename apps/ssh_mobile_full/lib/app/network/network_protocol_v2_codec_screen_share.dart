@@ -16,6 +16,7 @@ Uint8List _encodeScreenShareConsent(RealtimeConsent consent) {
         ..varint(1, consent.schemaVersion)
         ..string(2, consent.operationId)
         ..string(3, consent.realtimeId)
+        ..string(12, consent.sharedSessionInstanceId)
         ..varint(4, consent.issuedAtMs)
         ..varint(5, consent.expiresAtMs)
         ..varint(6, consent.decision.wireValue)
@@ -45,6 +46,7 @@ RealtimeConsent _decodeScreenShareConsent(Uint8List bytes) {
   var media = 0;
   var requiresAcceptance = false;
   var actionRevision = 0;
+  var sharedSessionInstanceId = '';
   while (!reader.isDone) {
     final field = reader.field();
     switch (field.number) {
@@ -70,6 +72,8 @@ RealtimeConsent _decodeScreenShareConsent(Uint8List bytes) {
         requiresAcceptance = reader.varint(field.wireType) != 0;
       case 11:
         actionRevision = reader.varint(field.wireType);
+      case 12:
+        sharedSessionInstanceId = utf8.decode(reader.bytes(field.wireType));
       default:
         reader.skip(field.wireType);
     }
@@ -85,6 +89,7 @@ RealtimeConsent _decodeScreenShareConsent(Uint8List bytes) {
       schemaVersion: schemaVersion,
       operationId: operationId,
       realtimeId: realtimeId,
+      sharedSessionInstanceId: sharedSessionInstanceId,
       issuedAt: DateTime.fromMillisecondsSinceEpoch(issuedAtMs),
       expiresAt: DateTime.fromMillisecondsSinceEpoch(expiresAtMs),
       decision: decodedDecision,

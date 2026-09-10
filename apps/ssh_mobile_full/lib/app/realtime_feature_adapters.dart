@@ -59,6 +59,7 @@ final class AppRealtimeSessionBackend
         schemaVersion: consent.schemaVersion,
         operationId: consent.operationId,
         realtimeId: consent.realtimeId,
+        sharedSessionInstanceId: consent.sharedSessionInstanceId,
         issuedAtMs: consent.issuedAtMs,
         expiresAtMs: consent.expiresAtMs,
         decision: NativeScreenShareConsentDecision.values.firstWhere(
@@ -192,6 +193,7 @@ final class AppRealtimeSessionBackend
         :final state,
         :final revision,
         :final generation,
+        :final sharedSessionInstanceId,
         :final error,
       ):
         _events.add(
@@ -201,6 +203,7 @@ final class AppRealtimeSessionBackend
             state: _mapState(state),
             revision: revision,
             generation: generation,
+            sharedSessionInstanceId: sharedSessionInstanceId,
             error: error == null ? null : _mapError(error),
           ),
         );
@@ -210,6 +213,7 @@ final class AppRealtimeSessionBackend
         :final state,
         :final revision,
         :final generation,
+        :final sharedSessionInstanceId,
         :final error,
       ):
         // 快照在 session 存在前到达时由 SDK coordinator 忽略；这里只做类型映射。
@@ -221,6 +225,7 @@ final class AppRealtimeSessionBackend
               state: _mapState(state),
               revision: revision,
               generation: generation,
+              sharedSessionInstanceId: sharedSessionInstanceId,
               error: error == null ? null : _mapError(error),
             ),
           ),
@@ -236,6 +241,7 @@ final class AppRealtimeSessionBackend
                 schemaVersion: consent.schemaVersion,
                 operationId: consent.operationId,
                 realtimeId: consent.realtimeId,
+                sharedSessionInstanceId: consent.sharedSessionInstanceId,
                 issuedAt: DateTime.fromMillisecondsSinceEpoch(
                   consent.issuedAtMs,
                 ),

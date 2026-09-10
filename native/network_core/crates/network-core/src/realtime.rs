@@ -6,7 +6,7 @@
 //! QUIC/Relay paths.
 
 use network_protocol::{
-    RealtimeSessionState, RealtimeSignalKind, ScreenShareConsentDecision,
+    RealtimeSessionState, RealtimeSignalEnvelope, RealtimeSignalKind, ScreenShareConsentDecision,
     ScreenShareConsentPurpose, ScreenShareConsentV2, ScreenShareMediaKind,
     SendRealtimeSignalCommand, StartRealtimeSessionCommand, StopRealtimeSessionCommand,
 };
@@ -19,6 +19,7 @@ use network_webrtc::{
     WebRtcPeer, MAX_ICE_CANDIDATE_BYTES, MAX_SDP_BYTES,
 };
 use prost::Message;
+use rand::RngCore;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -39,6 +40,10 @@ static NEXT_REALTIME_SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 struct RealtimeSession {
     peer_id: String,
+    /// Cross-device identity for the current realtime session instance. This
+    /// is carried in the signaling envelope and consent metadata; it is
+    /// deliberately separate from the process-local native generation.
+    shared_session_instance_id: String,
     /// §22：PeerConnection/SDP/ICE 状态绑定在创建它的 ConnectionSession 上，
     /// ConnectionSession 销毁（transport 丢失）即一并销毁 RealtimeSession；
     /// 恢复必须走新的 Resolve → Connection → 重新 signaling → 新 PeerConnection。
@@ -140,6 +145,7 @@ impl RealtimeManager {
             realtime_id,
             RealtimeSession {
                 peer_id,
+                shared_session_instance_id: new_shared_session_instance_id(),
                 connection_session_id: None,
                 peer: None,
                 driver: Some(driver),
@@ -172,7 +178,7 @@ impl RealtimeManager {
         &mut self,
         peer_id: &str,
         session_id: SessionId,
-    ) -> Vec<(String, String, u64, u64)> {
+    ) -> Vec<(String, String, u64, u64, String)> {
         self.close_for_connection_session_with_hook(peer_id, session_id, |_| {})
     }
 
@@ -183,7 +189,7 @@ impl RealtimeManager {
         peer_id: &str,
         session_id: SessionId,
         mut before_peer_close: impl FnMut(&str),
-    ) -> Vec<(String, String, u64, u64)> {
+    ) -> Vec<(String, String, u64, u64, String)> {
         let mut closed = Vec::new();
         let matching = self
             .sessions
@@ -201,7 +207,13 @@ impl RealtimeManager {
             let close_revision = session.revision.saturating_add(1);
             before_peer_close(&realtime_id);
             let _ = with_session_peer(&mut session, WebRtcPeer::close);
-            closed.push((realtime_id, session.peer_id, close_revision, generation));
+            closed.push((
+                realtime_id,
+                session.peer_id,
+                close_revision,
+                generation,
+                session.shared_session_instance_id,
+            ));
         }
         closed
     }
@@ -210,6 +222,7 @@ impl RealtimeManager {
 struct OutboundSignal {
     realtime_id: String,
     peer_id: String,
+    shared_session_instance_id: String,
     kind: RealtimeSignalKind,
     revision: u64,
     payload: Vec<u8>,
@@ -218,6 +231,7 @@ struct OutboundSignal {
 /// 一条已解码的入站 WebRTC 信令。v1 信封（revision 内嵌）与 v2 控制面帧
 /// （revision 独立字段）在进入状态机前都归一化为该三元组。
 struct InboundSignal {
+    shared_session_instance_id: String,
     kind: RealtimeSignalKind,
     revision: u64,
     payload: Vec<u8>,
@@ -225,6 +239,7 @@ struct InboundSignal {
 
 struct SignalOutcome {
     peer_id: String,
+    shared_session_instance_id: String,
     revision: u64,
     generation: u64,
     state: RealtimeSessionState,
@@ -296,6 +311,7 @@ async fn start_session_with_config(
     let driver = driver.into_handle();
     let realtime_id = command.realtime_id;
     let peer_id = command.peer_id;
+    let shared_session_instance_id = new_shared_session_instance_id();
     // §22：PeerConnection 绑定在创建它的 ConnectionSession 上（transport 丢失时
     // 随 ConnectionSession 一并销毁）。创建时若尚无数据连接，绑定为 None。
     let connection_session_id = state.connection_sessions.current_session_id(&peer_id).await;
@@ -319,6 +335,7 @@ async fn start_session_with_config(
         realtime_id.clone(),
         RealtimeSession {
             peer_id: peer_id.clone(),
+            shared_session_instance_id: shared_session_instance_id.clone(),
             connection_session_id,
             peer: None,
             driver: Some(driver.clone()),
@@ -336,6 +353,7 @@ async fn start_session_with_config(
     let outbound = OutboundSignal {
         realtime_id: realtime_id.clone(),
         peer_id: peer_id.clone(),
+        shared_session_instance_id: shared_session_instance_id.clone(),
         kind: RealtimeSignalKind::WebRtcOffer,
         revision,
         payload: offer.sdp.into_bytes(),
@@ -360,6 +378,7 @@ async fn start_session_with_config(
             RealtimeSessionState::Failed as i32,
             revision,
             generation,
+            &shared_session_instance_id,
             Some(error.clone()),
         );
         return Err(error);
@@ -406,6 +425,7 @@ async fn start_session_with_config(
         RealtimeSessionState::Negotiating as i32,
         revision,
         generation,
+        &shared_session_instance_id,
         None,
     );
     emit_realtime_signal(
@@ -450,6 +470,7 @@ pub(crate) async fn stop_session(
     let outbound = OutboundSignal {
         realtime_id: command.realtime_id.clone(),
         peer_id: session.peer_id.clone(),
+        shared_session_instance_id: session.shared_session_instance_id.clone(),
         kind: RealtimeSignalKind::WebRtcClose,
         revision: close_revision,
         payload: b"close".to_vec(),
@@ -464,6 +485,7 @@ pub(crate) async fn stop_session(
         RealtimeSessionState::Closed as i32,
         close_revision,
         generation,
+        &session.shared_session_instance_id,
         None,
     );
     Ok(())
@@ -484,19 +506,7 @@ pub(crate) async fn send_signal_command(
         )
     })?;
     validate_signal(kind, command.revision, &command.payload)?;
-    if kind == RealtimeSignalKind::ScreenShareConsent {
-        validate_screen_share_consent(&command.payload, &command.realtime_id, None).map_err(
-            |error| {
-                realtime_error(
-                    network_protocol::NetworkErrorCode::InvalidArgument,
-                    error.to_string(),
-                    "send_realtime_signal",
-                    &command.peer_id,
-                )
-            },
-        )?;
-    }
-    let (session_peer_id, session_revision, ice_revision) = {
+    let (session_peer_id, session_shared_session_instance_id, session_revision, ice_revision) = {
         let sessions = state.realtime.lock().await;
         let Some(session) = sessions.sessions.get(&command.realtime_id) else {
             return Err(realtime_error(
@@ -508,10 +518,27 @@ pub(crate) async fn send_signal_command(
         };
         (
             session.peer_id.clone(),
+            session.shared_session_instance_id.clone(),
             session.revision,
             session.ice_revision,
         )
     };
+    if kind == RealtimeSignalKind::ScreenShareConsent {
+        validate_screen_share_consent(
+            &command.payload,
+            &command.realtime_id,
+            None,
+            Some(&session_shared_session_instance_id),
+        )
+        .map_err(|error| {
+            realtime_error(
+                network_protocol::NetworkErrorCode::InvalidArgument,
+                error.to_string(),
+                "send_realtime_signal",
+                &command.peer_id,
+            )
+        })?;
+    }
     let revision_is_valid = if kind == RealtimeSignalKind::ScreenShareConsent {
         // Consent has its own action_revision and shared-session freshness
         // checks. The outer realtime revision is only a positive relay
@@ -533,6 +560,7 @@ pub(crate) async fn send_signal_command(
     let outbound = OutboundSignal {
         realtime_id: command.realtime_id.clone(),
         peer_id: command.peer_id.clone(),
+        shared_session_instance_id: session_shared_session_instance_id,
         kind,
         revision: command.revision,
         payload: command.payload,
@@ -550,9 +578,11 @@ pub(crate) async fn send_signal_command(
 }
 
 /// v2 控制面信令入口（§17/§22：WebRTC signaling 经 Relay Control Plane）。
-/// `RealtimeSignal` 帧携带独立 `revision` 与原始 payload（无 v1 信封）。冻结 wire
-/// 不携带 sender 字段；接收端只能使用已经建立的 `realtime_id → peer_id` 会话绑定，
-/// 未知会话直接拒绝，不能把 `target_device_id` 冒充远端身份。
+/// `RealtimeSignal` 帧携带独立 `revision`，payload 是 native-owned envelope；
+/// envelope 把信令绑定到跨设备共享的 session instance，而不是 process-local
+/// native generation。冻结 wire 不携带 sender 字段；接收端只能使用已经建立的
+/// `realtime_id → peer_id` 会话绑定，未知会话直接拒绝，不能把 `target_device_id`
+/// 冒充远端身份。
 pub(crate) async fn handle_v2_realtime_signal(
     state: &Arc<RuntimeState>,
     signal: &V2RealtimeSignal,
@@ -570,6 +600,8 @@ pub(crate) async fn handle_v2_realtime_signal(
             "v2 WebRTC signal has an empty established peer binding",
         ));
     }
+    let (shared_session_instance_id, payload) = decode_realtime_signal_payload(&signal.payload)
+        .map_err(|error| boxed_message(error.to_string()))?;
     let kind = RealtimeSignalKind::try_from(signal.kind)
         .map_err(|_| boxed_message("invalid v2 WebRTC signal kind"))?;
     handle_realtime_signal(
@@ -578,7 +610,8 @@ pub(crate) async fn handle_v2_realtime_signal(
         &signal.realtime_id,
         &peer_id,
         signal.revision,
-        signal.payload.clone(),
+        shared_session_instance_id,
+        payload,
     )
     .await
 }
@@ -595,9 +628,11 @@ async fn handle_realtime_signal(
     realtime_id: &str,
     peer_id: &str,
     revision: u64,
+    shared_session_instance_id: String,
     payload: Vec<u8>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     validate_realtime_id(realtime_id).map_err(boxed_protocol_error)?;
+    validate_shared_session_instance_id(&shared_session_instance_id)?;
     validate_peer(state, peer_id)
         .await
         .map_err(boxed_protocol_error)?;
@@ -609,7 +644,19 @@ async fn handle_realtime_signal(
     // carries the shared-session and action-revision guards used by the
     // business layer.
     if kind == RealtimeSignalKind::ScreenShareConsent {
-        validate_screen_share_consent(&payload, realtime_id, Some(peer_id))?;
+        let expected_shared = state
+            .realtime
+            .lock()
+            .await
+            .sessions
+            .get(realtime_id)
+            .map(|session| session.shared_session_instance_id.clone());
+        validate_screen_share_consent(
+            &payload,
+            realtime_id,
+            Some(peer_id),
+            expected_shared.as_deref(),
+        )?;
         emit_realtime_signal(
             &state.event_tx,
             realtime_id,
@@ -624,7 +671,14 @@ async fn handle_realtime_signal(
     if kind == RealtimeSignalKind::WebRtcClose {
         let generation = {
             let mut manager = state.realtime.lock().await;
-            close_remote_realtime_session(state, &mut manager, realtime_id, peer_id, revision)?
+            close_remote_realtime_session(
+                state,
+                &mut manager,
+                realtime_id,
+                peer_id,
+                revision,
+                &shared_session_instance_id,
+            )?
         };
         state
             .task_supervisor
@@ -645,6 +699,7 @@ async fn handle_realtime_signal(
             RealtimeSessionState::Closed as i32,
             revision,
             generation,
+            &shared_session_instance_id,
             None,
         );
         return Ok(());
@@ -679,6 +734,7 @@ async fn handle_realtime_signal(
             realtime_id,
             peer_id,
             InboundSignal {
+                shared_session_instance_id,
                 kind,
                 revision,
                 payload: payload.clone(),
@@ -754,6 +810,7 @@ async fn handle_realtime_signal(
         outcome.state as i32,
         outcome.revision,
         outcome.generation,
+        &outcome.shared_session_instance_id,
         None,
     );
     if let Some(outbound) = outcome.outbound {
@@ -795,6 +852,11 @@ fn apply_signal(
         realtime_id,
         peer_id,
         InboundSignal {
+            shared_session_instance_id: manager
+                .sessions
+                .get(realtime_id)
+                .map(|session| session.shared_session_instance_id.clone())
+                .unwrap_or_else(new_shared_session_instance_id),
             kind,
             revision,
             payload,
@@ -814,12 +876,18 @@ fn take_remote_closed_session(
     realtime_id: &str,
     peer_id: &str,
     revision: u64,
+    shared_session_instance_id: &str,
 ) -> Result<(RealtimeSession, u64), Box<dyn std::error::Error + Send + Sync>> {
     let Some(session) = manager.sessions.get(realtime_id) else {
         return Err(boxed_message("realtime session does not exist"));
     };
     if session.peer_id != peer_id {
         return Err(boxed_message("realtime signal peer does not match session"));
+    }
+    if session.shared_session_instance_id != shared_session_instance_id {
+        return Err(boxed_message(
+            "realtime signal session instance does not match session",
+        ));
     }
     if revision <= session.remote_revision {
         return Err(boxed_message("stale realtime signaling revision"));
@@ -842,9 +910,15 @@ fn close_remote_realtime_session(
     realtime_id: &str,
     peer_id: &str,
     revision: u64,
+    shared_session_instance_id: &str,
 ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-    let (mut session, generation) =
-        take_remote_closed_session(manager, realtime_id, peer_id, revision)?;
+    let (mut session, generation) = take_remote_closed_session(
+        manager,
+        realtime_id,
+        peer_id,
+        revision,
+        shared_session_instance_id,
+    )?;
     crate::realtime_media::invalidate_realtime(state, realtime_id);
     let _ = with_session_peer(&mut session, WebRtcPeer::close);
     Ok(generation)
@@ -859,16 +933,24 @@ fn apply_signal_with_driver(
     connection_session_id: Option<SessionId>,
 ) -> Result<SignalOutcome, Box<dyn std::error::Error + Send + Sync>> {
     let InboundSignal {
+        shared_session_instance_id,
         kind,
         revision,
         payload,
     } = signal;
+    validate_shared_session_instance_id(&shared_session_instance_id)?;
     if kind == RealtimeSignalKind::WebRtcClose {
-        let (mut session, generation) =
-            take_remote_closed_session(manager, realtime_id, peer_id, revision)?;
+        let (mut session, generation) = take_remote_closed_session(
+            manager,
+            realtime_id,
+            peer_id,
+            revision,
+            &shared_session_instance_id,
+        )?;
         let _ = with_session_peer(&mut session, WebRtcPeer::close);
         return Ok(SignalOutcome {
             peer_id: peer_id.to_string(),
+            shared_session_instance_id,
             revision,
             generation,
             state: RealtimeSessionState::Closed,
@@ -879,6 +961,11 @@ fn apply_signal_with_driver(
     if let Some(session) = manager.sessions.get(realtime_id) {
         if session.peer_id != peer_id {
             return Err(boxed_message("realtime signal peer does not match session"));
+        }
+        if session.shared_session_instance_id != shared_session_instance_id {
+            return Err(boxed_message(
+                "realtime signal session instance does not match session",
+            ));
         }
         match kind {
             RealtimeSignalKind::IceCandidate => {
@@ -906,6 +993,7 @@ fn apply_signal_with_driver(
                 None => match pending_driver {
                     Some(driver) => RealtimeSession {
                         peer_id: peer_id.to_string(),
+                        shared_session_instance_id: shared_session_instance_id.clone(),
                         connection_session_id,
                         peer: None,
                         driver: Some(driver),
@@ -916,6 +1004,7 @@ fn apply_signal_with_driver(
                     },
                     None => RealtimeSession {
                         peer_id: peer_id.to_string(),
+                        shared_session_instance_id: shared_session_instance_id.clone(),
                         connection_session_id,
                         peer: Some(
                             WebRtcPeer::new(WebRtcConfig::default())
@@ -980,12 +1069,14 @@ fn apply_signal_with_driver(
                 .ok_or_else(|| boxed_message("realtime session generation missing"))?;
             Ok(SignalOutcome {
                 peer_id: peer_id.clone(),
+                shared_session_instance_id: shared_session_instance_id.clone(),
                 revision: answer_revision,
                 generation,
                 state: RealtimeSessionState::Negotiating,
                 outbound: Some(OutboundSignal {
                     realtime_id: realtime_id.to_string(),
                     peer_id,
+                    shared_session_instance_id: shared_session_instance_id.clone(),
                     kind: RealtimeSignalKind::WebRtcAnswer,
                     revision: answer_revision,
                     payload: answer.sdp.into_bytes(),
@@ -1008,6 +1099,7 @@ fn apply_signal_with_driver(
             session.remote_revision = revision;
             Ok(SignalOutcome {
                 peer_id: session.peer_id.clone(),
+                shared_session_instance_id: session.shared_session_instance_id.clone(),
                 revision: session.revision,
                 generation,
                 state: RealtimeSessionState::Connected,
@@ -1028,6 +1120,7 @@ fn apply_signal_with_driver(
             session.seen_candidates.insert(payload);
             Ok(SignalOutcome {
                 peer_id: session.peer_id.clone(),
+                shared_session_instance_id: session.shared_session_instance_id.clone(),
                 revision: session.revision,
                 generation,
                 state: RealtimeSessionState::Negotiating,
@@ -1051,12 +1144,14 @@ fn apply_signal_with_driver(
             session.seen_candidates.clear();
             Ok(SignalOutcome {
                 peer_id: session.peer_id.clone(),
+                shared_session_instance_id: session.shared_session_instance_id.clone(),
                 revision: session.revision,
                 generation,
                 state: RealtimeSessionState::Restarting,
                 outbound: Some(OutboundSignal {
                     realtime_id: realtime_id.to_string(),
                     peer_id: session.peer_id.clone(),
+                    shared_session_instance_id: session.shared_session_instance_id.clone(),
                     kind: RealtimeSignalKind::WebRtcOffer,
                     revision: session.revision,
                     payload: offer.sdp.into_bytes(),
@@ -1168,6 +1263,8 @@ async fn run_realtime_session_io(
                 if let Err(error) = result {
                     let revision = session_revision(&state, &realtime_id).await;
                     let generation = session_generation(&state, &realtime_id).await;
+                    let shared_session_instance_id =
+                        session_shared_session_instance_id(&state, &realtime_id).await;
                     emit_realtime_state(
                         &state.event_tx,
                         &realtime_id,
@@ -1175,6 +1272,7 @@ async fn run_realtime_session_io(
                         RealtimeSessionState::Failed as i32,
                         revision,
                         generation,
+                        &shared_session_instance_id,
                         Some(realtime_error(
                             network_protocol::NetworkErrorCode::IoError,
                             error.to_string(),
@@ -1223,6 +1321,8 @@ async fn handle_io_event(
         RealtimeIoEvent::PeerConnected => {
             let revision = session_revision(state, realtime_id).await;
             let generation = session_generation(state, realtime_id).await;
+            let shared_session_instance_id =
+                session_shared_session_instance_id(state, realtime_id).await;
             emit_realtime_state(
                 &state.event_tx,
                 realtime_id,
@@ -1230,6 +1330,7 @@ async fn handle_io_event(
                 RealtimeSessionState::Connected as i32,
                 revision,
                 generation,
+                &shared_session_instance_id,
                 None,
             );
             // Session 稳定后发布完整快照；订阅方在 delta 状态之后看到一致快照。
@@ -1240,6 +1341,7 @@ async fn handle_io_event(
                 RealtimeSessionState::Connected as i32,
                 revision,
                 generation,
+                &shared_session_instance_id,
                 None,
             );
             false
@@ -1248,6 +1350,8 @@ async fn handle_io_event(
         | RealtimeIoEvent::PeerFailed
         | RealtimeIoEvent::IceFailed => {
             let generation = session_generation(state, realtime_id).await;
+            let shared_session_instance_id =
+                session_shared_session_instance_id(state, realtime_id).await;
             emit_realtime_state(
                 &state.event_tx,
                 realtime_id,
@@ -1255,6 +1359,7 @@ async fn handle_io_event(
                 RealtimeSessionState::Failed as i32,
                 session_revision(state, realtime_id).await,
                 generation,
+                &shared_session_instance_id,
                 Some(realtime_error(
                     network_protocol::NetworkErrorCode::IoError,
                     "WebRTC peer connection terminated",
@@ -1367,7 +1472,9 @@ pub(crate) async fn close_realtime_sessions_for_session(
             crate::realtime_media::invalidate_realtime(state, realtime_id);
         })
     };
-    for (realtime_id, session_peer_id, close_revision, generation) in closed {
+    for (realtime_id, session_peer_id, close_revision, generation, shared_session_instance_id) in
+        closed
+    {
         state
             .task_supervisor
             .cancel_session(&realtime_task_key(&realtime_id))
@@ -1379,6 +1486,7 @@ pub(crate) async fn close_realtime_sessions_for_session(
             RealtimeSessionState::Closed as i32,
             close_revision,
             generation,
+            &shared_session_instance_id,
             None,
         );
     }
@@ -1420,18 +1528,33 @@ async fn session_generation(state: &RuntimeState, realtime_id: &str) -> u64 {
         .unwrap_or_default()
 }
 
+async fn session_shared_session_instance_id(state: &RuntimeState, realtime_id: &str) -> String {
+    state
+        .realtime
+        .lock()
+        .await
+        .sessions
+        .get(realtime_id)
+        .map(|session| session.shared_session_instance_id.clone())
+        .unwrap_or_default()
+}
+
 async fn forward_local_candidate(
     state: &RuntimeState,
     realtime_id: &str,
     peer_id: &str,
     candidate: IceCandidate,
 ) {
-    let (session_peer_id, revision) = {
+    let (session_peer_id, shared_session_instance_id, revision) = {
         let sessions = state.realtime.lock().await;
         let Some(session) = sessions.sessions.get(realtime_id) else {
             return;
         };
-        (session.peer_id.clone(), session.ice_revision)
+        (
+            session.peer_id.clone(),
+            session.shared_session_instance_id.clone(),
+            session.ice_revision,
+        )
     };
     if session_peer_id != peer_id {
         return;
@@ -1440,6 +1563,7 @@ async fn forward_local_candidate(
     let outbound = OutboundSignal {
         realtime_id: realtime_id.to_owned(),
         peer_id: peer_id.to_owned(),
+        shared_session_instance_id,
         kind: RealtimeSignalKind::IceCandidate,
         revision,
         payload,
@@ -1472,6 +1596,62 @@ async fn validate_peer(
         ));
     }
     Ok(())
+}
+
+const SHARED_SESSION_INSTANCE_ID_BYTES: usize = 16;
+const SHARED_SESSION_INSTANCE_ID_HEX_LEN: usize = SHARED_SESSION_INSTANCE_ID_BYTES * 2;
+
+fn new_shared_session_instance_id() -> String {
+    let mut bytes = [0_u8; SHARED_SESSION_INSTANCE_ID_BYTES];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
+
+fn validate_shared_session_instance_id(
+    id: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if id.len() != SHARED_SESSION_INSTANCE_ID_HEX_LEN
+        || id != id.to_ascii_lowercase()
+        || hex::decode(id).map_or(true, |bytes| {
+            bytes.len() != SHARED_SESSION_INSTANCE_ID_BYTES
+        })
+    {
+        return Err(boxed_message(
+            "shared_session_instance_id must be 32 lowercase hexadecimal characters",
+        ));
+    }
+    Ok(())
+}
+
+fn encode_realtime_signal_payload(
+    shared_session_instance_id: &str,
+    payload: &[u8],
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    validate_shared_session_instance_id(shared_session_instance_id)?;
+    let encoded = RealtimeSignalEnvelope {
+        shared_session_instance_id: shared_session_instance_id.to_owned(),
+        payload: payload.to_vec(),
+    }
+    .encode_to_vec();
+    if encoded.len() > MAX_REALTIME_SIGNAL_PAYLOAD_BYTES {
+        return Err(boxed_message("realtime signal envelope is outside bounds"));
+    }
+    Ok(encoded)
+}
+
+fn decode_realtime_signal_payload(
+    payload: &[u8],
+) -> Result<(String, Vec<u8>), Box<dyn std::error::Error + Send + Sync>> {
+    if payload.is_empty() || payload.len() > MAX_REALTIME_SIGNAL_PAYLOAD_BYTES {
+        return Err(boxed_message("realtime signal envelope is outside bounds"));
+    }
+    let envelope = RealtimeSignalEnvelope::decode(payload)
+        .map_err(|error| boxed_message(format!("malformed realtime signal envelope: {error}")))?;
+    validate_shared_session_instance_id(&envelope.shared_session_instance_id)?;
+    if envelope.payload.len() > MAX_REALTIME_SIGNAL_PAYLOAD_BYTES {
+        return Err(boxed_message("realtime signal payload is outside bounds"));
+    }
+    Ok((envelope.shared_session_instance_id, envelope.payload))
 }
 
 fn validate_realtime_id(id: &str) -> Result<(), network_protocol::NetworkError> {
@@ -1533,6 +1713,7 @@ fn validate_screen_share_consent(
     payload: &[u8],
     expected_realtime_id: &str,
     expected_sender_peer_id: Option<&str>,
+    expected_shared_session_instance_id: Option<&str>,
 ) -> Result<ScreenShareConsentV2, Box<dyn std::error::Error + Send + Sync>> {
     if payload.is_empty() || payload.len() > 4096 {
         return Err(boxed_message(
@@ -1555,6 +1736,14 @@ fn validate_screen_share_consent(
         return Err(boxed_message(
             "screen-share consent realtime_id does not match signal",
         ));
+    }
+    validate_shared_session_instance_id(&consent.shared_session_instance_id)?;
+    if let Some(expected) = expected_shared_session_instance_id {
+        if consent.shared_session_instance_id != expected {
+            return Err(boxed_message(
+                "screen-share consent session instance does not match signal",
+            ));
+        }
     }
     if consent.issued_at_ms == 0
         || consent.expires_at_ms <= consent.issued_at_ms
@@ -1620,6 +1809,16 @@ async fn send_signal(
             "Relay signaling route is disconnected",
         ));
     }
+    let payload =
+        encode_realtime_signal_payload(&signal.shared_session_instance_id, &signal.payload)
+            .map_err(|error| {
+                realtime_error(
+                    network_protocol::NetworkErrorCode::InvalidArgument,
+                    error.to_string(),
+                    "send_realtime_signal",
+                    &signal.peer_id,
+                )
+            })?;
     let kind = to_v2_signal_kind(signal.kind);
     control
         .signal_webrtc_wire_kind(
@@ -1627,7 +1826,7 @@ async fn send_signal(
             &signal.peer_id,
             kind,
             signal.revision,
-            &signal.payload,
+            &payload,
         )
         .await
         .map_err(|error| {

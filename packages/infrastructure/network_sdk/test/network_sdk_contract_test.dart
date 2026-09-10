@@ -914,6 +914,9 @@ final class _FakeRealtimeSession implements RealtimeSession {
   int? get generation => null;
 
   @override
+  String? get sharedSessionInstanceId => null;
+
+  @override
   RealtimeSessionToken? get mediaToken => null;
 
   @override

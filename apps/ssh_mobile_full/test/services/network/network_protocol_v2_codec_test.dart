@@ -233,6 +233,7 @@ void main() {
     final consent = RealtimeConsent(
       operationId: 'operation-a',
       realtimeId: '00112233445566778899aabbccddeeff',
+      sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
       issuedAt: issued,
       expiresAt: issued.add(const Duration(minutes: 1)),
       decision: RealtimeConsentDecision.request,

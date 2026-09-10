@@ -65,6 +65,7 @@ final class RealtimeClientImpl implements RealtimeClient {
           event.error,
           revision: event.revision,
           generation: event.generation,
+          sharedSessionInstanceId: event.sharedSessionInstanceId,
         );
       case RealtimeSnapshotBackendEvent(:final snapshot):
         final session = _sessions[snapshot.realtimeId];
@@ -112,6 +113,17 @@ final class RealtimeClientImpl implements RealtimeClient {
         ),
       );
     }
+    if (consent.sharedSessionInstanceId != session.sharedSessionInstanceId) {
+      return SdkFailure(
+        NetworkError(
+          code: NetworkErrorCode.staleOperation,
+          message:
+              'Consent does not match the active Realtime session instance.',
+          operation: NetworkOperation.send,
+          peerId: session.peerId,
+        ),
+      );
+    }
     final backend = _backend;
     if (backend is! RealtimeConsentBackend) {
       return SdkFailure(
@@ -152,6 +164,7 @@ final class _RealtimeSession implements RealtimeSession {
   RealtimeAudioState _audioState = RealtimeAudioState.unavailable;
   int _revision = 0;
   int? _generation;
+  String? _sharedSessionInstanceId;
   bool _awaitingGenerationAdvance = false;
   Future<SdkResult<void>>? _startFuture;
   Future<SdkResult<void>>? _stopFuture;
@@ -174,6 +187,9 @@ final class _RealtimeSession implements RealtimeSession {
 
   @override
   int? get generation => _generation;
+
+  @override
+  String? get sharedSessionInstanceId => _sharedSessionInstanceId;
 
   @override
   RealtimeSessionToken? get mediaToken {
@@ -214,6 +230,10 @@ final class _RealtimeSession implements RealtimeSession {
     // WebRTC peer). Reset the recorded revision so the new generation's low
     // revisions are not mistaken for stale events from the previous session.
     _revision = 0;
+    // The next native start creates a new cross-device session instance. Do
+    // not let delayed consent from the previous instance remain admissible
+    // while the new native state event is still in flight.
+    _sharedSessionInstanceId = null;
     _awaitingGenerationAdvance = _generation != null;
     _stopCommandCompleted = false;
     _state = RealtimeSessionState.starting;
@@ -282,6 +302,7 @@ final class _RealtimeSession implements RealtimeSession {
     NetworkError? error, {
     int revision = 0,
     int? generation,
+    String? sharedSessionInstanceId,
   }) {
     if (_disposed) return;
     if (generation != null) {
@@ -307,11 +328,19 @@ final class _RealtimeSession implements RealtimeSession {
     // never advance the revision. revision == 0 is the legacy/unspecified
     // marker: it always applies its state but never advances `_revision`.
     if (revision > 0 && _revision > 0 && revision < _revision) return;
+    if (sharedSessionInstanceId != null &&
+        !RegExp(r'^[0-9a-f]{32}$').hasMatch(sharedSessionInstanceId)) {
+      return;
+    }
     _state = error == null ? state : RealtimeSessionState.failed;
     if (revision > _revision) _revision = revision;
+    if (sharedSessionInstanceId != null) {
+      _sharedSessionInstanceId = sharedSessionInstanceId;
+    }
     if (_state == RealtimeSessionState.stopped ||
         _state == RealtimeSessionState.failed) {
       _stopCommandCompleted = false;
+      _sharedSessionInstanceId = null;
     }
   }
 
@@ -322,6 +351,7 @@ final class _RealtimeSession implements RealtimeSession {
       snapshot.error,
       revision: snapshot.revision,
       generation: snapshot.generation,
+      sharedSessionInstanceId: snapshot.sharedSessionInstanceId,
     );
   }
 
@@ -333,6 +363,7 @@ final class _RealtimeSession implements RealtimeSession {
   void _applyConsent(RealtimeConsent consent) {
     if (_disposed || consent.isExpired()) return;
     if (consent.realtimeId != realtimeId) return;
+    if (consent.sharedSessionInstanceId != _sharedSessionInstanceId) return;
     _consents.add(consent);
   }
 

@@ -994,6 +994,7 @@ RealtimeConsent _testConsent({
   return RealtimeConsent(
     operationId: 'operation-a',
     realtimeId: '00112233445566778899aabbccddeeff',
+    sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
     issuedAt: issued,
     expiresAt: issued.add(const Duration(minutes: 1)),
     decision: decision,
@@ -1006,6 +1007,7 @@ NativeScreenShareConsent _nativeTestConsent() => NativeScreenShareConsent(
   schemaVersion: 2,
   operationId: 'operation-a',
   realtimeId: '00112233445566778899aabbccddeeff',
+  sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
   issuedAtMs: DateTime.utc(2030, 1, 1, 12).millisecondsSinceEpoch,
   expiresAtMs: DateTime.utc(2030, 1, 1, 12, 1).millisecondsSinceEpoch,
   decision: NativeScreenShareConsentDecision.request,

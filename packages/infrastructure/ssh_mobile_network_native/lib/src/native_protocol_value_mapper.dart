@@ -72,6 +72,26 @@ final class _NativeProtocolValueMapper {
     }
   }
 
+  void validateSharedSessionInstanceId(String value) {
+    if (value.length != _sharedSessionInstanceIdBytes ||
+        value != value.toLowerCase() ||
+        !isLowerHex(value)) {
+      throw ArgumentError.value(
+        value,
+        'sharedSessionInstanceId',
+        'Must be 32 lowercase hexadecimal characters.',
+      );
+    }
+  }
+
+  void validateDecodedSharedSessionInstanceId(String value) {
+    try {
+      validateSharedSessionInstanceId(value);
+    } on ArgumentError catch (error) {
+      throw FormatException(error.message);
+    }
+  }
+
   void validateDecodedRealtimeId(String value) {
     try {
       validateRealtimeId(value);

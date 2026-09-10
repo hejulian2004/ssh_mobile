@@ -516,6 +516,9 @@ message RealtimeStateChangedEvent {
   // Native-owned media/session generation. This is independent from the
   // signaling revision and binds endpoint operations to one PeerConnection.
   uint64 generation = 6;
+  // Cross-device session instance identity used for consent replay isolation.
+  // This is independent from the process-local native generation.
+  string shared_session_instance_id = 7;
 }
 
 message RealtimeSignalEvent {
@@ -541,6 +544,17 @@ message ScreenShareConsentV2 {
   ScreenShareMediaKind media = 9;
   bool requires_acceptance = 10;
   uint64 action_revision = 11;
+  // Cross-device session instance identity; never use native generation here.
+  string shared_session_instance_id = 12;
+}
+
+// Native-only envelope for WebRTC signaling payloads. The relay forwards this
+// as opaque bytes; the native realtime owner unwraps it before handing SDP,
+// ICE or close bytes to WebRTC. This binds every signal to one shared session
+// instance without exposing process-local native generation on the wire.
+message RealtimeSignalEnvelope {
+  string shared_session_instance_id = 1;
+  bytes payload = 2;
 }
 
 // Realtime Session 稳定后发布的完整状态快照。
@@ -552,6 +566,8 @@ message RealtimeSnapshotEvent {
   NetworkError error = 5;
   // Native-owned media/session generation; never derive this from revision.
   uint64 generation = 6;
+  // Cross-device session instance identity used for consent replay isolation.
+  string shared_session_instance_id = 7;
 }
 
 message ChannelMessageEvent {

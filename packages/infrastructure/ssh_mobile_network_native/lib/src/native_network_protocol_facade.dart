@@ -178,6 +178,9 @@ final class NativeNetworkProtocol {
         _values.utf8ByteLength(consent.operationId) >
             _maxScreenShareOperationIdBytes ||
         consent.realtimeId.isEmpty ||
+        consent.sharedSessionInstanceId.isEmpty ||
+        _values.utf8ByteLength(consent.sharedSessionInstanceId) !=
+            _sharedSessionInstanceIdBytes ||
         consent.issuedAtMs <= 0 ||
         consent.expiresAtMs <= consent.issuedAtMs ||
         consent.expiresAtMs - consent.issuedAtMs >
@@ -192,10 +195,12 @@ final class NativeNetworkProtocol {
       throw ArgumentError.value(consent, 'consent', 'Invalid consent payload.');
     }
     _values.validateRealtimeId(consent.realtimeId);
+    _values.validateSharedSessionInstanceId(consent.sharedSessionInstanceId);
     return (_ProtoWriter()
           ..varint(1, consent.schemaVersion)
           ..string(2, consent.operationId)
           ..string(3, consent.realtimeId)
+          ..string(12, consent.sharedSessionInstanceId)
           ..varint(4, consent.issuedAtMs)
           ..varint(5, consent.expiresAtMs)
           ..varint(6, consent.decision.wireValue)

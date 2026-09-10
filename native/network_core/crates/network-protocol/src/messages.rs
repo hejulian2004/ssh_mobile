@@ -57,6 +57,17 @@ pub struct NetworkErrorEnvelope {
     pub error: Option<NetworkError>,
 }
 
+/// Native-only envelope carried as opaque Relay signaling payload bytes. It
+/// binds SDP/ICE/close signaling to the same cross-device session instance;
+/// the process-local native generation is intentionally not serialized here.
+#[derive(Clone, PartialEq, Message)]
+pub struct RealtimeSignalEnvelope {
+    #[prost(string, tag = "1")]
+    pub shared_session_instance_id: String,
+    #[prost(bytes = "vec", tag = "2")]
+    pub payload: Vec<u8>,
+}
+
 /// Current screen-share consent metadata carried by the dedicated realtime
 /// consent signal. This message never contains media, SDP, ICE or secrets.
 #[derive(Clone, PartialEq, Message)]
@@ -83,4 +94,6 @@ pub struct ScreenShareConsentV2 {
     pub requires_acceptance: bool,
     #[prost(uint64, tag = "11")]
     pub action_revision: u64,
+    #[prost(string, tag = "12")]
+    pub shared_session_instance_id: String,
 }

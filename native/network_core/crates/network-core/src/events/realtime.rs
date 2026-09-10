@@ -15,6 +15,7 @@ pub(crate) fn emit_realtime_state(
     state: i32,
     revision: u64,
     generation: u64,
+    shared_session_instance_id: &str,
     error: Option<ProtocolError>,
 ) {
     let _ = event_tx.send(NetworkEvent {
@@ -29,6 +30,7 @@ pub(crate) fn emit_realtime_state(
                 revision,
                 error,
                 generation,
+                shared_session_instance_id: shared_session_instance_id.to_owned(),
             },
         )),
     });
@@ -68,6 +70,7 @@ pub(crate) fn emit_realtime_snapshot(
     state: i32,
     revision: u64,
     generation: u64,
+    shared_session_instance_id: &str,
     error: Option<ProtocolError>,
 ) {
     let _ = event_tx.send(NetworkEvent {
@@ -82,6 +85,7 @@ pub(crate) fn emit_realtime_snapshot(
                 revision,
                 error,
                 generation,
+                shared_session_instance_id: shared_session_instance_id.to_owned(),
             },
         )),
     });

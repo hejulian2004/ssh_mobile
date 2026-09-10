@@ -68,6 +68,7 @@ fn realtime_snapshot_event_round_trips_state_and_revision() {
         state: RealtimeSessionState::Connected as i32,
         revision: 7,
         generation: 11,
+        shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
         error: Some(NetworkError {
             code: NetworkErrorCode::IdentityConflict as i32,
             message: "identity conflict".into(),
@@ -84,6 +85,10 @@ fn realtime_snapshot_event_round_trips_state_and_revision() {
     assert_eq!(decoded.state, RealtimeSessionState::Connected as i32);
     assert_eq!(decoded.revision, 7);
     assert_eq!(decoded.generation, 11);
+    assert_eq!(
+        decoded.shared_session_instance_id,
+        "00112233445566778899aabbccddeeff"
+    );
     let error = decoded.error.expect("snapshot error");
     assert_eq!(error.code, NetworkErrorCode::IdentityConflict as i32);
     assert_eq!(error.retry_disposition, RetryDisposition::NoRetry as i32);
@@ -419,6 +424,7 @@ fn screen_share_consent_wire_values_and_payload_round_trip() {
         media: ScreenShareMediaKind::ScreenVideo as i32,
         requires_acceptance: true,
         action_revision: 1,
+        shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
     };
     let decoded = ScreenShareConsentV2::decode(consent.encode_to_vec().as_slice())
         .expect("decode consent payload");
@@ -428,4 +434,8 @@ fn screen_share_consent_wire_values_and_payload_round_trip() {
     assert_eq!(decoded.decision, ScreenShareConsentDecision::Request as i32);
     assert!(decoded.requires_acceptance);
     assert_eq!(decoded.action_revision, 1);
+    assert_eq!(
+        decoded.shared_session_instance_id,
+        "00112233445566778899aabbccddeeff"
+    );
 }
