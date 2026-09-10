@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::time::Instant;
 
 use rtc::peer_connection::configuration::media_engine::{MediaEngine, MIME_TYPE_H264};
@@ -17,6 +18,10 @@ use super::{
 const H264_RTP_PAYLOAD_TYPE: u8 = 102;
 const H264_RTP_MTU: usize = 1_200;
 const MIN_PLI_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+// Packets arriving within this sequence distance may still repair a loss
+// estimate. Older packets are treated as stale so the accounting remains
+// bounded and cannot be kept alive by arbitrarily delayed traffic.
+const RTP_REORDER_WINDOW: u64 = 128;
 
 /// Bounded queue/recovery counters for one native H.264 screen-video
 /// direction. Platform owners may expose these as low-frequency metadata; no
@@ -123,7 +128,11 @@ pub(crate) struct H264ScreenVideo {
     packets_lost: u64,
     frames_recovered: u64,
     recovery_pending: bool,
-    last_inbound_sequence: Option<u16>,
+    first_inbound_extended_sequence: Option<u64>,
+    highest_inbound_extended_sequence: Option<u64>,
+    inbound_received_sequences: BTreeSet<u64>,
+    inbound_unique_packets: u64,
+    inbound_lost_baseline: u64,
     last_inbound_timestamp: Option<u32>,
     last_inbound_arrival: Option<Instant>,
     jitter_rtp_units: u64,
@@ -161,7 +170,11 @@ impl H264ScreenVideo {
             packets_lost: 0,
             frames_recovered: 0,
             recovery_pending: false,
-            last_inbound_sequence: None,
+            first_inbound_extended_sequence: None,
+            highest_inbound_extended_sequence: None,
+            inbound_received_sequences: BTreeSet::new(),
+            inbound_unique_packets: 0,
+            inbound_lost_baseline: 0,
             last_inbound_timestamp: None,
             last_inbound_arrival: None,
             jitter_rtp_units: 0,
@@ -189,20 +202,45 @@ impl H264ScreenVideo {
     fn observe_inbound_packet(&mut self, packet: &rtc::rtp::Packet, now: Instant) {
         self.packets_received = self.packets_received.saturating_add(1);
 
-        if let Some(previous) = self.last_inbound_sequence {
-            let delta = packet.header.sequence_number.wrapping_sub(previous);
-            // A forward jump in the RTP sequence space represents one or more
-            // missing packets. Equal/backward values are duplicates or late
-            // reordering and must not inflate loss counters.
-            if delta > 0 && delta <= u16::MAX / 2 {
-                self.packets_lost = self
-                    .packets_lost
-                    .saturating_add(u64::from(delta.saturating_sub(1)));
-                self.last_inbound_sequence = Some(packet.header.sequence_number);
-            }
-        } else {
-            self.last_inbound_sequence = Some(packet.header.sequence_number);
+        let extended_sequence = self.extend_inbound_sequence(packet.header.sequence_number);
+        if self.first_inbound_extended_sequence.is_none() {
+            self.first_inbound_extended_sequence = Some(extended_sequence);
         }
+        if self
+            .highest_inbound_extended_sequence
+            .is_none_or(|highest| extended_sequence > highest)
+        {
+            self.highest_inbound_extended_sequence = Some(extended_sequence);
+        }
+        let highest = self
+            .highest_inbound_extended_sequence
+            .expect("highest inbound sequence is initialized above");
+        let lower_bound = highest.saturating_sub(RTP_REORDER_WINDOW);
+        if extended_sequence >= lower_bound
+            && self.inbound_received_sequences.insert(extended_sequence)
+        {
+            self.inbound_unique_packets = self.inbound_unique_packets.saturating_add(1);
+        }
+        while self
+            .inbound_received_sequences
+            .first()
+            .is_some_and(|oldest| *oldest < lower_bound)
+        {
+            let oldest = *self
+                .inbound_received_sequences
+                .first()
+                .expect("sequence window was non-empty above");
+            self.inbound_received_sequences.remove(&oldest);
+        }
+        let expected = highest
+            .saturating_sub(
+                self.first_inbound_extended_sequence
+                    .expect("first inbound sequence is initialized above"),
+            )
+            .saturating_add(1);
+        self.packets_lost = self
+            .inbound_lost_baseline
+            .saturating_add(expected.saturating_sub(self.inbound_unique_packets));
 
         if let (Some(previous_timestamp), Some(previous_arrival)) =
             (self.last_inbound_timestamp, self.last_inbound_arrival)
@@ -244,10 +282,26 @@ impl H264ScreenVideo {
     }
 
     fn reset_inbound_timing(&mut self) {
-        self.last_inbound_sequence = None;
+        self.inbound_lost_baseline = self.packets_lost;
+        self.first_inbound_extended_sequence = None;
+        self.highest_inbound_extended_sequence = None;
+        self.inbound_received_sequences.clear();
+        self.inbound_unique_packets = 0;
         self.last_inbound_timestamp = None;
         self.last_inbound_arrival = None;
         self.jitter_rtp_units = 0;
+    }
+
+    fn extend_inbound_sequence(&self, sequence: u16) -> u64 {
+        let Some(highest) = self.highest_inbound_extended_sequence else {
+            return u64::from(sequence);
+        };
+        let delta = sequence.wrapping_sub(highest as u16) as i16;
+        if delta >= 0 {
+            highest.saturating_add(delta as u64)
+        } else {
+            highest.saturating_sub(u64::from(delta.unsigned_abs()))
+        }
     }
 
     fn jitter_ms(&self) -> u64 {
