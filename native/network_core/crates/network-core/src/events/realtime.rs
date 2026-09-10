@@ -7,6 +7,27 @@ use network_protocol::{
     RealtimeSnapshotEvent, RealtimeStateChangedEvent, NETWORK_PROTOCOL_VERSION,
 };
 
+/// Identity carried by realtime state and snapshot events.
+///
+/// The process-local native generation protects media leases from stale
+/// owners, while the shared session instance ID isolates cross-device
+/// signaling and consent after reconnect. Keeping them together here reduces
+/// call-site drift without conflating their separate wire semantics.
+#[derive(Clone, Copy)]
+pub(crate) struct RealtimeSessionIdentity<'a> {
+    pub(crate) generation: u64,
+    pub(crate) shared_session_instance_id: &'a str,
+}
+
+impl<'a> RealtimeSessionIdentity<'a> {
+    pub(crate) const fn new(generation: u64, shared_session_instance_id: &'a str) -> Self {
+        Self {
+            generation,
+            shared_session_instance_id,
+        }
+    }
+}
+
 /// 发布 WebRTC realtime Session 的状态变化，不改变普通 Data Route 的状态。
 pub(crate) fn emit_realtime_state(
     event_tx: &EventSender,
@@ -14,8 +35,7 @@ pub(crate) fn emit_realtime_state(
     peer_id: &str,
     state: i32,
     revision: u64,
-    generation: u64,
-    shared_session_instance_id: &str,
+    session_identity: RealtimeSessionIdentity<'_>,
     error: Option<ProtocolError>,
 ) {
     let _ = event_tx.send(NetworkEvent {
@@ -29,8 +49,8 @@ pub(crate) fn emit_realtime_state(
                 state,
                 revision,
                 error,
-                generation,
-                shared_session_instance_id: shared_session_instance_id.to_owned(),
+                generation: session_identity.generation,
+                shared_session_instance_id: session_identity.shared_session_instance_id.to_owned(),
             },
         )),
     });
@@ -69,8 +89,7 @@ pub(crate) fn emit_realtime_snapshot(
     peer_id: &str,
     state: i32,
     revision: u64,
-    generation: u64,
-    shared_session_instance_id: &str,
+    session_identity: RealtimeSessionIdentity<'_>,
     error: Option<ProtocolError>,
 ) {
     let _ = event_tx.send(NetworkEvent {
@@ -84,8 +103,8 @@ pub(crate) fn emit_realtime_snapshot(
                 state,
                 revision,
                 error,
-                generation,
-                shared_session_instance_id: shared_session_instance_id.to_owned(),
+                generation: session_identity.generation,
+                shared_session_instance_id: session_identity.shared_session_instance_id.to_owned(),
             },
         )),
     });

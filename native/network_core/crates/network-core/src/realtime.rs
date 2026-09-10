@@ -30,7 +30,7 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use crate::events::{
     emit_realtime_signal, emit_realtime_snapshot, emit_realtime_state, protocol_error,
-    protocol_error_with_peer,
+    protocol_error_with_peer, RealtimeSessionIdentity,
 };
 use crate::runtime::RuntimeState;
 use crate::session::SessionId;
@@ -377,8 +377,7 @@ async fn start_session_with_config(
             &peer_id,
             RealtimeSessionState::Failed as i32,
             revision,
-            generation,
-            &shared_session_instance_id,
+            RealtimeSessionIdentity::new(generation, &shared_session_instance_id),
             Some(error.clone()),
         );
         return Err(error);
@@ -424,8 +423,7 @@ async fn start_session_with_config(
         &peer_id,
         RealtimeSessionState::Negotiating as i32,
         revision,
-        generation,
-        &shared_session_instance_id,
+        RealtimeSessionIdentity::new(generation, &shared_session_instance_id),
         None,
     );
     emit_realtime_signal(
@@ -484,8 +482,7 @@ pub(crate) async fn stop_session(
         &session.peer_id,
         RealtimeSessionState::Closed as i32,
         close_revision,
-        generation,
-        &session.shared_session_instance_id,
+        RealtimeSessionIdentity::new(generation, &session.shared_session_instance_id),
         None,
     );
     Ok(())
@@ -698,8 +695,7 @@ async fn handle_realtime_signal(
             peer_id,
             RealtimeSessionState::Closed as i32,
             revision,
-            generation,
-            &shared_session_instance_id,
+            RealtimeSessionIdentity::new(generation, &shared_session_instance_id),
             None,
         );
         return Ok(());
@@ -809,8 +805,7 @@ async fn handle_realtime_signal(
         &outcome.peer_id,
         outcome.state as i32,
         outcome.revision,
-        outcome.generation,
-        &outcome.shared_session_instance_id,
+        RealtimeSessionIdentity::new(outcome.generation, &outcome.shared_session_instance_id),
         None,
     );
     if let Some(outbound) = outcome.outbound {
@@ -1271,8 +1266,7 @@ async fn run_realtime_session_io(
                         &peer_id,
                         RealtimeSessionState::Failed as i32,
                         revision,
-                        generation,
-                        &shared_session_instance_id,
+                        RealtimeSessionIdentity::new(generation, &shared_session_instance_id),
                         Some(realtime_error(
                             network_protocol::NetworkErrorCode::IoError,
                             error.to_string(),
@@ -1329,8 +1323,7 @@ async fn handle_io_event(
                 peer_id,
                 RealtimeSessionState::Connected as i32,
                 revision,
-                generation,
-                &shared_session_instance_id,
+                RealtimeSessionIdentity::new(generation, &shared_session_instance_id),
                 None,
             );
             // Session 稳定后发布完整快照；订阅方在 delta 状态之后看到一致快照。
@@ -1340,8 +1333,7 @@ async fn handle_io_event(
                 peer_id,
                 RealtimeSessionState::Connected as i32,
                 revision,
-                generation,
-                &shared_session_instance_id,
+                RealtimeSessionIdentity::new(generation, &shared_session_instance_id),
                 None,
             );
             false
@@ -1358,8 +1350,7 @@ async fn handle_io_event(
                 peer_id,
                 RealtimeSessionState::Failed as i32,
                 session_revision(state, realtime_id).await,
-                generation,
-                &shared_session_instance_id,
+                RealtimeSessionIdentity::new(generation, &shared_session_instance_id),
                 Some(realtime_error(
                     network_protocol::NetworkErrorCode::IoError,
                     "WebRTC peer connection terminated",
@@ -1485,8 +1476,7 @@ pub(crate) async fn close_realtime_sessions_for_session(
             &session_peer_id,
             RealtimeSessionState::Closed as i32,
             close_revision,
-            generation,
-            &shared_session_instance_id,
+            RealtimeSessionIdentity::new(generation, &shared_session_instance_id),
             None,
         );
     }
