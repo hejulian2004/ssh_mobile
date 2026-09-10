@@ -49,6 +49,7 @@ void CaptureState::WaitForCallbacks() {
 
 bool CaptureState::ReleaseResources() {
   if (resources_released.load()) return true;
+  stopped.store(true);
   try {
     if (session != nullptr) session.Close();
     if (frame_pool != nullptr) frame_pool.Close();

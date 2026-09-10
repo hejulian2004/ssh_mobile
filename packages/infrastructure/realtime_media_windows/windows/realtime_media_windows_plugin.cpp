@@ -253,32 +253,25 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
   void StopOwner(const EncodableMap& arguments,
                  std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
     const auto owner_id = OwnerIdArgument(arguments);
-    if (!owner_id) {
+    const auto direction = StringArgument(arguments, "direction");
+    if (!owner_id || !direction ||
+        (*direction != "send" && *direction != "receive")) {
       ReplyError(result, "invalid_argument", "A native owner token is required.");
       return;
     }
     std::lock_guard<std::mutex> lock(mutex_);
     const auto decoder_status = decoder_manager_.Detach(*owner_id);
     const auto capture_status = capture_manager_.Stop(*owner_id);
-    if (capture_status != CaptureStatus::kOk &&
-        capture_status != CaptureStatus::kSourceEnded &&
-        capture_status != CaptureStatus::kNotFound) {
-      ReplyError(result, CaptureStatusCode(capture_status),
-                 "The Windows capture owner could not be stopped.");
-      return;
-    }
-    if (decoder_status != DecoderStatus::kOk &&
-        decoder_status != DecoderStatus::kNotFound) {
-      ReplyError(result, DecoderStatusCode(decoder_status),
-                 "The Windows decoder could not be stopped.");
-      return;
-    }
     if (!RefreshNativeMediaApi()) {
       ReplyError(result, kBackendFailure,
                  "The native media owner lifecycle is unavailable.");
       return;
     }
-    if (native_media_api_.detach_renderer != nullptr) {
+    // Renderer state exists only for receive owners. The native ABI
+    // intentionally returns direction-mismatch for detachRenderer(send), so
+    // do not turn an ordinary send capture stop into a lifecycle failure.
+    if (*direction == "receive" &&
+        native_media_api_.detach_renderer != nullptr) {
       const auto renderer_status = native_media_api_.detach_renderer(*owner_id);
       if (renderer_status != 0 && renderer_status != -12) {
         ReplyError(result, NativeStatusCode(renderer_status),
@@ -292,22 +285,6 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
                  "The native media owner could not be stopped.");
       return;
     }
-    result->Success();
-  }
-
-  void ReleaseOwner(const EncodableMap& arguments,
-                    std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
-    const auto owner_id = OwnerIdArgument(arguments);
-    if (!owner_id) {
-      ReplyError(result, "invalid_argument", "A native owner token is required.");
-      return;
-    }
-    std::lock_guard<std::mutex> lock(mutex_);
-    // Stop platform production before closing the generation-bound native
-    // owner. A retry after a native close failure still sees the same stopped
-    // capture record and cannot leak a frame callback.
-    const auto decoder_status = decoder_manager_.Release(*owner_id);
-    const auto capture_status = capture_manager_.Stop(*owner_id);
     if (capture_status != CaptureStatus::kOk &&
         capture_status != CaptureStatus::kSourceEnded &&
         capture_status != CaptureStatus::kNotFound) {
@@ -318,15 +295,34 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
     if (decoder_status != DecoderStatus::kOk &&
         decoder_status != DecoderStatus::kNotFound) {
       ReplyError(result, DecoderStatusCode(decoder_status),
-                 "The Windows decoder stopped with a terminal failure.");
+                 "The Windows decoder could not be stopped.");
       return;
     }
+    result->Success();
+  }
+
+  void ReleaseOwner(const EncodableMap& arguments,
+                    std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
+    const auto owner_id = OwnerIdArgument(arguments);
+    const auto direction = StringArgument(arguments, "direction");
+    if (!owner_id || !direction ||
+        (*direction != "send" && *direction != "receive")) {
+      ReplyError(result, "invalid_argument", "A native owner token is required.");
+      return;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Stop platform production before closing the generation-bound native
+    // owner. A retry after a native close failure still sees the same stopped
+    // capture record and cannot leak a frame callback.
+    const auto decoder_status = decoder_manager_.Release(*owner_id);
+    capture_manager_.Stop(*owner_id);
     if (!RefreshNativeMediaApi()) {
       ReplyError(result, kBackendFailure,
                  "The native media owner lifecycle is unavailable.");
       return;
     }
-    if (native_media_api_.detach_renderer != nullptr) {
+    if (*direction == "receive" &&
+        native_media_api_.detach_renderer != nullptr) {
       const auto renderer_status = native_media_api_.detach_renderer(*owner_id);
       if (renderer_status != 0 && renderer_status != -12) {
         ReplyError(result, NativeStatusCode(renderer_status),
@@ -346,12 +342,11 @@ class RealtimeMediaWindowsPlugin : public flutter::Plugin {
                  "The native media owner could not be closed.");
       return;
     }
-    const auto release_status = capture_manager_.Release(*owner_id);
-    if (release_status != CaptureStatus::kOk &&
-        release_status != CaptureStatus::kSourceEnded &&
-        release_status != CaptureStatus::kNotFound) {
-      ReplyError(result, CaptureStatusCode(release_status),
-                 "The Windows capture owner resources could not be released.");
+    capture_manager_.Release(*owner_id);
+    if (decoder_status != DecoderStatus::kOk &&
+        decoder_status != DecoderStatus::kNotFound) {
+      ReplyError(result, DecoderStatusCode(decoder_status),
+                 "The Windows decoder stopped with a terminal failure.");
       return;
     }
     result->Success();
