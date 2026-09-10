@@ -206,16 +206,11 @@ internal class AndroidMediaOwner(
     fun release(): String? {
         val detachFailure = detach()
         if (detachFailure != null) return detachFailure
-        var failure: String? = null
-        val stopStatus = NativeMediaBridge.stopOwner(token)
-        if (failure == null && stopStatus != 0 && stopStatus != -12) {
-            failure = statusCode(stopStatus)
-        }
-        val closeStatus = NativeMediaBridge.closeOwner(token)
-        if (failure == null && closeStatus != 0 && closeStatus != -12) {
-            failure = statusCode(closeStatus)
-        }
-        return failure
+        val nativeStatus = releaseNativeOwner(
+            stopOwner = { NativeMediaBridge.stopOwner(token) },
+            closeOwner = { NativeMediaBridge.closeOwner(token) },
+        )
+        return if (nativeStatus == 0) null else statusCode(nativeStatus)
     }
 
     fun onProjectionRevoked() {
