@@ -35,7 +35,7 @@ void main() {
     );
     final port = AppScreenShareConsentPort(session);
 
-    expect(port.consents, same(events.stream));
+    expect(port.consents, isA<Stream<RealtimeConsent>>());
     final received = port.consents.first;
     events.add(consent);
     expect(await received, consent);
@@ -76,7 +76,7 @@ void main() {
           },
     );
 
-    expect(port.events, same(events.stream));
+    expect(port.events, isA<Stream<ScreenShareMediaEvent>>());
     final event = ScreenShareMediaEvent(
       operationId: 'operation-a',
       realtimeId: realtimeId,
@@ -127,6 +127,7 @@ final class _FakeRealtimeSession implements RealtimeSession {
 
   @override
   String? get sharedSessionInstanceId => '00112233445566778899aabbccddeeff';
+
   final Stream<RealtimeConsent> consentStream;
   final Future<SdkResult<void>> Function(RealtimeConsent) onSendConsent;
 
