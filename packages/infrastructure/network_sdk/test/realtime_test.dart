@@ -491,6 +491,8 @@ void main() {
         sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
       ),
     );
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
     expect(session.sharedSessionInstanceId, '00112233445566778899aabbccddeeff');
     final received = <RealtimeConsent>[];
     final subscription = session.consentEvents.listen(received.add);
@@ -538,6 +540,7 @@ void main() {
         ),
       ),
     );
+    await Future<void>.delayed(Duration.zero);
     await Future<void>.delayed(Duration.zero);
     expect(received, hasLength(2));
     expect(received.map((consent) => consent.operationId), [
