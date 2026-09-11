@@ -33,8 +33,7 @@ class RealtimeMediaAndroidPlugin :
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
     private var projectionManager: MediaProjectionManager? = null
-    private var projection: MediaProjection? = null
-    private var projectionCallback: MediaProjection.Callback? = null
+    private var projectionLease: ProjectionLease? = null
     private var pendingProjectionResult: MethodChannel.Result? = null
     private val owners = HashMap<Long, AndroidMediaOwner>()
 
@@ -96,17 +95,28 @@ class RealtimeMediaAndroidPlugin :
                 pending.error("permission_denied", "MediaProjection grant is unavailable.", null)
                 return true
             }
-            projectionCallback = object : MediaProjection.Callback() {
+            lateinit var lease: ProjectionLease
+            val callback = object : MediaProjection.Callback() {
                 override fun onStop() {
-                    revokeProjection()
+                    lease.revoke()
                 }
             }
-            mediaProjection.registerCallback(projectionCallback!!, Handler(Looper.getMainLooper()))
-            projection = mediaProjection
+            lease = ProjectionLease(
+                mediaProjection = mediaProjection,
+                callback = callback,
+                onRevoked = { ownerToken -> revokeProjection(lease, ownerToken) },
+                onReleased = {
+                    if (projectionLease === lease) projectionLease = null
+                },
+            )
+            projectionLease = lease
+            mediaProjection.registerCallback(callback, Handler(Looper.getMainLooper()))
             pending.success(null)
         } catch (_: SecurityException) {
+            projectionLease?.releaseAfterResources()
             pending.error("permission_denied", "MediaProjection permission was rejected.", null)
         } catch (_: Exception) {
+            projectionLease?.releaseAfterResources()
             pending.error("backend_failure", "MediaProjection could not be initialized.", null)
         }
         return true
@@ -155,7 +165,7 @@ class RealtimeMediaAndroidPlugin :
                     }
                 }
                 val failure = try {
-                    owner.startCapture(projection, sourceId, sourceKind)
+                    owner.startCapture(projectionLease, sourceId, sourceKind)
                 } catch (_: Exception) {
                     "backend_failure"
                 }
@@ -255,8 +265,12 @@ class RealtimeMediaAndroidPlugin :
     }
 
     private fun requestProjection(result: MethodChannel.Result) {
-        if (projection != null) {
-            result.success(null)
+        if (projectionLease != null) {
+            error(
+                result,
+                "duplicate_endpoint",
+                "The existing MediaProjection grant is single-use; request a new grant after release.",
+            )
             return
         }
         if (pendingProjectionResult != null) {
@@ -302,15 +316,15 @@ class RealtimeMediaAndroidPlugin :
             error(result, "invalid_argument", "A native owner token is required.")
             return
         }
-        val owner = owners.remove(token)
+        val owner = owners[token]
         val failure = owner?.release()
             ?: if (NativeMediaBridge.closeOwner(token) == 0) null else "backend_failure"
         if (failure == null) {
+            if (owner != null) owners.remove(token)
             stopForegroundServiceIfUnused()
             result.success(null)
         } else {
             // Keep a failed owner in the map so a caller can retry cleanup.
-            if (owner != null) owners[token] = owner
             error(result, failure, "Android media owner release failed.")
         }
     }
@@ -386,11 +400,16 @@ class RealtimeMediaAndroidPlugin :
         return normalized.toInt()
     }
 
-    private fun revokeProjection() {
-        projection = null
-        owners.values
-            .filter { it.identity.direction == "send" && it.isCaptureOwnerActive() }
-            .forEach { it.onProjectionRevoked() }
+    private fun revokeProjection(lease: ProjectionLease, ownerToken: Long?) {
+        if (projectionLease !== lease) return
+        val owner = ownerToken?.let { owners[it] }
+        if (owner != null) {
+            owner.onProjectionRevoked()
+        } else {
+            // A grant revoked before it was consumed has no owner to notify;
+            // release it immediately so the next request gets a fresh grant.
+            lease.releaseAfterResources()
+        }
         stopForegroundServiceIfUnused()
     }
 
@@ -406,14 +425,11 @@ class RealtimeMediaAndroidPlugin :
         owners.toList().forEach { (token, owner) ->
             if (owner.release() == null) owners.remove(token)
         }
-        projection?.let {
-            try {
-                it.stop()
-            } catch (_: Exception) {
-                // Projection may already have been revoked.
+        projectionLease?.let { lease ->
+            if (lease.state != ProjectionLeaseState.CONSUMED) {
+                lease.releaseAfterResources()
             }
         }
-        projection = null
         stopForegroundServiceIfUnused()
     }
 

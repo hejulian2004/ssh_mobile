@@ -279,4 +279,24 @@ void main() {
       expect(healthy.bitrateKbps, 3 * 1024);
     },
   );
+
+  test('a decreasing packets-lost sample rebaselines without a loss spike', () {
+    final controller = RealtimeMediaAdaptationController();
+    final first = DateTime.utc(2026, 9, 8, 12);
+    final baseline = RealtimeMediaStats(
+      width: 1920,
+      height: 1080,
+      packetsReceived: 100,
+      packetsLost: 10,
+    );
+    controller.decide(baseline, now: first);
+
+    final repaired = controller.decide(
+      baseline.copyWith(packetsReceived: 110, packetsLost: 9),
+      now: first.add(const Duration(seconds: 1)),
+    );
+
+    expect(repaired.reason, RealtimeMediaAdaptationReason.steady);
+    expect(repaired.bitrateKbps, 3 * 1024);
+  });
 }

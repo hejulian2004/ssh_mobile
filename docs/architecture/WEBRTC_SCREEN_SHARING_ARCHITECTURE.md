@@ -1,4 +1,4 @@
-Last updated: 2026-09-09
+Last updated: 2026-09-11
 
 # WebRTC Screen Sharing Architecture
 
@@ -376,6 +376,15 @@ The Phase 1 encoded-frame model must carry at least:
 Frame payloads, SDP, TURN credentials, and complete ICE candidates must never be
 logged.
 
+Android's hardware H.264 owner keeps a bounded (64 KiB) SPS/PPS cache. Encoder
+codec configuration may arrive through either `BUFFER_FLAG_CODEC_CONFIG` or
+`INFO_OUTPUT_FORMAT_CHANGED` `csd-0`/`csd-1`; both are normalized to validated
+Annex-B parameter sets. The sender drops deltas until a complete CSD+IDR is
+accepted into the native bounded queue. A decoder learns CSD only from received
+Annex-B access units, replays its validated cache after flush, and drops deltas
+until a recovery IDR is queued. CSD cache overflow or malformed NAL units fail
+closed; codec-config is never sent as a standalone media frame.
+
 ## Consent and signaling
 
 Existing authenticated signaling carries offer, answer, ICE candidate, ICE
@@ -427,6 +436,16 @@ separate checks. Native generation is process-local media-lease freshness and
 never appears in the consent wire payload. The Relay routes this bounded
 control message but does not trust, rewrite, parse, store, or forward media
 payload.
+
+Consent freshness is checked at ingress, not by the value constructor:
+`issued_at_ms` may be at most 30 seconds in the future, `expires_at_ms` must be
+after the injected current time, and the lifetime is at most 120 seconds.
+Simultaneous REQUESTs are resolved without a response race by comparing the
+UTF-8 byte order of `(peer_id, operation_id)`. The smaller tuple keeps its
+outgoing operation; the other controller locally abandons its outgoing
+operation, resets its local action lane and adopts the incoming operation. No
+collision REJECT or CANCEL is sent, and late actions for the abandoned ID are
+ignored.
 
 The accepted receiving flow is:
 
@@ -482,6 +501,21 @@ Queue rules are:
 5. On stop, terminal loss, endpoint replacement, or generation mismatch,
    discard all pending video. Never replay historical video after recovery.
 
+Android capture owns a one-shot `ProjectionLease` with states
+`granted -> consumed -> released`. A consumed `MediaProjection` is used for
+one `createVirtualDisplay()` only. Normal stop releases the VirtualDisplay,
+codec, and surface before unregistering the projection callback and calling
+`MediaProjection.stop()`. If the encoder worker reaches `cleanup_deferred`,
+the consumed lease remains bound to its owner and its callback/projection stay
+alive for a later retry; they are not stopped while the worker is unsafe.
+Display-size changes remain `capture_source_ended` and require a fresh capture
+and fresh projection grant; this architecture does not add rotation hot-resize.
+
+An Android decoder may retain at most one already-pulled encoded frame while
+`MediaCodec` input is unavailable. A pending frame prevents another native
+pull. Reset/flush clears that frame, preserves validated CSD for replay, and
+never replays a pre-reset delta frame.
+
 A native keyframe request is required after first-track activation, decoder
 reset, source or resolution change, ICE restart, unrecoverable packet loss, or
 viewer reconnect. The generation-bound owner port now carries explicit
@@ -535,6 +569,14 @@ source; it is never synthesized from media arrival timing. The planned
 aggregate fields include capture, encode, sent, decode, and render FPS;
 resolution; target and actual bitrate; RTT, jitter, loss; frame and keyframe
 counters; codec; and selected ICE path.
+
+For RTP screen video, `packets_lost` is a finalized monotonic total within one
+endpoint generation. A 128-packet reorder window keeps missing sequence
+numbers provisional; only numbers outside that window are finalized, so a late
+reordered packet never decreases the native total or creates a new loss burst.
+Timing, connection-loss, and track-close resets preserve the total; a new
+endpoint generation starts at zero. Dart treats a defensive decrease as
+`delta = 0` and rebaselines the sample.
 
 Telemetry work follows ADR-033 and its contract source. It may emit outcome,
 duration, metric buckets, codec, ICE path, and error category. It may not emit
@@ -599,9 +641,12 @@ The first platform matrix is:
 Windows source closure, encoder unavailability, resize, double start, and
 release ordering need deterministic fake-platform tests before device testing.
 Android must use the system MediaProjection prompt, correctly typed foreground
-service, and revocation callback. Projection revoke, surface destruction,
-rotation, background behavior, and permission denial fail closed and stop
-production immediately.
+service, and revocation callback. Each grant is a single-use lease for one
+VirtualDisplay; revoke affects only the bound send owner. Projection revoke,
+surface destruction, rotation/size change, background behavior, and permission
+denial fail closed and stop production immediately. Rotation remains a known
+device-acceptance gap and uses restart-required handling until a separately
+approved hot-resize design exists.
 
 The renderer uses a native decoder and GPU surface. A Flutter widget observes an
 opaque surface and low-frequency state; it must not rebuild from raw frame bytes

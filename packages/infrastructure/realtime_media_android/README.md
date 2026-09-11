@@ -1,4 +1,4 @@
-Last updated: 2026-09-08
+Last updated: 2026-09-11
 
 # realtime_media_android
 
@@ -22,6 +22,39 @@ change is rejected until an explicit stop/release/recreate path is used. Send
 owners request a MediaCodec sync frame and receive owners use the native
 WebRTC RTCP path; neither path exposes Dart bytes. Device capability and E2E
 remain acceptance gates.
+
+The encoder keeps a 64 KiB maximum SPS/PPS cache. It accepts codec
+configuration from both `BUFFER_FLAG_CODEC_CONFIG` output and
+`INFO_OUTPUT_FORMAT_CHANGED` `csd-0`/`csd-1`, normalizes and validates those
+parameter sets as Annex-B, and drops deltas until a complete CSD+IDR has been
+accepted by native `pushH264` (`0`, including accepted-after-dropping). A
+frame-dropped result keeps the recovery gate closed. Codec-config is cache
+state, not a standalone native media frame; malformed or oversized CSD fails
+closed.
+
+The decoder learns CSD only from received Annex-B access units. It retains the
+last validated CSD across `flush()`, replays it before a recovery IDR, and
+drops deltas before CSD/recovery readiness. At most one pulled frame is held
+under MediaCodec input backpressure; a pending frame blocks another native
+pull, and reset clears it so pre-reset deltas are never replayed.
+
+## Projection lease and teardown
+
+Each user grant is a one-shot `ProjectionLease`:
+
+```text
+granted -> consumed -> released
+```
+
+`consumed` permits exactly one `createVirtualDisplay()` call. A normal safe
+stop releases the VirtualDisplay, codec, and surface before unregistering the
+projection callback and calling `MediaProjection.stop()`. A terminal startup
+failure performs the same release when no worker cleanup is deferred. When
+`stopCapture` returns `cleanup_deferred`, the consumed lease remains associated
+with its owner, including its callback and projection, until a later retry
+reaches the safe point. Projection revoke is delivered only to that bound send
+owner. Display-size changes remain `capture_source_ended` and require restart
+with a new grant; rotation hot-resize is a known device-acceptance gap.
 
 ## Current Phase 4 boundary
 

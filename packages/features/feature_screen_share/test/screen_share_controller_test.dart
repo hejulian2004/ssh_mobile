@@ -321,6 +321,98 @@ void main() {
       await wire.close();
     }
   });
+
+  for (final deliveryOrder in ['remote request first', 'local request first']) {
+    test(
+      'crossed requests converge without collision responses: $deliveryOrder',
+      () async {
+        final localConsent = _FakeConsentPort();
+        final remoteConsent = _FakeConsentPort();
+        final local = ScreenShareController(
+          consentPort: localConsent,
+          mediaPort: _FakeMediaPort(),
+          realtimeId: realtimeId,
+          sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
+          generation: 7,
+          localPeerId: 'peer-a',
+          remotePeerId: 'peer-b',
+          now: () => issued,
+        );
+        final remote = ScreenShareController(
+          consentPort: remoteConsent,
+          mediaPort: _FakeMediaPort(),
+          realtimeId: realtimeId,
+          sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
+          generation: 8,
+          localPeerId: 'peer-b',
+          remotePeerId: 'peer-a',
+          now: () => issued,
+        );
+        try {
+          await Future.wait([
+            local.startOutgoing(operationId: 'operation-a'),
+            remote.startOutgoing(operationId: 'operation-b'),
+          ]);
+          final localRequest = localConsent.sent.single;
+          final remoteRequest = remoteConsent.sent.single;
+
+          if (deliveryOrder == 'remote request first') {
+            localConsent.emit(remoteRequest);
+            await Future<void>.delayed(Duration.zero);
+            remoteConsent.emit(localRequest);
+          } else {
+            remoteConsent.emit(localRequest);
+            await Future<void>.delayed(Duration.zero);
+            localConsent.emit(remoteRequest);
+          }
+          await Future<void>.delayed(Duration.zero);
+
+          expect(local.state, ScreenShareOperationState.outgoingPending);
+          expect(local.operationId, 'operation-a');
+          expect(remote.state, ScreenShareOperationState.incomingPending);
+          expect(remote.operationId, 'operation-a');
+          expect(
+            localConsent.sent.where(
+              (consent) => consent.decision != RealtimeConsentDecision.request,
+            ),
+            isEmpty,
+          );
+          expect(
+            remoteConsent.sent.where(
+              (consent) => consent.decision != RealtimeConsentDecision.request,
+            ),
+            isEmpty,
+          );
+
+          await remote.acceptIncoming();
+          expect(
+            remoteConsent.sent.last.decision,
+            RealtimeConsentDecision.accept,
+          );
+          expect(remoteConsent.sent.last.actionRevision, 1);
+
+          // Messages belonging to the abandoned operation must not disturb the
+          // newly selected incoming operation.
+          remoteConsent.emit(
+            _consent(
+              issued: issued,
+              expires: issued.add(const Duration(minutes: 1)),
+              decision: RealtimeConsentDecision.cancel,
+              senderPeerId: 'peer-a',
+              actionRevision: 1,
+              operationId: 'operation-b',
+            ),
+          );
+          await Future<void>.delayed(Duration.zero);
+          expect(remote.state, ScreenShareOperationState.accepted);
+          expect(remote.operationId, 'operation-a');
+        } finally {
+          local.dispose();
+          remote.dispose();
+        }
+      },
+    );
+  }
 }
 
 RealtimeConsent _consent({

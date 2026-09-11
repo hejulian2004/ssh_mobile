@@ -1,4 +1,4 @@
-Last updated: 2026-09-09
+Last updated: 2026-09-11
 
 # WebRTC Screen Share TODO
 
@@ -100,6 +100,32 @@ ADR-034 或原始技术架构文档。
   已通过 Rust FFI、Windows 和 Android 平台桥接接线，仍不暴露媒体载荷；
   native owner 已接入硬件 bitrate/framerate、IDR 与 receive-side PLI。
   硬件/设备能力证明、全链路隐私和最终门禁仍待完成。
+
+## PR #73 定向收敛
+
+PR #73 保持 Draft，承载 Phase 3–7 的合并后定向修复，不恢复已关闭的
+`#68`–`#72`。本轮只收敛以下跨层契约：Android CSD/recovery gate、one-shot
+MediaProjection lease 与 `cleanup_deferred` retry、Consent freshness/确定性
+crossed-request 仲裁，以及 finalized monotonic RTP `packets_lost`。不修改
+Relay、TURN、Windows、UI、rotation hot-resize 或统计 ABI。
+
+- [x] Android encoder 从 codec-config buffer 和 output-format `csd-0/csd-1`
+  建立有界 64 KiB SPS/PPS cache；首个完整 CSD+IDR 只有在 native
+  `pushH264 == 0` 后才解除 delta gate。
+- [x] Android decoder 保留 validated CSD，flush 后 replay；最多保留一个
+  pending frame，CSD/recovery 未就绪的 delta 直接丢弃，尺寸变化仍为
+  `capture_source_ended`。
+- [x] ProjectionLease 使用 `granted → consumed → released`；worker
+  `cleanup_deferred` 时保留 consumed lease/owner callback，安全 retry 后才
+  teardown projection。
+- [x] Consent freshness 使用 30 秒 future skew/120 秒 TTL；crossed request
+  按 UTF-8 `(peer_id, operation_id)` 仲裁，不发送 collision REJECT/CANCEL，
+  并隔离旧 operation 的异步消息。
+- [x] native RTP loss 在 128 包 reorder window 外才 finalize；同一 endpoint
+  generation 内 monotonic，timing/connection-loss/track-close reset 不回退，
+  Dart decrease 只产生零 delta 并 rebaseline。
+- [ ] 最终 exact-head CI、Android/Windows/App-Dart/Rust/protocol jobs、真机
+  codec/rotation/dual-device/production TURN 证据仍待完成；skipped 不计为绿。
 
 当前状态：Phase 0、Phase 1、Phase 2 的实现、exact-head CI 证据和 PR #67
 接受记录已齐；Phase 3/4 的 native platform owner、Phase 5 consent/Feature、
@@ -206,6 +232,12 @@ evidence。Windows Graphics Capture、Media Foundation hardware ingress/decode �
 - [x] MediaProjection/foreground-service、hardware-only MediaCodec H.264
   encode/decode、Annex-B normalization 和 Phase 2 owner push/pull 已实现；
   硬件不可用时返回 typed failure，不静默软件或 Dart bytes fallback。
+- [x] CSD 来源、64 KiB parameter-set cache、首个 native-accepted CSD+IDR
+  recovery gate、decoder flush replay 和 bounded pending-frame backpressure
+  已加入 owner/helper tests；codec-config 不作为独立媒体帧发送。
+- [x] MediaProjection 使用 single-use ProjectionLease；正常 stop 才释放
+  callback/projection，`cleanup_deferred` 保留 consumed lease 供 retry；
+  display size 变化继续按 `capture_source_ended`/restart-required 处理。
 - [ ] Android 权限拒绝、projection revoke、旋转/后台、Surface 销毁、重复
   start/stop 与 generation replacement 的设备/instrumentation/E2E 验收。
 
@@ -219,6 +251,9 @@ evidence。Windows Graphics Capture、Media Foundation hardware ingress/decode �
   Feature 只持有业务状态与 metadata subscriptions。
 - [x] reject/cancel/timeout/duplicate/stale-generation/recoverable media failure
   的单元回归已加入。
+- [x] Consent freshness 使用 structural value + injected temporal check；两种
+  crossed-request delivery order 均按 UTF-8 tuple 收敛到唯一 winner/loser，
+  不发送 collision REJECT/CANCEL，旧 operation action 不污染新状态。
 - [ ] 真实 App Shell UI、Realtime transport 与 Windows/Android consent E2E 验收。
 
 ### Phase 6 — TURN Credential Delivery
@@ -243,6 +278,9 @@ evidence。Windows Graphics Capture、Media Foundation hardware ingress/decode �
   Rust FFI、Windows/Android owner 和平台 channel 接线，并由 native owner 做
   一秒限频；发送端已接入硬件 IDR 请求，接收端由 native peer 在同一 WebRTC
   路径发出 PLI，请求仍保持在 native queue/peer owner 内。
+- [x] RTP `packets_lost` 改为 128 包 reorder-window finalized monotonic total；
+  late reorder、wraparound、duplicate、timing/connection/track reset 和大跳跃
+  的 bounded accounting 回归已加入，Dart decrease 只 rebaseline。
 - [ ] 完成真实硬件编码器/RTCP 设备验收、拥塞恢复策略与完整平台 E2E。
 - [ ] stop/revoke/permission/privacy 回归及全链路 recovery。
 - [ ] Rust、Dart、Go、平台测试与覆盖率门禁全部通过。

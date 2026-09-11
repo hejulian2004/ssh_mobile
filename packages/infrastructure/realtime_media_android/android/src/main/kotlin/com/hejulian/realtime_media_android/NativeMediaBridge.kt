@@ -37,6 +37,7 @@ internal data class NativeMediaStats(
  */
 internal object NativeMediaBridge {
     private const val STATUS_DRIVER_UNAVAILABLE = -9
+    internal const val FRAME_DROPPED = 1
     private var loaded = false
 
     init {

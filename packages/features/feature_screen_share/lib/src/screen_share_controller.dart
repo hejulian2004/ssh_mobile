@@ -278,7 +278,7 @@ final class ScreenShareController extends ChangeNotifier
         consent.realtimeId != realtimeId ||
         consent.sharedSessionInstanceId != sharedSessionInstanceId ||
         consent.senderPeerId != remotePeerId ||
-        consent.isExpired(_now())) {
+        !consent.isFresh(_now())) {
       return;
     }
     final currentId = _snapshot.operationId;
@@ -298,6 +298,19 @@ final class ScreenShareController extends ChangeNotifier
           ),
         );
         _armExpiry(consent.expiresAt);
+      } else if (state == ScreenShareOperationState.outgoingPending &&
+          currentId != null) {
+        if (_compareCollision(
+              localOperationId: currentId,
+              remoteOperationId: consent.operationId,
+            ) <
+            0) {
+          // The local tuple wins. The remote request is a losing collision
+          // proposal; no extra response is needed because the winner is
+          // deterministic and the losing operation has not acquired media.
+          return;
+        }
+        _replaceOutgoingWithIncoming(consent);
       }
       return;
     }
@@ -412,6 +425,47 @@ final class ScreenShareController extends ChangeNotifier
       return;
     }
     _expiryTimer = Timer(delay, _expire);
+  }
+
+  void _replaceOutgoingWithIncoming(RealtimeConsent consent) {
+    ++_operationEpoch;
+    _expiryTimer?.cancel();
+    _nextLocalActionRevision = 0;
+    _lastRemoteActionRevision = consent.actionRevision;
+    _setSnapshot(
+      ScreenShareOperationSnapshot(
+        state: ScreenShareOperationState.incomingPending,
+        role: ScreenShareRole.receiver,
+        realtimeId: realtimeId,
+        generation: generation,
+        operationId: consent.operationId,
+        mediaReady: _snapshot.mediaReady,
+        expiresAt: consent.expiresAt,
+      ),
+    );
+    _armExpiry(consent.expiresAt);
+  }
+
+  int _compareCollision({
+    required String localOperationId,
+    required String remoteOperationId,
+  }) {
+    final peerComparison = _compareUtf8(localPeerId, remotePeerId);
+    if (peerComparison != 0) return peerComparison;
+    return _compareUtf8(localOperationId, remoteOperationId);
+  }
+
+  static int _compareUtf8(String left, String right) {
+    final leftBytes = utf8.encode(left);
+    final rightBytes = utf8.encode(right);
+    final length = leftBytes.length < rightBytes.length
+        ? leftBytes.length
+        : rightBytes.length;
+    for (var index = 0; index < length; index++) {
+      final comparison = leftBytes[index].compareTo(rightBytes[index]);
+      if (comparison != 0) return comparison;
+    }
+    return leftBytes.length.compareTo(rightBytes.length);
   }
 
   void _expire() {

@@ -1328,6 +1328,56 @@ async fn delayed_consent_from_previous_generation_is_rejected_after_reconnect() 
     );
 }
 
+#[test]
+fn screen_share_consent_freshness_rejects_future_or_expired_payloads() {
+    let now_ms = 1_735_732_800_000_u64;
+    let realtime_id = "00112233445566778899aabbccddeeff";
+    let shared_session_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    let payload = |issued_at_ms: u64, expires_at_ms: u64| {
+        ScreenShareConsentV2 {
+            schema_version: 2,
+            operation_id: "operation-a".into(),
+            realtime_id: realtime_id.into(),
+            issued_at_ms,
+            expires_at_ms,
+            decision: ScreenShareConsentDecision::Request as i32,
+            sender_peer_id: "peer-a".into(),
+            purpose: ScreenShareConsentPurpose::ScreenShare as i32,
+            media: ScreenShareMediaKind::ScreenVideo as i32,
+            requires_acceptance: true,
+            action_revision: 1,
+            shared_session_instance_id: shared_session_id.into(),
+        }
+        .encode_to_vec()
+    };
+
+    assert!(validate_screen_share_consent_at(
+        &payload(now_ms, now_ms + 120_000),
+        realtime_id,
+        Some("peer-a"),
+        Some(shared_session_id),
+        now_ms,
+    )
+    .is_ok());
+    assert!(validate_screen_share_consent_at(
+        &payload(now_ms + 30_001, now_ms + 150_001),
+        realtime_id,
+        Some("peer-a"),
+        Some(shared_session_id),
+        now_ms,
+    )
+    .is_err());
+    assert!(validate_screen_share_consent_at(
+        &payload(now_ms - 120_000, now_ms),
+        realtime_id,
+        Some("peer-a"),
+        Some(shared_session_id),
+        now_ms,
+    )
+    .is_err());
+}
+
 async fn register_realtime_peer(state: &RuntimeState, peer_id: &str) {
     state.peers.write().await.insert(
         peer_id.to_string(),

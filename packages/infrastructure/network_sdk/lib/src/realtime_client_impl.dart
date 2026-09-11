@@ -361,7 +361,7 @@ final class _RealtimeSession implements RealtimeSession {
   }
 
   void _applyConsent(RealtimeConsent consent) {
-    if (_disposed || consent.isExpired()) return;
+    if (_disposed || !consent.isFresh(DateTime.now())) return;
     if (consent.realtimeId != realtimeId) return;
     if (consent.sharedSessionInstanceId != _sharedSessionInstanceId) return;
     _consents.add(consent);

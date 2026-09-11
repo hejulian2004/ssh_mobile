@@ -25,11 +25,42 @@ void main() {
     expect(value.issuedAtMs, issued.millisecondsSinceEpoch);
     expect(value.isExpired(issued), isFalse);
     expect(value.isExpired(expires), isTrue);
+    expect(value.isFresh(issued), isTrue);
     expect(
       value.copyWith(decision: RealtimeConsentDecision.accept),
       isNot(equals(value)),
     );
   });
+
+  test(
+    'consent freshness rejects future issuance without using the constructor clock',
+    () {
+      final now = DateTime.utc(2026, 1, 1, 12);
+      final futureIssued = now.add(const Duration(seconds: 31));
+      final future = RealtimeConsent(
+        operationId: 'operation-a',
+        realtimeId: '00112233445566778899aabbccddeeff',
+        sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
+        issuedAt: futureIssued,
+        expiresAt: futureIssued.add(const Duration(minutes: 1)),
+        decision: RealtimeConsentDecision.request,
+        senderPeerId: 'peer-a',
+        actionRevision: 1,
+      );
+
+      expect(future.isFresh(now), isFalse);
+      expect(
+        future
+            .copyWith(
+              issuedAt: now.add(const Duration(seconds: 30)),
+              expiresAt: now.add(const Duration(minutes: 2, seconds: 30)),
+            )
+            .isFresh(now),
+        isTrue,
+      );
+      expect(consent().isFresh(now.add(const Duration(seconds: 30))), isTrue);
+    },
+  );
 
   test('consent rejects invalid identity, lifetime and action revision', () {
     expect(

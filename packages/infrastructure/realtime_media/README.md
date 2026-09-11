@@ -1,4 +1,4 @@
-Last updated: 2026-09-08
+Last updated: 2026-09-11
 
 # realtime_media
 
@@ -26,6 +26,15 @@ bounded targets and timestamps; it never stores media bytes or grows a queue.
 `RealtimeMediaStats` is a low-frequency, payload-free snapshot. Native owners
 populate bounded queue, packet, loss/recovery, keyframe and jitter counters;
 RTT is reported only when the platform has an authoritative RTCP/ICE source.
+
+For screen-video RTP, `packetsLost` is a finalized monotonic total within one
+endpoint generation. Native keeps missing sequence numbers provisional inside
+a 128-packet reorder window; only sequence numbers outside that window are
+finalized, so a late reorder cannot lower the total. Timing, connection-loss,
+and track-close resets preserve the total, while a new endpoint generation
+starts from zero. The Dart adaptation controller defensively treats a lower
+sample as a zero interval delta and rebaselines it; it never converts the
+lower cumulative estimate into a new loss burst.
 
 ## Ownership and release
 

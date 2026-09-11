@@ -315,7 +315,9 @@ fn screen_video_stats_report_rtp_loss_recovery_and_jitter_without_payloads() {
         stats.packets_received as usize,
         first.len() - 1 + recovered.len()
     );
-    assert_eq!(stats.packets_lost, 1);
+    // The missing packet is still inside the bounded reorder window, so the
+    // finalized loss total does not advance yet.
+    assert_eq!(stats.packets_lost, 0);
     assert_eq!(stats.frames_recovered, 1);
     assert_eq!(stats.keyframe_requests, 1);
     assert!(stats.jitter_ms > 0, "timestamp/arrival skew is observable");
@@ -324,7 +326,7 @@ fn screen_video_stats_report_rtp_loss_recovery_and_jitter_without_payloads() {
 }
 
 #[test]
-fn late_rtp_reordering_repairs_the_loss_estimate() {
+fn late_rtp_reordering_never_creates_finalized_loss() {
     let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
     peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
         .expect("receiver config");
@@ -338,7 +340,7 @@ fn late_rtp_reordering_repairs_the_loss_estimate() {
         peer.h264_screen_video_stats(MediaDirection::Recvonly)
             .expect("intermediate stats")
             .packets_lost,
-        1,
+        0,
     );
 
     peer.receive_h264_screen_video_rtp(&single_packet(101, 93_000), now)
@@ -348,6 +350,36 @@ fn late_rtp_reordering_repairs_the_loss_estimate() {
         .expect("reordered stats");
     assert_eq!(stats.packets_received, 3);
     assert_eq!(stats.packets_lost, 0);
+}
+
+#[test]
+fn rtp_loss_is_finalized_only_after_leaving_the_reorder_window() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+
+    peer.receive_h264_screen_video_rtp(&single_packet(100, 90_000), now)
+        .expect("first packet is accepted");
+    peer.receive_h264_screen_video_rtp(&single_packet(102, 96_000), now)
+        .expect("forward packet is accepted");
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("windowed stats")
+            .packets_lost,
+        0,
+    );
+
+    // Sequence 101 is missing when sequence 230 advances the lower bound to
+    // 102. The gap is now finalized exactly once.
+    peer.receive_h264_screen_video_rtp(&single_packet(230, 102_000), now)
+        .expect("window advancement is accepted");
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("finalized stats")
+            .packets_lost,
+        1,
+    );
 }
 
 #[test]
@@ -366,6 +398,96 @@ fn rtp_loss_accounting_handles_sequence_wraparound() {
         .expect("wrapped stats");
     assert_eq!(stats.packets_received, 2);
     assert_eq!(stats.packets_lost, 0);
+}
+
+#[test]
+fn rtp_loss_reset_preserves_finalized_total_and_starts_a_new_sequence_space() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+
+    for sequence in [100, 102, 230] {
+        peer.receive_h264_screen_video_rtp(&single_packet(sequence, 90_000), now)
+            .expect("initial packet is accepted");
+    }
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("initial finalized stats")
+            .packets_lost,
+        1,
+    );
+
+    peer.on_connection_lost();
+    for sequence in [500, 502, 630] {
+        peer.receive_h264_screen_video_rtp(&single_packet(sequence, 96_000), now)
+            .expect("replacement packet is accepted");
+    }
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("replacement finalized stats")
+            .packets_lost,
+        2,
+    );
+}
+
+#[test]
+fn released_endpoint_starts_packets_lost_from_zero() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+
+    for sequence in [100, 102, 230] {
+        peer.receive_h264_screen_video_rtp(&single_packet(sequence, 90_000), now)
+            .expect("initial packet is accepted");
+    }
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("initial finalized stats")
+            .packets_lost,
+        1,
+    );
+
+    peer.clear_h264_screen_video(MediaDirection::Recvonly)
+        .expect("endpoint release clears media state");
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("fresh endpoint stats")
+            .packets_lost,
+        0,
+    );
+
+    for sequence in [500, 502, 630] {
+        peer.receive_h264_screen_video_rtp(&single_packet(sequence, 96_000), now)
+            .expect("replacement packet is accepted");
+    }
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("replacement finalized stats")
+            .packets_lost,
+        1,
+    );
+}
+
+#[test]
+fn rtp_loss_finalization_uses_bounded_state_for_a_large_sequence_jump() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+
+    peer.receive_h264_screen_video_rtp(&single_packet(100, 90_000), now)
+        .expect("first packet is accepted");
+    peer.receive_h264_screen_video_rtp(&single_packet(30_100, 96_000), now)
+        .expect("large forward jump is accepted");
+
+    let stats = peer
+        .h264_screen_video_stats(MediaDirection::Recvonly)
+        .expect("bounded jump stats");
+    // Sequence 29_972 is still inside the 128-packet reorder window; only
+    // the range strictly below that lower bound is finalized.
+    assert_eq!(stats.packets_lost, 29_871);
 }
 
 #[test]

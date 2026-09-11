@@ -36,6 +36,8 @@ use crate::runtime::RuntimeState;
 use crate::session::SessionId;
 
 const MAX_REALTIME_SIGNAL_PAYLOAD_BYTES: usize = MAX_SDP_BYTES;
+const SCREEN_SHARE_CONSENT_MAX_LIFETIME_MS: u64 = 120_000;
+const SCREEN_SHARE_CONSENT_ALLOWED_FUTURE_SKEW_MS: u64 = 30_000;
 static NEXT_REALTIME_SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 struct RealtimeSession {
@@ -1705,6 +1707,23 @@ fn validate_screen_share_consent(
     expected_sender_peer_id: Option<&str>,
     expected_shared_session_instance_id: Option<&str>,
 ) -> Result<ScreenShareConsentV2, Box<dyn std::error::Error + Send + Sync>> {
+    validate_screen_share_consent_at(
+        payload,
+        expected_realtime_id,
+        expected_sender_peer_id,
+        expected_shared_session_instance_id,
+        crate::events::unix_timestamp_ms().max(0) as u64,
+    )
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn validate_screen_share_consent_at(
+    payload: &[u8],
+    expected_realtime_id: &str,
+    expected_sender_peer_id: Option<&str>,
+    expected_shared_session_instance_id: Option<&str>,
+    now_ms: u64,
+) -> Result<ScreenShareConsentV2, Box<dyn std::error::Error + Send + Sync>> {
     if payload.is_empty() || payload.len() > 4096 {
         return Err(boxed_message(
             "screen-share consent payload is outside bounds",
@@ -1737,9 +1756,15 @@ fn validate_screen_share_consent(
     }
     if consent.issued_at_ms == 0
         || consent.expires_at_ms <= consent.issued_at_ms
-        || consent.expires_at_ms.saturating_sub(consent.issued_at_ms) > 120_000
+        || consent.expires_at_ms.saturating_sub(consent.issued_at_ms)
+            > SCREEN_SHARE_CONSENT_MAX_LIFETIME_MS
     {
         return Err(boxed_message("screen-share consent expiration is invalid"));
+    }
+    if consent.issued_at_ms > now_ms.saturating_add(SCREEN_SHARE_CONSENT_ALLOWED_FUTURE_SKEW_MS)
+        || consent.expires_at_ms <= now_ms
+    {
+        return Err(boxed_message("screen-share consent is not fresh"));
     }
     if consent.sender_peer_id.is_empty() || consent.sender_peer_id.len() > 128 {
         return Err(boxed_message(

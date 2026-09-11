@@ -1,4 +1,4 @@
-Last updated: 2026-09-08
+Last updated: 2026-09-11
 
 # realtime_media_android maintenance contract
 
@@ -24,10 +24,21 @@ Last updated: 2026-09-08
 ## Lifecycle contract
 
 Projection permission and the typed foreground service must be active before
-capture starts. Native owner start validates the generation; capture stops
+capture starts. A `ProjectionLease` is single-use: `granted → consumed →
+released`, and one consumed `MediaProjection` may create only one
+VirtualDisplay. Native owner start validates the generation; capture stops
 before encoder/decoder and SurfaceTexture release; owner close remains separate
-from endpoint release. Permission denial, projection revoke, surface loss,
-stale owner, repeated stop, and late callbacks fail closed and are retry-safe.
+from endpoint release. Normal projection teardown unregisters the callback
+before calling `MediaProjection.stop()`.
+
+If an encoder worker cannot reach its safe point within the existing timeout,
+the owner returns `cleanup_deferred` and retains the consumed lease, callback,
+projection, codec, and VirtualDisplay for a later release retry. It must not
+stop the projection while that worker is still active. Permission denial,
+projection revoke, surface loss, stale owner, repeated stop, and late callbacks
+fail closed and are retry-safe; projection revoke is routed only to the bound
+send owner. Display-size changes remain `capture_source_ended`, not a hot
+resize path.
 
 ## Validation
 

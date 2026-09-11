@@ -43,6 +43,9 @@ enum RealtimeConsentMedia {
 
 /// Immutable wire-level consent value used by the SDK and Feature boundary.
 final class RealtimeConsent {
+  static const maxLifetime = Duration(minutes: 2);
+  static const allowedFutureSkew = Duration(seconds: 30);
+
   RealtimeConsent({
     required this.operationId,
     required this.realtimeId,
@@ -79,6 +82,13 @@ final class RealtimeConsent {
 
   bool isExpired([DateTime? now]) =>
       !(expiresAt.isAfter(now ?? DateTime.now()));
+
+  /// Validates the temporal freshness of an otherwise structurally valid
+  /// consent without making value construction depend on the wall clock.
+  bool isFresh(DateTime now) =>
+      !issuedAt.isAfter(now.add(allowedFutureSkew)) &&
+      expiresAt.isAfter(now) &&
+      expiresAt.difference(issuedAt) <= maxLifetime;
 
   RealtimeConsent copyWith({
     RealtimeConsentDecision? decision,
@@ -148,7 +158,7 @@ final class RealtimeConsent {
     }
     if (issuedAt.millisecondsSinceEpoch <= 0 ||
         !expiresAt.isAfter(issuedAt) ||
-        expiresAt.difference(issuedAt) > const Duration(minutes: 2)) {
+        expiresAt.difference(issuedAt) > maxLifetime) {
       throw ArgumentError.value(expiresAt, 'expiresAt');
     }
     _validateText(senderPeerId, 'senderPeerId');
