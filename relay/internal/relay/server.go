@@ -292,6 +292,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	// Device credential endpoints (V2 only).
 	mux.HandleFunc(RouteEnrollV2, s.enroll)
 	mux.HandleFunc(RouteRefreshV2, s.refresh)
+	mux.HandleFunc(RouteTurnCredentialsV2, s.turnCredentials)
 
 	// Transport Network V2（设计 §24）：控制面与数据面物理拆开。
 	// GET /v2/control —— 长期存活的控制面，只走 RelayFrame（protobuf）。

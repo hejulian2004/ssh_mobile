@@ -90,6 +90,10 @@ ADR-034 或原始技术架构文档。
   `/v2/turn/credentials` issuer，SDK 增加 bounded parser、in-memory
   `RealtimeTurnCredentialStore` 与 App provider；生产部署、secret scan 和
   relay-only E2E 仍待完成。
+- [ ] Phase 6 canonical request-body hash：当前 device proof transcript 仍为
+  `METHOD`、`PATH`、`TIMESTAMP`、`NONCE`；TODO: Consider binding BODY_SHA256
+  to the proof transcript before production security certification. 纳入 body
+  hash 需要单独审批 `.proto/manifest → 生成代码 → Go/Rust/Dart` 协议迁移。
 - [x] Phase 7 QoS foundation：`RealtimeMediaStats` 增加 bounded packet/drop/
   recovery/keyframe/jitter/RTT/queue counters，并提供不改变三帧队列的有界
   adaptation policy/native recovery port；原生 keyframe、全链路隐私和最终门禁

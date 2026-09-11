@@ -105,6 +105,7 @@ enum NetworkOperation {
   stopWebShare('stop_webshare'),
   enrollRelay('enroll_relay'),
   refreshCredential('refresh_credential'),
+  issueTurnCredential('issue_turn_credential'),
   connectRelay('connect_relay'),
   bootstrapProbe('bootstrap_probe'),
   listPeers('list_peers'),
