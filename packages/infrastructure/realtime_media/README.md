@@ -42,6 +42,12 @@ lower cumulative estimate into a new loss burst.
 
 Feature code may request an operation through its injected business port and release only its own operation/subscriptions. It never disposes the app-owned network runtime or native handle.
 
+Platform preparation ownership remains outside this generic endpoint contract.
+The Android App Shell composes an App-scope backend that serializes its
+single-use projection preparation across route coordinators and returns
+caller-ownership outcomes; Android-only abandon and `cleanup_deferred` details
+are not added to the generic media ABI or statistics layout.
+
 The App Shell native adapter receives a `RealtimeSessionToken` from
 `network_sdk` and forwards its native-authoritative generation unchanged to
 the endpoint ABI. Signaling revisions are not accepted as a substitute.

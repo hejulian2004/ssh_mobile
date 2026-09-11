@@ -9,36 +9,52 @@ internal enum class ProjectionLeaseState {
     RELEASED,
 }
 
+internal data class ProjectionLeaseRevocation(
+    val changed: Boolean,
+    val ownerToken: Long?,
+)
+
 /** Pure one-shot ownership state used by the platform projection lease. */
 internal class ProjectionLeaseStateMachine {
-    var state: ProjectionLeaseState = ProjectionLeaseState.GRANTED
-        private set
+    private val lock = Any()
+    private var stateValue = ProjectionLeaseState.GRANTED
+    private var ownerTokenValue: Long? = null
 
-    var ownerToken: Long? = null
-        private set
+    val state: ProjectionLeaseState
+        get() = synchronized(lock) { stateValue }
 
-    fun consume(owner: Long): Boolean {
-        if (state != ProjectionLeaseState.GRANTED) return false
-        state = ProjectionLeaseState.CONSUMED
-        ownerToken = owner
-        return true
+    val ownerToken: Long?
+        get() = synchronized(lock) { ownerTokenValue }
+
+    fun consume(owner: Long): Boolean = synchronized(lock) {
+        if (stateValue != ProjectionLeaseState.GRANTED) return@synchronized false
+        stateValue = ProjectionLeaseState.CONSUMED
+        ownerTokenValue = owner
+        true
     }
 
-    fun revoke(): Long? {
-        if (state == ProjectionLeaseState.REVOKED ||
-            state == ProjectionLeaseState.RELEASED
+    fun revoke(): ProjectionLeaseRevocation = synchronized(lock) {
+        if (stateValue == ProjectionLeaseState.REVOKED ||
+            stateValue == ProjectionLeaseState.RELEASED
         ) {
-            return null
+            return@synchronized ProjectionLeaseRevocation(false, null)
         }
-        state = ProjectionLeaseState.REVOKED
-        return ownerToken
+        stateValue = ProjectionLeaseState.REVOKED
+        ProjectionLeaseRevocation(true, ownerTokenValue)
     }
 
-    fun release(): Boolean {
-        if (state == ProjectionLeaseState.RELEASED) return false
-        state = ProjectionLeaseState.RELEASED
-        ownerToken = null
-        return true
+    fun release(): Boolean = synchronized(lock) {
+        if (stateValue == ProjectionLeaseState.RELEASED) return@synchronized false
+        stateValue = ProjectionLeaseState.RELEASED
+        ownerTokenValue = null
+        true
+    }
+
+    fun releaseIfGranted(): Boolean = synchronized(lock) {
+        if (stateValue != ProjectionLeaseState.GRANTED) return@synchronized false
+        stateValue = ProjectionLeaseState.RELEASED
+        ownerTokenValue = null
+        true
     }
 }
 
@@ -63,17 +79,22 @@ internal class ProjectionLease(
     fun consume(owner: Long): Boolean = stateMachine.consume(owner)
 
     fun revoke() {
-        val previous = stateMachine.state
-        val owner = stateMachine.revoke()
-        if (previous != ProjectionLeaseState.REVOKED &&
-            previous != ProjectionLeaseState.RELEASED
-        ) {
-            onRevoked(owner)
-        }
+        val revocation = stateMachine.revoke()
+        if (revocation.changed) onRevoked(revocation.ownerToken)
     }
 
     fun releaseAfterResources() {
         if (!stateMachine.release()) return
+        teardownProjection()
+    }
+
+    fun releaseIfGranted(): Boolean {
+        if (!stateMachine.releaseIfGranted()) return false
+        teardownProjection()
+        return true
+    }
+
+    private fun teardownProjection() {
         try {
             mediaProjection.unregisterCallback(callback)
         } catch (_: Exception) {

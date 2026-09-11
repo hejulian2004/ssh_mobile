@@ -149,6 +149,81 @@ class H264AnnexBTest {
         )
     }
 
+    @Test
+    fun decoderRelocksAfterNonIdrParameterSetUpdate() {
+        val gate = H264DecoderRecoveryGate()
+        val initialRecovery = requireInfo(accessUnit(sps, pps, idr))
+        val newSps = nalu(7, 0x64, 0x00, 0x28)
+        val updatedDelta = requireInfo(accessUnit(newSps, delta))
+        val newRecovery = requireInfo(accessUnit(newSps, pps, idr))
+
+        assertEquals(
+            H264DecoderFrameDecision.WAIT_FOR_CSD,
+            gate.inspect(initialRecovery, keyframe = true),
+        )
+        gate.markConfigQueued()
+        assertEquals(
+            H264DecoderFrameDecision.QUEUE,
+            gate.inspect(initialRecovery, keyframe = true),
+        )
+        gate.markFrameQueued(keyframe = true)
+        assertFalse(gate.isAwaitingRecoveryKeyframe)
+
+        assertEquals(
+            H264DecoderFrameDecision.DROP_AND_REQUEST,
+            gate.inspect(updatedDelta, keyframe = false),
+        )
+        assertTrue(gate.isAwaitingRecoveryKeyframe)
+        assertTrue(gate.hasPendingConfig)
+        gate.markConfigQueued()
+        assertEquals(
+            H264DecoderFrameDecision.DROP_AND_REQUEST,
+            gate.inspect(requireInfo(accessUnit(delta)), keyframe = false),
+        )
+        assertEquals(
+            H264DecoderFrameDecision.QUEUE,
+            gate.inspect(newRecovery, keyframe = true),
+        )
+        gate.markFrameQueued(keyframe = true)
+        assertFalse(gate.isAwaitingRecoveryKeyframe)
+        assertEquals(
+            H264DecoderFrameDecision.QUEUE,
+            gate.inspect(requireInfo(accessUnit(delta)), keyframe = false),
+        )
+    }
+
+    @Test
+    fun decoderRelocksAndReplaysWhenUpdatedCsdArrivesWithIdr() {
+        val gate = H264DecoderRecoveryGate()
+        val initialRecovery = requireInfo(accessUnit(sps, pps, idr))
+        val newSps = nalu(7, 0x64, 0x00, 0x28)
+        val updatedRecovery = requireInfo(accessUnit(newSps, pps, idr))
+
+        assertEquals(
+            H264DecoderFrameDecision.WAIT_FOR_CSD,
+            gate.inspect(initialRecovery, keyframe = true),
+        )
+        gate.markConfigQueued()
+        assertEquals(
+            H264DecoderFrameDecision.QUEUE,
+            gate.inspect(initialRecovery, keyframe = true),
+        )
+        gate.markFrameQueued(keyframe = true)
+
+        assertEquals(
+            H264DecoderFrameDecision.WAIT_FOR_CSD,
+            gate.inspect(updatedRecovery, keyframe = true),
+        )
+        assertTrue(gate.isAwaitingRecoveryKeyframe)
+        gate.markConfigQueued()
+        assertEquals(
+            H264DecoderFrameDecision.QUEUE,
+            gate.inspect(updatedRecovery, keyframe = true),
+        )
+        gate.markFrameQueued(keyframe = true)
+        assertFalse(gate.isAwaitingRecoveryKeyframe)
+    }
+
     private fun requireInfo(payload: ByteArray): H264AccessUnitInfo =
         H264AnnexB.analyze(payload) ?: error("test payload must be valid")
 

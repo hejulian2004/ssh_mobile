@@ -18,6 +18,10 @@ final class MethodChannelAndroidRealtimeMediaPlatform
   Future<void> requestProjection() => _invoke<void>('requestProjection');
 
   @override
+  Future<void> abandonProjectionGrant() =>
+      _invoke<void>('abandonProjectionGrant');
+
+  @override
   Future<List<ScreenCaptureSource>> listCaptureSources() async {
     final result = await _invoke<List<Object?>>('listSources');
     return result

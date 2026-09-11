@@ -382,8 +382,11 @@ codec configuration may arrive through either `BUFFER_FLAG_CODEC_CONFIG` or
 Annex-B parameter sets. The sender drops deltas until a complete CSD+IDR is
 accepted into the native bounded queue. A decoder learns CSD only from received
 Annex-B access units, replays its validated cache after flush, and drops deltas
-until a recovery IDR is queued. CSD cache overflow or malformed NAL units fail
-closed; codec-config is never sent as a standalone media frame.
+until a recovery IDR is queued. Any parameter-set update relocks the decoder
+recovery gate, including an update carried by an IDR; the IDR is rechecked only
+after codec-config replay and the gate opens only after
+`MediaCodec.queueInputBuffer` succeeds. CSD cache overflow or malformed NAL
+units fail closed; codec-config is never sent as a standalone media frame.
 
 ## Consent and signaling
 
@@ -510,6 +513,16 @@ the consumed lease remains bound to its owner and its callback/projection stay
 alive for a later retry; they are not stopped while the worker is unsafe.
 Display-size changes remain `capture_source_ended` and require a fresh capture
 and fresh projection grant; this architecture does not add rotation hot-resize.
+
+The App Shell's Android backend is an App-scope singleton shared by route
+coordinators. It serializes projection preparation across routes: a caller
+owns the preparation slot only after an `acquired` result, and an
+`invalidated` or failed preparation has already performed its own cleanup.
+Attach success releases the slot before any later stale-operation check; attach
+failure keeps it until the caller's matching abandon completes. This prevents
+an asynchronous route disposal from abandoning a newer route's unconsumed
+grant without adding a projection identifier. Queued starts re-check their
+operation epoch before requesting permission.
 
 An Android decoder may retain at most one already-pulled encoded frame while
 `MediaCodec` input is unavailable. A pending frame prevents another native

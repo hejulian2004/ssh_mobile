@@ -30,7 +30,10 @@ parameter sets as Annex-B, and drops deltas until a complete CSD+IDR has been
 accepted by native `pushH264` (`0`, including accepted-after-dropping). A
 frame-dropped result keeps the recovery gate closed. Codec-config is cache
 state, not a standalone native media frame; malformed or oversized CSD fails
-closed.
+closed. On the receive side, every validated parameter-set update relocks the
+recovery gate, including an IDR that carries the update; the decoder replays
+codec-config and rechecks that IDR, then opens delta input only after the
+recovery IDR is successfully queued into `MediaCodec`.
 
 The decoder learns CSD only from received Annex-B access units. It retains the
 last validated CSD across `flush()`, replays it before a recovery IDR, and
@@ -54,7 +57,20 @@ failure performs the same release when no worker cleanup is deferred. When
 with its owner, including its callback and projection, until a later retry
 reaches the safe point. Projection revoke is delivered only to that bound send
 owner. Display-size changes remain `capture_source_ended` and require restart
-with a new grant; rotation hot-resize is a known device-acceptance gap.
+with a new grant; rotation hot-resize is a known device-acceptance gap. The
+lease transitions are claimed under one state-machine synchronization boundary
+for consume, revoke, release, and release-if-granted; callback unregister and
+`MediaProjection.stop()` run only after a successful terminal claim. A
+pre-consume failure may release a captured `GRANTED` lease only when it is still
+the current lease, while consumed cleanup-deferred owners remain retryable.
+
+The App Shell reuses one App-scope `AndroidRealtimeMediaBackend` across routes.
+That backend serializes projection preparation: `acquired` transfers the grant
+and slot to the caller, while `invalidated` and failed preparations report that
+the backend already cleaned up. Attach success releases the slot immediately;
+attach failure retains it until the caller's single abandon completes. This
+keeps asynchronous route disposal from affecting a later grant without adding
+a grant or transaction ID.
 
 ## Current Phase 4 boundary
 

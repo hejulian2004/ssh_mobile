@@ -8,6 +8,10 @@ import 'package:realtime_media/realtime_media.dart';
 abstract interface class AndroidRealtimeMediaPlatform {
   Future<void> requestProjection();
 
+  /// Releases an unconsumed projection grant. Consumed owner leases are a
+  /// separate owner-level teardown concern and must be left untouched.
+  Future<void> abandonProjectionGrant();
+
   Future<List<ScreenCaptureSource>> listCaptureSources();
 
   Future<void> startCapture({

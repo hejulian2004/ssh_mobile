@@ -117,15 +117,21 @@ Relay、TURN、Windows、UI、rotation hot-resize 或统计 ABI。
   `capture_source_ended`。
 - [x] ProjectionLease 使用 `granted → consumed → released`；worker
   `cleanup_deferred` 时保留 consumed lease/owner callback，安全 retry 后才
-  teardown projection。
+  teardown projection；`consume/revoke/release/releaseIfGranted` 共用同一状态
+  transition lock。
+- [x] App-scope Android backend 串行化跨 route projection preparation；只有
+  `acquired` 把 grant/slot 交给 coordinator，`invalidated`/异常由 backend
+  自行清理，caller 只对自己持有的 preparation abandon 一次。
 - [x] Consent freshness 使用 30 秒 future skew/120 秒 TTL；crossed request
   按 UTF-8 `(peer_id, operation_id)` 仲裁，不发送 collision REJECT/CANCEL，
   并隔离旧 operation 的异步消息。
 - [x] native RTP loss 在 128 包 reorder window 外才 finalize；同一 endpoint
   generation 内 monotonic，timing/connection-loss/track-close reset 不回退，
   Dart decrease 只产生零 delta 并 rebaseline。
-- [ ] 最终 exact-head CI、Android/Windows/App-Dart/Rust/protocol jobs、真机
-  codec/rotation/dual-device/production TURN 证据仍待完成；skipped 不计为绿。
+- [x] PR #73 exact-head CI gate 已纳入 Android host unit、Android/Windows、
+  App-Dart、Rust 和 protocol jobs；最终通过 SHA/run 以 PR body 绑定证据为准，
+  skipped 不计为绿。
+- [ ] 真机 codec/rotation/dual-device/production TURN acceptance 证据仍待完成。
 
 当前状态：Phase 0、Phase 1、Phase 2 的实现、exact-head CI 证据和 PR #67
 接受记录已齐；Phase 3/4 的 native platform owner、Phase 5 consent/Feature、

@@ -1,6 +1,25 @@
+import 'dart:async';
+
 import 'package:realtime_media/realtime_media.dart';
 
 import 'android_realtime_media_platform.dart';
+
+typedef AndroidProjectionPreparationGuard = bool Function();
+
+/// Result of an Android projection preparation transaction.
+enum AndroidProjectionPreparationResult {
+  /// The caller owns the granted projection and the shared preparation slot.
+  acquired,
+
+  /// The backend invalidated and cleaned the transaction; the caller owns no
+  /// projection and must not issue a second abandon call.
+  invalidated,
+}
+
+final class _ProjectionPreparation {
+  final Completer<void> completion = Completer<void>();
+  Future<void>? abandonFuture;
+}
 
 /// Composes the existing endpoint lease with Android native media ownership.
 ///
@@ -23,8 +42,71 @@ final class AndroidRealtimeMediaBackend
       <RealtimeMediaEndpointId, RealtimeMediaNativeOwnerToken>{};
   final Map<RealtimeMediaEndpointId, RealtimeMediaEndpointIdentity>
   _ownerIdentities = <RealtimeMediaEndpointId, RealtimeMediaEndpointIdentity>{};
+  _ProjectionPreparation? _projectionPreparation;
 
-  Future<void> requestProjection() => platform.requestProjection();
+  /// Starts one serialized projection preparation transaction.
+  ///
+  /// The guard is checked before opening the platform permission flow and
+  /// again after it completes. A false result means the backend already
+  /// abandoned any grant and released the shared slot.
+  Future<AndroidProjectionPreparationResult> requestProjection({
+    AndroidProjectionPreparationGuard? isCurrent,
+  }) async {
+    final guard = isCurrent ?? _alwaysCurrent;
+    final previous = _projectionPreparation;
+    if (previous != null) await previous.completion.future;
+    if (!guard()) return AndroidProjectionPreparationResult.invalidated;
+
+    final preparation = _ProjectionPreparation();
+    _projectionPreparation = preparation;
+    var callerOwnsPreparation = false;
+    var platformRequestStarted = false;
+    var cleanupStarted = false;
+
+    Future<void> cleanupGrant() async {
+      if (cleanupStarted) return;
+      cleanupStarted = true;
+      await _abandonPlatformGrant();
+    }
+
+    try {
+      if (!guard()) return AndroidProjectionPreparationResult.invalidated;
+      platformRequestStarted = true;
+      await platform.requestProjection();
+      if (!guard()) {
+        await cleanupGrant();
+        return AndroidProjectionPreparationResult.invalidated;
+      }
+      callerOwnsPreparation = true;
+      return AndroidProjectionPreparationResult.acquired;
+    } catch (_) {
+      if (platformRequestStarted && !callerOwnsPreparation && !cleanupStarted) {
+        try {
+          await cleanupGrant();
+        } catch (_) {
+          // Preserve the original preparation failure. The slot is still
+          // finalized below, and the platform cleanup is idempotent.
+        }
+      }
+      rethrow;
+    } finally {
+      if (!callerOwnsPreparation) {
+        _finishProjectionPreparation(preparation);
+      }
+    }
+  }
+
+  /// Abandons the caller-owned grant and releases the shared preparation slot.
+  /// Repeated calls share the same cleanup future.
+  Future<void> abandonProjectionGrant() {
+    final preparation = _projectionPreparation;
+    if (preparation == null) return Future<void>.value();
+    final ongoing = preparation.abandonFuture;
+    if (ongoing != null) return ongoing;
+    final cleanup = _abandonAndFinish(preparation);
+    preparation.abandonFuture = cleanup;
+    return cleanup;
+  }
 
   Future<List<ScreenCaptureSource>> listCaptureSources() =>
       platform.listCaptureSources();
@@ -70,12 +152,16 @@ final class AndroidRealtimeMediaBackend
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
     required ScreenCaptureSource source,
-  }) => platform.startCapture(
-    endpointId: endpointId,
-    identity: identity,
-    source: source,
-    ownerToken: _ownerFor(endpointId, identity),
-  );
+  }) async {
+    final preparation = _projectionPreparation;
+    await platform.startCapture(
+      endpointId: endpointId,
+      identity: identity,
+      source: source,
+      ownerToken: _ownerFor(endpointId, identity),
+    );
+    if (preparation != null) _finishProjectionPreparation(preparation);
+  }
 
   @override
   Future<RemoteVideoSurface> attachRemoteVideoSurface({
@@ -207,4 +293,22 @@ final class AndroidRealtimeMediaBackend
       // original owner-capability error at this layer.
     }
   }
+
+  Future<void> _abandonAndFinish(_ProjectionPreparation preparation) async {
+    try {
+      await _abandonPlatformGrant();
+    } finally {
+      _finishProjectionPreparation(preparation);
+    }
+  }
+
+  Future<void> _abandonPlatformGrant() => platform.abandonProjectionGrant();
+
+  void _finishProjectionPreparation(_ProjectionPreparation preparation) {
+    if (!identical(_projectionPreparation, preparation)) return;
+    _projectionPreparation = null;
+    if (!preparation.completion.isCompleted) preparation.completion.complete();
+  }
+
+  static bool _alwaysCurrent() => true;
 }

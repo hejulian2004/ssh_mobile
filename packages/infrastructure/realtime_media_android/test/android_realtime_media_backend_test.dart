@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:realtime_media/realtime_media.dart';
 import 'package:test/test.dart';
 
@@ -289,11 +291,155 @@ void main() {
   test(
     'projection requests are delegated and repeated calls are safe',
     () async {
-      await backend.requestProjection();
-      await backend.requestProjection();
-      expect(platform.operations, <String>['projection', 'projection']);
+      expect(
+        await backend.requestProjection(isCurrent: () => true),
+        AndroidProjectionPreparationResult.acquired,
+      );
+      await backend.abandonProjectionGrant();
+      expect(
+        await backend.requestProjection(isCurrent: () => true),
+        AndroidProjectionPreparationResult.acquired,
+      );
+      await backend.abandonProjectionGrant();
+      expect(platform.operations, <String>[
+        'projection',
+        'abandon-projection',
+        'projection',
+        'abandon-projection',
+      ]);
     },
   );
+
+  test(
+    'invalidated preparation self-cleans before the next caller gets a grant',
+    () async {
+      final permissionGate = Completer<void>();
+      platform.projectionGate = permissionGate;
+      var firstCurrent = true;
+      final first = backend.requestProjection(
+        isCurrent: () => firstCurrent,
+      );
+      await Future<void>.delayed(Duration.zero);
+      firstCurrent = false;
+      final second = backend.requestProjection(isCurrent: () => true);
+
+      permissionGate.complete();
+
+      expect(
+        await first,
+        AndroidProjectionPreparationResult.invalidated,
+      );
+      expect(
+        await second,
+        AndroidProjectionPreparationResult.acquired,
+      );
+      expect(platform.operations, <String>[
+        'projection',
+        'abandon-projection',
+        'projection',
+      ]);
+      await backend.abandonProjectionGrant();
+    },
+  );
+
+  test('serializes preparation callers across a shared backend instance', () async {
+    expect(
+      await backend.requestProjection(isCurrent: () => true),
+      AndroidProjectionPreparationResult.acquired,
+    );
+
+    var secondCompleted = false;
+    final second = backend.requestProjection(isCurrent: () => true).then((value) {
+      secondCompleted = true;
+      return value;
+    });
+    await Future<void>.delayed(Duration.zero);
+    expect(secondCompleted, isFalse);
+
+    await backend.abandonProjectionGrant();
+    expect(
+      await second,
+      AndroidProjectionPreparationResult.acquired,
+    );
+    expect(platform.operations, <String>[
+      'projection',
+      'abandon-projection',
+      'projection',
+    ]);
+    await backend.abandonProjectionGrant();
+  });
+
+  test('a failed projection request releases its preparation slot', () async {
+    platform.failure = const RealtimeMediaException(
+      RealtimeMediaErrorCode.permissionDenied,
+      'projection denied',
+    );
+
+    await expectLater(
+      backend.requestProjection(isCurrent: () => true),
+      throwsA(isA<RealtimeMediaException>()),
+    );
+
+    platform.failure = null;
+    expect(
+      await backend.requestProjection(isCurrent: () => true),
+      AndroidProjectionPreparationResult.acquired,
+    );
+    await backend.abandonProjectionGrant();
+    expect(platform.operations, <String>[
+      'projection',
+      'abandon-projection',
+      'projection',
+      'abandon-projection',
+    ]);
+  });
+
+  test('a guard exception after permission self-cleans without caller ownership', () async {
+    var checks = 0;
+    await expectLater(
+      backend.requestProjection(
+        isCurrent: () {
+          checks++;
+          if (checks >= 3) throw StateError('stale guard failed');
+          return true;
+        },
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(platform.operations, <String>[
+      'projection',
+      'abandon-projection',
+    ]);
+
+    expect(
+      await backend.requestProjection(isCurrent: () => true),
+      AndroidProjectionPreparationResult.acquired,
+    );
+    await backend.abandonProjectionGrant();
+  });
+
+  test('successful capture attachment releases the preparation slot', () async {
+    expect(
+      await backend.requestProjection(isCurrent: () => true),
+      AndroidProjectionPreparationResult.acquired,
+    );
+    final endpoint = await backend.start(sendIdentity);
+    await backend.attachCaptureSource(
+      endpointId: endpoint,
+      identity: sendIdentity,
+      source: ScreenCaptureSource(
+        id: ScreenCaptureSourceId('display:default'),
+        kind: ScreenCaptureSourceKind.display,
+      ),
+    );
+
+    expect(
+      await backend.requestProjection(isCurrent: () => true),
+      AndroidProjectionPreparationResult.acquired,
+    );
+    await backend.abandonProjectionGrant();
+    await backend.release(endpointId: endpoint, identity: sendIdentity);
+  });
 
   test(
     'fails closed when endpoint backend lacks native owner capability',
@@ -461,12 +607,23 @@ final class RecordingAndroidPlatform implements AndroidRealtimeMediaPlatform {
   final List<String> operations = <String>[];
   RealtimeMediaException? failure;
   RealtimeMediaException? releaseFailure;
+  RealtimeMediaException? abandonFailure;
+  Completer<void>? projectionGate;
   int rendererDetachCalls = 0;
 
   @override
   Future<void> requestProjection() async {
     operations.add('projection');
+    final gate = projectionGate;
+    if (gate != null) await gate.future;
     final error = failure;
+    if (error != null) throw error;
+  }
+
+  @override
+  Future<void> abandonProjectionGrant() async {
+    operations.add('abandon-projection');
+    final error = abandonFailure;
     if (error != null) throw error;
   }
 

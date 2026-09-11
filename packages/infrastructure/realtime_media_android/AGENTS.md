@@ -29,7 +29,11 @@ released`, and one consumed `MediaProjection` may create only one
 VirtualDisplay. Native owner start validates the generation; capture stops
 before encoder/decoder and SurfaceTexture release; owner close remains separate
 from endpoint release. Normal projection teardown unregisters the callback
-before calling `MediaProjection.stop()`.
+before calling `MediaProjection.stop()`. The lease state machine uses one
+synchronized transition boundary for `consume`, `revoke`, `release`, and
+`releaseIfGranted`; platform teardown runs only after a terminal state claim.
+`releaseIfGranted` can release only an unconsumed `GRANTED` lease, never a
+consumed owner that is in `cleanup_deferred`.
 
 If an encoder worker cannot reach its safe point within the existing timeout,
 the owner returns `cleanup_deferred` and retains the consumed lease, callback,
@@ -37,14 +41,31 @@ projection, codec, and VirtualDisplay for a later release retry. It must not
 stop the projection while that worker is still active. Permission denial,
 projection revoke, surface loss, stale owner, repeated stop, and late callbacks
 fail closed and are retry-safe; projection revoke is routed only to the bound
-send owner. Display-size changes remain `capture_source_ended`, not a hot
-resize path.
+send owner. A pre-consume start failure releases the captured `GRANTED` lease
+only if it is still the current lease. The App-scope Android backend serializes
+permission preparation across route coordinators; caller-owned preparation is
+abandoned exactly once, while backend-invalidated preparation is not abandoned
+again by the caller. Display-size changes remain `capture_source_ended`, not a
+hot resize path.
+
+The encoder's bounded CSD cache accepts both MediaCodec codec-config output and
+output-format `csd-0`/`csd-1`. The sender's recovery gate stays closed until a
+complete CSD+IDR is accepted by native `pushH264`; the decoder relocks on every
+parameter-set update and opens its delta path only after a recovery IDR has
+actually been queued into MediaCodec. A pending decoder frame is bounded to one
+and is cleared on reset.
 
 ## Validation
 
 ```sh
 flutter analyze --no-pub
 flutter test --no-pub
+```
+
+The Android host-unit gate is:
+
+```sh
+./gradlew :realtime_media_android:testDebugUnitTest --no-daemon --console=plain
 ```
 
 The Android Gradle build and instrumentation tests are additional Phase 4

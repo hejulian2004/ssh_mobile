@@ -1004,6 +1004,20 @@ jobs:
         run: flutter pub get
       - name: Install Full App dependencies
         run: flutter pub get
+      - name: Test realtime_media_android JVM unit tests
+        working-directory: apps/ssh_mobile_full/android
+        run: |
+          # The Flutter tool injects ignored Gradle wrapper files lazily when
+          # it runs a Gradle command. Prepare the same wrapper explicitly so
+          # this independent host-test step works on a fresh checkout.
+          if [[ ! -x ./gradlew ]]; then
+            flutter_root="$(cd "$(dirname "$(command -v flutter)")/.." && pwd)"
+            cp "$flutter_root/bin/cache/artifacts/gradle_wrapper/gradlew" ./gradlew
+            cp "$flutter_root/bin/cache/artifacts/gradle_wrapper/gradle-wrapper.jar" \
+              ./gradle/wrapper/gradle-wrapper.jar
+            chmod +x ./gradlew
+          fi
+          ./gradlew :realtime_media_android:testDebugUnitTest --no-daemon --console=plain
       - name: Build Android debug APK
         run: flutter build apk --debug --no-pub
 

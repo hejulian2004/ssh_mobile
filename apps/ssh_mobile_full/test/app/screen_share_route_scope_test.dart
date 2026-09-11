@@ -190,6 +190,16 @@ void main() {
         realtimeId: realtimeId,
         generation: 7,
       );
+      final startExpectation = expectLater(
+        start,
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.staleEndpoint,
+          ),
+        ),
+      );
       await Future<void>.delayed(Duration.zero);
       final stop = coordinator.port.stop(
         operationId: 'operation-a',
@@ -200,16 +210,58 @@ void main() {
       gate.complete();
       await stop;
 
-      await expectLater(
-        start,
-        throwsA(
-          isA<RealtimeMediaException>().having(
-            (error) => error.code,
-            'code',
-            RealtimeMediaErrorCode.staleEndpoint,
-          ),
-        ),
+      await startExpectation;
+      expect(backend.operations, isEmpty);
+      await coordinator.dispose();
+    },
+  );
+
+  test(
+    'stop invalidates a queued capture before its preparation callback runs',
+    () async {
+      final gate = Completer<void>();
+      capabilities.prepareGate = gate;
+      final coordinator = _coordinator(
+        backend,
+        capabilities,
+        session,
+        source: source,
       );
+      await coordinator.prepare(capture: true);
+
+      final first = coordinator.port.startCapture(
+        operationId: 'operation-a',
+        realtimeId: realtimeId,
+        generation: 7,
+      );
+      final firstExpectation = expectLater(
+        first,
+        throwsA(isA<RealtimeMediaException>()),
+      );
+      await Future<void>.delayed(Duration.zero);
+      final queued = coordinator.port.startCapture(
+        operationId: 'operation-b',
+        realtimeId: realtimeId,
+        generation: 7,
+      );
+      final queuedExpectation = expectLater(
+        queued,
+        throwsA(isA<RealtimeMediaException>()),
+      );
+      await Future<void>.delayed(Duration.zero);
+      final stop = coordinator.port.stop(
+        operationId: 'operation-b',
+        realtimeId: realtimeId,
+        generation: 7,
+      );
+
+      gate.complete();
+      await stop;
+
+      await firstExpectation;
+      await queuedExpectation;
+      expect(capabilities.prepareCalls, 1);
+      expect(capabilities.abandonCalls, 0);
       expect(backend.operations, isEmpty);
       await coordinator.dispose();
     },
@@ -246,6 +298,63 @@ void main() {
       ),
     );
     expect(backend.operations, isEmpty);
+    await coordinator.dispose();
+  });
+
+  test('an invalidated preparation is not abandoned again by the coordinator', () async {
+    final coordinator = _coordinator(
+      backend,
+      capabilities,
+      session,
+      source: source,
+    );
+    capabilities.preparationResult = AppScreenSharePreparationResult.invalidated;
+    await coordinator.prepare(capture: true);
+
+    await expectLater(
+      coordinator.port.startCapture(
+        operationId: 'operation-a',
+        realtimeId: realtimeId,
+        generation: 7,
+      ),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.staleEndpoint,
+        ),
+      ),
+    );
+    expect(capabilities.abandonCalls, 0);
+    await coordinator.dispose();
+  });
+
+  test('attach success clears preparation before a later stale check', () async {
+    final coordinator = _coordinator(
+      backend,
+      capabilities,
+      session,
+      source: source,
+    );
+    backend.afterAttach = () => session.replaceGeneration(8);
+    await coordinator.prepare(capture: true);
+
+    await expectLater(
+      coordinator.port.startCapture(
+        operationId: 'operation-a',
+        realtimeId: realtimeId,
+        generation: 7,
+      ),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.staleEndpoint,
+        ),
+      ),
+    );
+    expect(capabilities.abandonCalls, 0);
+    expect(backend.operations, contains('release:1'));
     await coordinator.dispose();
   });
 
@@ -514,7 +623,10 @@ void main() {
       platform: windowsPlatform,
     );
     final windowsCapabilities = appScreenSharePlatformCapabilitiesFor(windows);
-    await windowsCapabilities.prepareCapture();
+    expect(
+      await windowsCapabilities.prepareCapture(() => true),
+      AppScreenSharePreparationResult.acquired,
+    );
     expect(
       await windowsCapabilities.listCaptureSources(),
       <ScreenCaptureSource>[source],
@@ -528,12 +640,16 @@ void main() {
       platform: androidPlatform,
     );
     final androidCapabilities = appScreenSharePlatformCapabilitiesFor(android);
-    await androidCapabilities.prepareCapture();
+    expect(
+      await androidCapabilities.prepareCapture(() => true),
+      AppScreenSharePreparationResult.acquired,
+    );
     expect(androidPlatform.projectionCalls, 1);
     expect(
       await androidCapabilities.listCaptureSources(),
       <ScreenCaptureSource>[source],
     );
+    await androidCapabilities.abandonCapturePreparation();
 
     expect(
       () => appScreenSharePlatformCapabilitiesFor(backend),
@@ -609,14 +725,26 @@ final class _RecordingCapabilities
 
   List<ScreenCaptureSource> sources;
   int prepareCalls = 0;
+  int abandonCalls = 0;
   int listCalls = 0;
   Completer<void>? prepareGate;
+  AppScreenSharePreparationResult preparationResult =
+      AppScreenSharePreparationResult.acquired;
 
   @override
-  Future<void> prepareCapture() async {
+  Future<AppScreenSharePreparationResult> prepareCapture(
+    AppScreenShareOperationGuard guard,
+  ) async {
     prepareCalls++;
     final gate = prepareGate;
     if (gate != null) await gate.future;
+    if (!guard()) return AppScreenSharePreparationResult.invalidated;
+    return preparationResult;
+  }
+
+  @override
+  Future<void> abandonCapturePreparation() async {
+    abandonCalls++;
   }
 
   @override
@@ -630,6 +758,7 @@ final class _RecordingMediaBackend implements RealtimeMediaBackend {
   final List<String> operations = <String>[];
   int _nextEndpoint = 0;
   Completer<void>? startGate;
+  void Function()? afterAttach;
 
   @override
   Future<RealtimeMediaEndpointId> start(
@@ -649,6 +778,7 @@ final class _RecordingMediaBackend implements RealtimeMediaBackend {
     required ScreenCaptureSource source,
   }) async {
     operations.add('attach-capture:${endpointId.value}');
+    afterAttach?.call();
   }
 
   @override
@@ -848,6 +978,9 @@ final class _RecordingAndroidPlatform implements AndroidRealtimeMediaPlatform {
 
   @override
   Future<void> requestProjection() async => projectionCalls++;
+
+  @override
+  Future<void> abandonProjectionGrant() async {}
 
   @override
   Future<List<ScreenCaptureSource>> listCaptureSources() async => sources;

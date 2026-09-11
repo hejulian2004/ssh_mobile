@@ -125,59 +125,9 @@ class RealtimeMediaAndroidPlugin :
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "requestProjection" -> requestProjection(result)
+            "abandonProjectionGrant" -> abandonProjectionGrant(result)
             "listSources" -> result.success(listSources())
-            "startCapture" -> withOwner(call, result) { owner, args ->
-                val sourceId = args["source_id"] as? String
-                val sourceKind = args["source_kind"] as? String
-                if (sourceId.isNullOrBlank() || sourceKind.isNullOrBlank()) {
-                    error(result, "invalid_argument", "A source ID is required.")
-                    return@withOwner
-                }
-                val appContext = context
-                if (appContext == null) {
-                    error(result, "backend_failure", "Android capture service context is unavailable.")
-                    return@withOwner
-                }
-                val needsForegroundService = owners.values.none {
-                    it.isCaptureOwnerActive()
-                }
-                if (needsForegroundService) {
-                    try {
-                        // MediaProjection capture must have its typed foreground
-                        // service active before createVirtualDisplay is called.
-                        ScreenCaptureForegroundService.start(appContext)
-                    } catch (_: SecurityException) {
-                        stopForegroundServiceIfUnused()
-                        error(
-                            result,
-                            "permission_denied",
-                            "Android capture foreground service permission was rejected.",
-                        )
-                        return@withOwner
-                    } catch (_: Exception) {
-                        stopForegroundServiceIfUnused()
-                        error(
-                            result,
-                            "backend_failure",
-                            "Android capture foreground service could not start.",
-                        )
-                        return@withOwner
-                    }
-                }
-                val failure = try {
-                    owner.startCapture(projectionLease, sourceId, sourceKind)
-                } catch (_: Exception) {
-                    "backend_failure"
-                }
-                if (failure == null) {
-                    result.success(null)
-                } else {
-                    // A failed first capture must compensate the service
-                    // request, while another active capture owner keeps it.
-                    if (needsForegroundService) stopForegroundServiceIfUnused()
-                    error(result, failure, "Android capture could not start.")
-                }
-            }
+            "startCapture" -> handleStartCapture(call, result)
             "attachRemoteVideoSurface" -> withOwner(call, result) { owner, _ ->
                 val failure = owner.attachDecoder()
                 if (failure != null) {
@@ -292,6 +242,82 @@ class RealtimeMediaAndroidPlugin :
         } catch (_: Exception) {
             pendingProjectionResult = null
             error(result, "backend_failure", "MediaProjection request could not open.")
+        }
+    }
+
+    private fun abandonProjectionGrant(result: MethodChannel.Result) {
+        projectionLease?.releaseIfGranted()
+        stopForegroundServiceIfUnused()
+        result.success(null)
+    }
+
+    /** Wraps the whole owner lookup so pre-block failures release this grant. */
+    private fun handleStartCapture(call: MethodCall, result: MethodChannel.Result) {
+        val capturedLease = projectionLease
+        try {
+            withOwner(call, result) { owner, args ->
+                val sourceId = args["source_id"] as? String
+                val sourceKind = args["source_kind"] as? String
+                if (sourceId.isNullOrBlank() || sourceKind.isNullOrBlank()) {
+                    error(result, "invalid_argument", "A source ID is required.")
+                    return@withOwner
+                }
+                val appContext = context
+                if (appContext == null) {
+                    error(result, "backend_failure", "Android capture service context is unavailable.")
+                    return@withOwner
+                }
+                val needsForegroundService = owners.values.none {
+                    it.isCaptureOwnerActive()
+                }
+                if (needsForegroundService) {
+                    try {
+                        // MediaProjection capture must have its typed foreground
+                        // service active before createVirtualDisplay is called.
+                        ScreenCaptureForegroundService.start(appContext)
+                    } catch (_: SecurityException) {
+                        stopForegroundServiceIfUnused()
+                        error(
+                            result,
+                            "permission_denied",
+                            "Android capture foreground service permission was rejected.",
+                        )
+                        return@withOwner
+                    } catch (_: Exception) {
+                        stopForegroundServiceIfUnused()
+                        error(
+                            result,
+                            "backend_failure",
+                            "Android capture foreground service could not start.",
+                        )
+                        return@withOwner
+                    }
+                }
+                val failure = try {
+                    owner.startCapture(projectionLease, sourceId, sourceKind)
+                } catch (_: Exception) {
+                    "backend_failure"
+                }
+                if (failure == null) {
+                    result.success(null)
+                } else {
+                    // A failed first capture must compensate the service
+                    // request, while another active capture owner keeps it.
+                    if (needsForegroundService) stopForegroundServiceIfUnused()
+                    error(result, failure, "Android capture could not start.")
+                }
+            }
+        } finally {
+            releaseCapturedGrantIfStillCurrent(capturedLease)
+        }
+    }
+
+    private fun releaseCapturedGrantIfStillCurrent(capturedLease: ProjectionLease?) {
+        if (capturedLease == null || projectionLease !== capturedLease) return
+        if (capturedLease.state == ProjectionLeaseState.GRANTED &&
+            capturedLease.releaseIfGranted()
+        ) {
+            stopForegroundServiceIfUnused()
         }
     }
 

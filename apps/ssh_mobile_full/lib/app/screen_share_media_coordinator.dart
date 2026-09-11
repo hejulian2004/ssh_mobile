@@ -9,17 +9,35 @@ import 'package:realtime_media_windows/realtime_media_windows.dart';
 import 'realtime_media_feature_adapters.dart';
 import 'screen_share_feature_adapters.dart';
 
+typedef AppScreenShareOperationGuard = bool Function();
+
+/// Result of the App Shell's capture-preparation lifecycle.
+enum AppScreenSharePreparationResult {
+  /// The caller owns the prepared platform lease until attach or abandon.
+  acquired,
+
+  /// The platform owner invalidated and cleaned the preparation already.
+  invalidated,
+}
+
 /// App-owned platform capability boundary for one screen-share route.
 ///
 /// It carries only source metadata and permission/lifecycle results. Platform
 /// adapters retain capture, codec, surface and native-owner ownership.
 abstract interface class AppScreenSharePlatformCapabilities {
   factory AppScreenSharePlatformCapabilities({
-    required Future<void> Function() prepareCapture,
+    required Future<AppScreenSharePreparationResult> Function(
+      AppScreenShareOperationGuard guard,
+    ) prepareCapture,
+    required Future<void> Function() abandonCapturePreparation,
     required Future<List<ScreenCaptureSource>> Function() listCaptureSources,
   }) = _AppScreenSharePlatformCapabilities;
 
-  Future<void> prepareCapture();
+  Future<AppScreenSharePreparationResult> prepareCapture(
+    AppScreenShareOperationGuard guard,
+  );
+
+  Future<void> abandonCapturePreparation();
 
   Future<List<ScreenCaptureSource>> listCaptureSources();
 }
@@ -28,14 +46,23 @@ final class _AppScreenSharePlatformCapabilities
     implements AppScreenSharePlatformCapabilities {
   const _AppScreenSharePlatformCapabilities({
     required this._prepareCapture,
+    required this._abandonCapturePreparation,
     required this._listCaptureSources,
   });
 
-  final Future<void> Function() _prepareCapture;
+  final Future<AppScreenSharePreparationResult> Function(
+    AppScreenShareOperationGuard guard,
+  ) _prepareCapture;
+  final Future<void> Function() _abandonCapturePreparation;
   final Future<List<ScreenCaptureSource>> Function() _listCaptureSources;
 
   @override
-  Future<void> prepareCapture() => _prepareCapture();
+  Future<AppScreenSharePreparationResult> prepareCapture(
+    AppScreenShareOperationGuard guard,
+  ) => _prepareCapture(guard);
+
+  @override
+  Future<void> abandonCapturePreparation() => _abandonCapturePreparation();
 
   @override
   Future<List<ScreenCaptureSource>> listCaptureSources() =>
@@ -128,29 +155,51 @@ final class AppScreenShareMediaCoordinator {
     required String operationId,
     required String realtimeId,
     required int generation,
-  }) => _trackMediaOperation(
-    () => _startCapture(
+  }) async {
+    _validateOperation(
       operationId: operationId,
       realtimeId: realtimeId,
       generation: generation,
-    ),
-  );
+    );
+    final epoch = ++_operationEpoch;
+    await _trackMediaOperation(
+      () => _startCapture(
+        operationId: operationId,
+        realtimeId: realtimeId,
+        generation: generation,
+        epoch: epoch,
+      ),
+    );
+  }
 
   Future<void> _startViewerTracked({
     required String operationId,
     required String realtimeId,
     required int generation,
-  }) => _trackMediaOperation(
-    () => _startViewer(
+  }) async {
+    _validateOperation(
       operationId: operationId,
       realtimeId: realtimeId,
       generation: generation,
-    ),
-  );
+    );
+    final epoch = ++_operationEpoch;
+    await _trackMediaOperation(
+      () => _startViewer(
+        operationId: operationId,
+        realtimeId: realtimeId,
+        generation: generation,
+        epoch: epoch,
+      ),
+    );
+  }
 
   Future<void> _trackMediaOperation(Future<void> Function() operation) {
+    final predecessor = _activeMediaOperation;
     late final Future<void> tracked;
-    tracked = _runTrackedMediaOperation(operation, () {
+    tracked = _runTrackedMediaOperation(() async {
+      if (predecessor != null) await predecessor;
+      await operation();
+    }, () {
       if (identical(_activeMediaOperation, tracked)) {
         _activeMediaOperation = null;
       }
@@ -174,12 +223,14 @@ final class AppScreenShareMediaCoordinator {
     required String operationId,
     required String realtimeId,
     required int generation,
+    required int epoch,
   }) async {
     _validateOperation(
       operationId: operationId,
       realtimeId: realtimeId,
       generation: generation,
     );
+    _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
     final selectedSource = source;
     if (!_prepared || selectedSource == null) {
       throw const RealtimeMediaException(
@@ -193,34 +244,52 @@ final class AppScreenShareMediaCoordinator {
         'Screen-share media is already active.',
       );
     }
-    final epoch = ++_operationEpoch;
     final mediaSession = _mediaSession!;
-    await capabilities.prepareCapture();
-    _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
-    final sources = await capabilities.listCaptureSources();
-    _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
-    if (!sources.any((item) => item.id.value == selectedSource.id.value)) {
-      throw const RealtimeMediaException(
-        RealtimeMediaErrorCode.driverUnavailable,
-        'The selected capture source is no longer available.',
-      );
-    }
-    final endpoint = await mediaSession.start(RealtimeMediaDirection.send);
-    if (!_isCurrentOperation(epoch, operationId, realtimeId, generation)) {
-      await _releaseEndpointIfNeeded(mediaSession, endpoint);
-      throw const RealtimeMediaException(
-        RealtimeMediaErrorCode.staleEndpoint,
-        'Screen-share capture start became stale.',
-      );
-    }
-    _endpoint = endpoint;
-    _operationId = operationId;
+    var ownsPreparation = false;
+    var attachCompleted = false;
     try {
-      await mediaSession.attachCaptureSource(endpoint, selectedSource);
+      final preparation = await capabilities.prepareCapture(
+        () => _isCurrentOperation(epoch, operationId, realtimeId, generation),
+      );
+      if (preparation == AppScreenSharePreparationResult.invalidated) {
+        throw const RealtimeMediaException(
+          RealtimeMediaErrorCode.staleEndpoint,
+          'Screen-share capture preparation became stale.',
+        );
+      }
+      ownsPreparation = true;
       _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
-    } catch (_) {
-      await _releaseCurrentEndpoint();
-      rethrow;
+      final sources = await capabilities.listCaptureSources();
+      _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
+      if (!sources.any((item) => item.id.value == selectedSource.id.value)) {
+        throw const RealtimeMediaException(
+          RealtimeMediaErrorCode.driverUnavailable,
+          'The selected capture source is no longer available.',
+        );
+      }
+      final endpoint = await mediaSession.start(RealtimeMediaDirection.send);
+      if (!_isCurrentOperation(epoch, operationId, realtimeId, generation)) {
+        await _releaseEndpointIfNeeded(mediaSession, endpoint);
+        throw const RealtimeMediaException(
+          RealtimeMediaErrorCode.staleEndpoint,
+          'Screen-share capture start became stale.',
+        );
+      }
+      _endpoint = endpoint;
+      _operationId = operationId;
+      try {
+        await mediaSession.attachCaptureSource(endpoint, selectedSource);
+        attachCompleted = true;
+        ownsPreparation = false;
+        _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
+      } catch (_) {
+        await _releaseCurrentEndpoint();
+        rethrow;
+      }
+    } finally {
+      if (ownsPreparation && !attachCompleted) {
+        await capabilities.abandonCapturePreparation();
+      }
     }
   }
 
@@ -228,12 +297,14 @@ final class AppScreenShareMediaCoordinator {
     required String operationId,
     required String realtimeId,
     required int generation,
+    required int epoch,
   }) async {
     _validateOperation(
       operationId: operationId,
       realtimeId: realtimeId,
       generation: generation,
     );
+    _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
     if (!_prepared) {
       throw const RealtimeMediaException(
         RealtimeMediaErrorCode.backendFailure,
@@ -246,7 +317,6 @@ final class AppScreenShareMediaCoordinator {
         'Screen-share media is already active.',
       );
     }
-    final epoch = ++_operationEpoch;
     final mediaSession = _mediaSession!;
     final endpoint = await mediaSession.start(RealtimeMediaDirection.receive);
     if (!_isCurrentOperation(epoch, operationId, realtimeId, generation)) {
@@ -389,14 +459,24 @@ AppScreenSharePlatformCapabilities appScreenSharePlatformCapabilitiesFor(
   if (backend is WindowsRealtimeMediaBackend) {
     final windows = backend;
     return AppScreenSharePlatformCapabilities(
-      prepareCapture: () async {},
+      prepareCapture: (_) async => AppScreenSharePreparationResult.acquired,
+      abandonCapturePreparation: () async {},
       listCaptureSources: windows.listCaptureSources,
     );
   }
   if (backend is AndroidRealtimeMediaBackend) {
     final android = backend;
     return AppScreenSharePlatformCapabilities(
-      prepareCapture: android.requestProjection,
+      prepareCapture: (guard) async {
+        final result = await android.requestProjection(isCurrent: guard);
+        return switch (result) {
+          AndroidProjectionPreparationResult.acquired =>
+            AppScreenSharePreparationResult.acquired,
+          AndroidProjectionPreparationResult.invalidated =>
+            AppScreenSharePreparationResult.invalidated,
+        };
+      },
+      abandonCapturePreparation: android.abandonProjectionGrant,
       listCaptureSources: android.listCaptureSources,
     );
   }

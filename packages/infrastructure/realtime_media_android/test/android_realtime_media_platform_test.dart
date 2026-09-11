@@ -56,6 +56,19 @@ void main() {
     );
   });
 
+  test('forwards projection grant abandonment', () async {
+    MethodCall? captured;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      captured = call;
+      return null;
+    });
+
+    const platform = MethodChannelAndroidRealtimeMediaPlatform();
+    await platform.abandonProjectionGrant();
+
+    expect(captured?.method, 'abandonProjectionGrant');
+  });
+
   test('maps hardware codec failures to typed errors', () async {
     messenger.setMockMethodCallHandler(channel, (call) async {
       throw PlatformException(

@@ -181,6 +181,7 @@ internal class H264DecoderRecoveryGate {
         return when (cache.updateFromAccessUnit(info)) {
             H264ParameterSetUpdate.REJECTED -> H264DecoderFrameDecision.REJECTED
             H264ParameterSetUpdate.UPDATED -> {
+                awaitingRecoveryKeyframe = true
                 configPending = cache.isComplete
                 if (!keyframe) {
                     H264DecoderFrameDecision.DROP_AND_REQUEST
