@@ -301,62 +301,69 @@ void main() {
     await coordinator.dispose();
   });
 
-  test('an invalidated preparation is not abandoned again by the coordinator', () async {
-    final coordinator = _coordinator(
-      backend,
-      capabilities,
-      session,
-      source: source,
-    );
-    capabilities.preparationResult = AppScreenSharePreparationResult.invalidated;
-    await coordinator.prepare(capture: true);
+  test(
+    'an invalidated preparation is not abandoned again by the coordinator',
+    () async {
+      final coordinator = _coordinator(
+        backend,
+        capabilities,
+        session,
+        source: source,
+      );
+      capabilities.preparationResult =
+          AppScreenSharePreparationResult.invalidated;
+      await coordinator.prepare(capture: true);
 
-    await expectLater(
-      coordinator.port.startCapture(
-        operationId: 'operation-a',
-        realtimeId: realtimeId,
-        generation: 7,
-      ),
-      throwsA(
-        isA<RealtimeMediaException>().having(
-          (error) => error.code,
-          'code',
-          RealtimeMediaErrorCode.staleEndpoint,
+      await expectLater(
+        coordinator.port.startCapture(
+          operationId: 'operation-a',
+          realtimeId: realtimeId,
+          generation: 7,
         ),
-      ),
-    );
-    expect(capabilities.abandonCalls, 0);
-    await coordinator.dispose();
-  });
-
-  test('attach success clears preparation before a later stale check', () async {
-    final coordinator = _coordinator(
-      backend,
-      capabilities,
-      session,
-      source: source,
-    );
-    backend.afterAttach = () => session.replaceGeneration(8);
-    await coordinator.prepare(capture: true);
-
-    await expectLater(
-      coordinator.port.startCapture(
-        operationId: 'operation-a',
-        realtimeId: realtimeId,
-        generation: 7,
-      ),
-      throwsA(
-        isA<RealtimeMediaException>().having(
-          (error) => error.code,
-          'code',
-          RealtimeMediaErrorCode.staleEndpoint,
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.staleEndpoint,
+          ),
         ),
-      ),
-    );
-    expect(capabilities.abandonCalls, 0);
-    expect(backend.operations, contains('release:1'));
-    await coordinator.dispose();
-  });
+      );
+      expect(capabilities.abandonCalls, 0);
+      await coordinator.dispose();
+    },
+  );
+
+  test(
+    'attach success clears preparation before a later stale check',
+    () async {
+      final coordinator = _coordinator(
+        backend,
+        capabilities,
+        session,
+        source: source,
+      );
+      backend.afterAttach = () => session.replaceGeneration(8);
+      await coordinator.prepare(capture: true);
+
+      await expectLater(
+        coordinator.port.startCapture(
+          operationId: 'operation-a',
+          realtimeId: realtimeId,
+          generation: 7,
+        ),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.staleEndpoint,
+          ),
+        ),
+      );
+      expect(capabilities.abandonCalls, 0);
+      expect(backend.operations, contains('release:1'));
+      await coordinator.dispose();
+    },
+  );
 
   test(
     'prepare rejects missing generation and missing capture source',

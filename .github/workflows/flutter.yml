@@ -1010,10 +1010,12 @@ jobs:
           # The Flutter tool injects ignored Gradle wrapper files lazily when
           # it runs a Gradle command. Prepare the same wrapper explicitly so
           # this independent host-test step works on a fresh checkout.
-          if [[ ! -x ./gradlew ]]; then
-            flutter_root="$(cd "$(dirname "$(command -v flutter)")/.." && pwd)"
-            cp "$flutter_root/bin/cache/artifacts/gradle_wrapper/gradlew" ./gradlew
-            cp "$flutter_root/bin/cache/artifacts/gradle_wrapper/gradle-wrapper.jar" \
+          flutter_root="${FLUTTER_ROOT:?Flutter SDK root is required}"
+          wrapper_source="$flutter_root/bin/cache/artifacts/gradle_wrapper"
+          if [[ ! -x ./gradlew || ! -f ./gradle/wrapper/gradle-wrapper.jar ]]; then
+            flutter precache --android
+            cp "$wrapper_source/gradlew" ./gradlew
+            cp "$wrapper_source/gradle-wrapper.jar" \
               ./gradle/wrapper/gradle-wrapper.jar
             chmod +x ./gradlew
           fi

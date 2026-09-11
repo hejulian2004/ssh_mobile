@@ -28,7 +28,8 @@ abstract interface class AppScreenSharePlatformCapabilities {
   factory AppScreenSharePlatformCapabilities({
     required Future<AppScreenSharePreparationResult> Function(
       AppScreenShareOperationGuard guard,
-    ) prepareCapture,
+    )
+    prepareCapture,
     required Future<void> Function() abandonCapturePreparation,
     required Future<List<ScreenCaptureSource>> Function() listCaptureSources,
   }) = _AppScreenSharePlatformCapabilities;
@@ -52,7 +53,8 @@ final class _AppScreenSharePlatformCapabilities
 
   final Future<AppScreenSharePreparationResult> Function(
     AppScreenShareOperationGuard guard,
-  ) _prepareCapture;
+  )
+  _prepareCapture;
   final Future<void> Function() _abandonCapturePreparation;
   final Future<List<ScreenCaptureSource>> Function() _listCaptureSources;
 
@@ -196,14 +198,17 @@ final class AppScreenShareMediaCoordinator {
   Future<void> _trackMediaOperation(Future<void> Function() operation) {
     final predecessor = _activeMediaOperation;
     late final Future<void> tracked;
-    tracked = _runTrackedMediaOperation(() async {
-      if (predecessor != null) await predecessor;
-      await operation();
-    }, () {
-      if (identical(_activeMediaOperation, tracked)) {
-        _activeMediaOperation = null;
-      }
-    });
+    tracked = _runTrackedMediaOperation(
+      () async {
+        if (predecessor != null) await predecessor;
+        await operation();
+      },
+      () {
+        if (identical(_activeMediaOperation, tracked)) {
+          _activeMediaOperation = null;
+        }
+      },
+    );
     _activeMediaOperation = tracked;
     return tracked;
   }
