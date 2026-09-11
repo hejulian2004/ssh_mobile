@@ -502,7 +502,7 @@ void main() {
   );
 
   test('reads payload-free low-frequency endpoint statistics', () async {
-    backend.stats = const RealtimeMediaStats(
+    backend.stats = RealtimeMediaStats(
       width: 1280,
       height: 720,
       framesCaptured: 10,
@@ -518,6 +518,102 @@ void main() {
     expect(stats.framesSent, 9);
     expect(backend.operations.last, 'stats:endpoint-1');
   });
+
+  test(
+    'routes keyframe and decoder recovery through the native capability',
+    () async {
+      final endpoint = await controller.start(RealtimeMediaDirection.receive);
+
+      await controller.requestKeyframe(endpoint: endpoint);
+      await controller.resetDecoder(endpoint: endpoint);
+
+      expect(backend.operations, <String>[
+        'start:realtime-1:7:receive',
+        'stats:endpoint-1',
+        'request-keyframe:endpoint-1',
+        'stats:endpoint-1',
+        'reset-decoder:endpoint-1',
+      ]);
+    },
+  );
+
+  test(
+    'adaptation uses the narrower native capability after one stats read',
+    () async {
+      backend.stats = RealtimeMediaStats(
+        width: 1280,
+        height: 720,
+        jitterMs: 120,
+        queueDepth: 3,
+      );
+      final endpoint = await controller.start(RealtimeMediaDirection.send);
+
+      final decision = await controller.adapt(endpoint);
+
+      expect(decision.reason, RealtimeMediaAdaptationReason.congestion);
+      expect(decision.bitrateKbps, 3072);
+      expect(decision.framerate, 15);
+      expect(backend.operations, <String>[
+        'start:realtime-1:7:send',
+        'stats:endpoint-1',
+        'adapt:endpoint-1:3072:15',
+      ]);
+    },
+  );
+
+  test(
+    'default adaptation keeps interval loss state instead of cumulative loss',
+    () async {
+      final first = RealtimeMediaStats(
+        width: 1280,
+        height: 720,
+        packetsReceived: 100,
+        packetsLost: 10,
+      );
+      final healthy = first.copyWith(packetsReceived: 101, packetsLost: 10);
+      backend.statsSequence = <RealtimeMediaStats>[first, healthy];
+      final endpoint = await controller.start(RealtimeMediaDirection.send);
+      final atStart = DateTime.utc(2026, 1, 1);
+
+      final initial = await controller.adapt(endpoint, now: atStart);
+      final next = await controller.adapt(
+        endpoint,
+        now: atStart.add(const Duration(seconds: 1)),
+      );
+
+      expect(initial.reason, RealtimeMediaAdaptationReason.congestion);
+      expect(next.reason, RealtimeMediaAdaptationReason.steady);
+      expect(backend.operations, <String>[
+        'start:realtime-1:7:send',
+        'stats:endpoint-1',
+        'adapt:endpoint-1:3072:15',
+        'stats:endpoint-1',
+        'adapt:endpoint-1:3072:15',
+      ]);
+    },
+  );
+
+  test(
+    'resolution adaptation is a restart intent, not a live codec mutation',
+    () async {
+      backend.stats = RealtimeMediaStats(
+        width: 3840,
+        height: 2160,
+        packetsReceived: 100,
+        packetsLost: 10,
+        rttMs: 400,
+      );
+      final endpoint = await controller.start(RealtimeMediaDirection.send);
+
+      final decision = await controller.adapt(endpoint);
+
+      expect(decision.requiresRestart, isTrue);
+      expect(backend.operations, <String>[
+        'start:realtime-1:7:send',
+        'stats:endpoint-1',
+      ]);
+    },
+  );
 
   test('foreign generation endpoint is stale', () async {
     final oldEndpoint = await controller.start(RealtimeMediaDirection.send);
@@ -629,7 +725,11 @@ void main() {
   );
 }
 
-final class RecordingBackend implements RealtimeMediaBackend {
+final class RecordingBackend
+    implements
+        RealtimeMediaBackend,
+        RealtimeMediaKeyframeBackend,
+        RealtimeMediaAdaptationBackend {
   final List<String> operations = <String>[];
   bool failStart = false;
   bool failAttach = false;
@@ -644,7 +744,8 @@ final class RecordingBackend implements RealtimeMediaBackend {
   Completer<void>? releaseStarted;
   Completer<void>? startGate;
   Completer<void>? startStarted;
-  RealtimeMediaStats stats = const RealtimeMediaStats();
+  RealtimeMediaStats stats = RealtimeMediaStats();
+  List<RealtimeMediaStats>? statsSequence;
   RemoteVideoSurface? lastSurface;
   int _nextEndpoint = 0;
 
@@ -750,6 +851,35 @@ final class RecordingBackend implements RealtimeMediaBackend {
     required RealtimeMediaEndpointIdentity identity,
   }) async {
     operations.add('stats:${endpointId.value}');
+    final sequence = statsSequence;
+    if (sequence != null && sequence.isNotEmpty) return sequence.removeAt(0);
     return stats;
+  }
+
+  @override
+  Future<void> requestKeyframe({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) async {
+    operations.add('request-keyframe:${endpointId.value}');
+  }
+
+  @override
+  Future<void> resetDecoder({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) async {
+    operations.add('reset-decoder:${endpointId.value}');
+  }
+
+  @override
+  Future<void> applyAdaptation({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    required RealtimeMediaAdaptationDecision decision,
+  }) async {
+    operations.add(
+      'adapt:${endpointId.value}:${decision.bitrateKbps}:${decision.framerate}',
+    );
   }
 }

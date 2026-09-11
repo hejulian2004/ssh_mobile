@@ -3,7 +3,9 @@ library;
 
 export 'src/realtime_media_endpoint.dart';
 export 'src/realtime_media_error.dart';
+export 'src/realtime_media_adaptation.dart';
 export 'src/realtime_media_native_owner.dart';
+export 'src/realtime_media_qos.dart';
 export 'src/realtime_media_session.dart';
 export 'src/realtime_media_state.dart';
 export 'src/realtime_media_stats.dart';

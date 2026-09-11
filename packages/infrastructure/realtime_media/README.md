@@ -1,10 +1,31 @@
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 # realtime_media
 
 `realtime_media` owns the Dart lifecycle contract for an opaque native screen-media endpoint. It is infrastructure: it does not own `NetworkRuntime`, a WebRTC peer, signaling, a network socket, capture, encoding, decoding, or renderer implementation.
 
-The public API contains only endpoint/session identity, lifecycle, capture-source selection metadata, a renderer capability, and payload-free statistics. Statistics are requested as a low-frequency `readStats` snapshot, never a media stream. Raw or encoded frames never cross this package's Dart API. Native platform adapters introduced by later phases own capture/codec/surface resources and use the native bridge directly.
+The public API contains only endpoint/session identity, lifecycle, capture-source selection metadata, a renderer capability, and payload-free statistics. Statistics are requested as a low-frequency `readStats` snapshot, never a media stream; the bounded QoS counters and adaptation decision are metadata only. Raw or encoded frames never cross this package's Dart API. Native platform adapters introduced by later phases own capture/codec/surface resources and use the native bridge directly.
+
+The optional `RealtimeMediaKeyframeBackend` capability exposes generation-bound
+`requestKeyframe` and `resetDecoder` commands without carrying frame payloads.
+It is a recovery port only: platform owners and the native WebRTC peer retain
+the request, and native owners may turn it into bounded codec/RTCP recovery.
+
+The optional `RealtimeMediaAdaptationBackend` capability carries one bounded
+bitrate/framerate/resolution decision to the native owner. The native owner
+applies bitrate and frame-rate changes without changing the fixed three-frame
+queue; a resolution change is an explicit stop/release/recreate operation.
+No frame payload or per-frame statistic is part of this capability.
+
+Callers that poll over time can use `RealtimeMediaAdaptationController` to add
+the planned hysteresis: congestion must persist for three seconds before a
+bounded degradation step, and healthy loss/RTT/queue conditions must persist
+for ten seconds before recovering one level. The controller retains only
+bounded targets and timestamps; it never stores media bytes or grows a queue.
+
+`RealtimeMediaStats` is a low-frequency, payload-free snapshot. Native owners
+populate bounded queue, packet, loss/recovery, keyframe and jitter counters;
+RTT is reported only when the platform has an authoritative RTCP/ICE source.
 
 ## Ownership and release
 

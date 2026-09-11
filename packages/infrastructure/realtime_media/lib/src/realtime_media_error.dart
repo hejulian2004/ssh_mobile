@@ -18,6 +18,7 @@ enum RealtimeMediaErrorCode {
   captureSourceEnded,
   encoderUnavailable,
   encoderFailed,
+  recreateRequired,
   cleanupDeferred,
   decoderUnavailable,
   decoderFailed,

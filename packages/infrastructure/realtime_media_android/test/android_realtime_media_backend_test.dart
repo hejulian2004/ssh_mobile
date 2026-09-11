@@ -248,6 +248,45 @@ void main() {
   );
 
   test(
+    'routes keyframe and decoder recovery through the owner token',
+    () async {
+      final sendEndpoint = await backend.start(sendIdentity);
+      await backend.requestKeyframe(
+        endpointId: sendEndpoint,
+        identity: sendIdentity,
+      );
+
+      final receiveEndpoint = await backend.start(receiveIdentity);
+      await backend.resetDecoder(
+        endpointId: receiveEndpoint,
+        identity: receiveIdentity,
+      );
+
+      expect(platform.operations, <String>['keyframe:1', 'reset-decoder:2']);
+    },
+  );
+
+  test(
+    'routes bounded adaptation through the generation-bound owner token',
+    () async {
+      final endpoint = await backend.start(sendIdentity);
+      await backend.applyAdaptation(
+        endpointId: endpoint,
+        identity: sendIdentity,
+        decision: const RealtimeMediaAdaptationDecision(
+          bitrateKbps: 1536,
+          framerate: 7,
+          width: 1280,
+          height: 720,
+          reason: RealtimeMediaAdaptationReason.congestion,
+        ),
+      );
+
+      expect(platform.operations, <String>['adapt:1:1536:7']);
+    },
+  );
+
+  test(
     'projection requests are delegated and repeated calls are safe',
     () async {
       await backend.requestProjection();
@@ -274,6 +313,36 @@ void main() {
           ),
         ),
       );
+    },
+  );
+
+  test(
+    'duplicate native endpoint start releases the replacement owner',
+    () async {
+      final first = await backend.start(sendIdentity);
+      endpointBackend._nextEndpoint = 1;
+
+      await expectLater(
+        backend.start(sendIdentity),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.duplicateEndpoint,
+          ),
+        ),
+      );
+
+      expect(first.value, '1');
+      expect(endpointBackend.operations, <String>[
+        'start:realtime-1:7:send',
+        'owner-open:1',
+        'start:realtime-1:7:send',
+        'owner-open:1',
+        'owner-close:1',
+        'release:1',
+      ]);
+      await backend.release(endpointId: first, identity: sendIdentity);
     },
   );
 }
@@ -461,5 +530,35 @@ final class RecordingAndroidPlatform implements AndroidRealtimeMediaPlatform {
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
     RealtimeMediaNativeOwnerToken? ownerToken,
-  }) async => const RealtimeMediaStats(framesRendered: 3);
+  }) async => RealtimeMediaStats(framesRendered: 3);
+
+  @override
+  Future<void> requestKeyframe({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {
+    operations.add('keyframe:${endpointId.value}');
+  }
+
+  @override
+  Future<void> resetDecoder({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {
+    operations.add('reset-decoder:${endpointId.value}');
+  }
+
+  @override
+  Future<void> applyAdaptation({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    required RealtimeMediaAdaptationDecision decision,
+    RealtimeMediaNativeOwnerToken? ownerToken,
+  }) async {
+    operations.add(
+      'adapt:${endpointId.value}:${decision.bitrateKbps}:${decision.framerate}',
+    );
+  }
 }

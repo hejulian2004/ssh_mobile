@@ -5,6 +5,7 @@ import android.hardware.display.DisplayManager
 import android.media.MediaCodec
 import android.media.MediaFormat
 import android.media.projection.MediaProjection
+import android.os.Bundle
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -22,6 +23,11 @@ internal data class AndroidOwnerIdentity(
     val peerId: String,
     val generation: Long,
     val direction: String,
+)
+
+internal data class AndroidMediaStatsSnapshot(
+    val failure: String? = null,
+    val values: Map<String, Any> = emptyMap(),
 )
 
 internal class AndroidMediaOwner(
@@ -44,6 +50,7 @@ internal class AndroidMediaOwner(
     private var decoderThread: Thread? = null
     private var decoderStopAck: CountDownLatch? = null
     private var decoderRunning = AtomicBoolean(false)
+    private var decoderResetRequested = AtomicBoolean(false)
     private var textureEntry: TextureRegistry.SurfaceTextureEntry? = null
     private var width = 0
     private var height = 0
@@ -55,6 +62,9 @@ internal class AndroidMediaOwner(
     private var framesDecoded = 0L
     private var framesRendered = 0L
     private var framesDropped = 0L
+    private var targetFramerate = 30
+    private var targetBitrateKbps = 0
+    private var nextEncodeTimestamp90k = 0L
 
     fun startCapture(
         mediaProjection: MediaProjection?,
@@ -86,12 +96,13 @@ internal class AndroidMediaOwner(
             if (startStatus != 0) return statusCode(startStatus)
             width = dimensions.first
             height = dimensions.second
+            targetBitrateKbps = AndroidCodecFactory.initialBitrateKbps(width, height)
             val codec = AndroidCodecFactory.createEncoder(width, height)
                 ?: return stopNativeAfterFailure("encoder_unavailable")
             try {
-                // Publish the codec and input surface before any subsequent
-                // start/configuration step can fail. The catch path then
-                // releases exactly the resources acquired here.
+                // Publish the codec and input surface to the owner before any
+                // subsequent start/configuration step can fail. The catch
+                // path then releases exactly the resources acquired here.
                 encoder = codec
                 val input = codec.createInputSurface()
                 encoderSurface = input
@@ -203,6 +214,109 @@ internal class AndroidMediaOwner(
         return if (status == 0 || status == -12) null else statusCode(status)
     }
 
+    fun requestKeyframe(): String? {
+        synchronized(lock) {
+            val status = NativeMediaBridge.requestKeyframe(token)
+            if (status != 0) return statusCode(status)
+            if (identity.direction != "send") return null
+            val codec = encoder ?: return "encoder_unavailable"
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
+                return "encoder_unavailable"
+            }
+            return try {
+                codec.setParameters(Bundle().apply {
+                    putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
+                })
+                null
+            } catch (_: IllegalStateException) {
+                terminalCode = "encoder_failed"
+                terminalMessage = "MediaCodec rejected the keyframe request."
+                "encoder_failed"
+            } catch (_: UnsupportedOperationException) {
+                "encoder_unavailable"
+            }
+        }
+    }
+
+    fun resetDecoder(): String? {
+        synchronized(lock) {
+            if (identity.direction != "receive") return "direction_mismatch"
+            if (terminalCode != null) return terminalCode
+            val status = NativeMediaBridge.resetDecoder(token)
+            if (status != 0) return statusCode(status)
+            if (decoder == null || !decoderRunning.get()) return "decoder_unavailable"
+            decoderResetRequested.set(true)
+            return null
+        }
+    }
+
+    fun applyAdaptation(
+        bitrateKbps: Int,
+        framerate: Int,
+        targetWidth: Int,
+        targetHeight: Int,
+        reason: Int,
+    ): String? {
+        synchronized(lock) {
+            if (identity.direction != "send") return "direction_mismatch"
+            if (bitrateKbps !in 256..(3 * 1024) || framerate !in 5..30 ||
+                targetWidth < 0 || targetHeight < 0 ||
+                ((targetWidth == 0) != (targetHeight == 0)) ||
+                reason !in 0..2
+            ) return "invalid_argument"
+            if (terminalCode != null) return terminalCode
+            val codec = encoder ?: return "encoder_unavailable"
+            if (targetWidth != 0 &&
+                (targetWidth != width || targetHeight != height)
+            ) {
+                // Resolution changes require stop/release/recreate so a stale
+                // surface or capture callback cannot survive an in-place swap.
+                return "encoder_failed"
+            }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
+                return "encoder_unavailable"
+            }
+            val previousBitrateKbps = targetBitrateKbps
+            val previousFramerate = targetFramerate
+            val platformFailure = setEncoderBitrate(codec, bitrateKbps)
+            if (platformFailure != null) {
+                terminalCode = if (platformFailure == "encoder_failed") {
+                    "encoder_failed"
+                } else {
+                    platformFailure
+                }
+                terminalMessage = "MediaCodec rejected the adaptation target."
+                return platformFailure
+            }
+            val nativeStatus = NativeMediaBridge.applyAdaptation(
+                token,
+                bitrateKbps,
+                framerate,
+                targetWidth,
+                targetHeight,
+                reason,
+            )
+            if (nativeStatus != 0) {
+                val rollbackFailure = setEncoderBitrate(codec, previousBitrateKbps)
+                if (rollbackFailure != null) {
+                    markAdaptationRecreateRequired(
+                        "Native adaptation commit failed and encoder rollback failed.",
+                    )
+                    return "recreate_required"
+                }
+                // The native owner rejected the target before committing it;
+                // the platform target is restored to the same previous value.
+                // Do not publish a partially applied target or poison the
+                // owner for a retryable stale/native failure.
+                return statusCode(nativeStatus)
+            }
+            targetBitrateKbps = bitrateKbps
+            targetFramerate = framerate
+            nextEncodeTimestamp90k = 0L
+            return null
+        }
+    }
+
     fun release(): String? {
         val detachFailure = detach()
         if (detachFailure != null) return detachFailure
@@ -226,15 +340,37 @@ internal class AndroidMediaOwner(
             (captureRunning.get() || encoderThread != null || virtualDisplay != null)
     }
 
-    fun stats(): Map<String, Any> = synchronized(lock) {
-        mapOf(
-            "width" to width,
-            "height" to height,
-            "frames_captured" to framesCaptured,
-            "frames_sent" to framesSent,
-            "frames_dropped" to framesDropped,
-            "frames_decoded" to framesDecoded,
-            "frames_rendered" to framesRendered,
+    fun stats(): AndroidMediaStatsSnapshot = synchronized(lock) {
+        val native = NativeMediaBridge.readStats(token)
+        if (native.status != 0) {
+            return@synchronized AndroidMediaStatsSnapshot(
+                failure = statusCode(native.status),
+            )
+        }
+        if (native.queueCapacity != 3 || native.queueDepth !in 0..3) {
+            return@synchronized AndroidMediaStatsSnapshot(
+                failure = "backend_failure",
+            )
+        }
+        AndroidMediaStatsSnapshot(
+            values = mapOf(
+                "width" to width,
+                "height" to height,
+                "frames_captured" to framesCaptured,
+                "frames_sent" to framesSent,
+                "frames_dropped" to (framesDropped + native.dropped),
+                "frames_decoded" to framesDecoded,
+                "frames_rendered" to framesRendered,
+                "packets_sent" to native.packetsSent,
+                "packets_received" to native.packetsReceived,
+                "packets_lost" to native.packetsLost,
+                "frames_recovered" to native.framesRecovered,
+                "keyframe_requests" to native.keyframeRequests,
+                "jitter_ms" to native.jitterMs,
+                "rtt_ms" to native.rttMs,
+                "queue_depth" to native.queueDepth,
+                "queue_capacity" to native.queueCapacity,
+            ),
         )
     }
 
@@ -281,28 +417,48 @@ internal class AndroidMediaOwner(
                                     break
                                 }
                                 val timestamp = timestampUsTo90k(info.presentationTimeUs)
-                                val sequenceValue = synchronized(lock) { sequence++ }
-                                val status = NativeMediaBridge.pushH264(
-                                    token,
-                                    sequenceValue,
-                                    timestamp,
-                                    width,
-                                    height,
-                                    info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0,
-                                    annexB,
-                                )
-                                when {
-                                    status == 0 -> synchronized(lock) {
-                                        framesCaptured++
-                                        framesSent++
-                                    }
-                                    status == 1 -> synchronized(lock) {
-                                        framesCaptured++
+                                val shouldSend = synchronized(lock) {
+                                    val interval = 90_000L / targetFramerate.coerceIn(5, 30)
+                                    if (timestamp < nextEncodeTimestamp90k) {
                                         framesDropped++
+                                        false
+                                    } else {
+                                        nextEncodeTimestamp90k =
+                                            if (timestamp > Long.MAX_VALUE - interval) {
+                                                Long.MAX_VALUE
+                                            } else {
+                                                timestamp + interval
+                                            }
+                                        true
                                     }
-                                    else -> {
-                                        failFromWorker(statusCode(status), "Native H.264 ingress rejected the frame.")
-                                        break
+                                }
+                                if (shouldSend) {
+                                    val sequenceValue = synchronized(lock) { sequence++ }
+                                    val status = NativeMediaBridge.pushH264(
+                                        token,
+                                        sequenceValue,
+                                        timestamp,
+                                        width,
+                                        height,
+                                        info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0,
+                                        annexB,
+                                    )
+                                    when {
+                                        status == 0 -> synchronized(lock) {
+                                            framesCaptured++
+                                            framesSent++
+                                        }
+                                        status == 1 -> synchronized(lock) {
+                                            framesCaptured++
+                                            // Native queue-drop counters are
+                                            // merged by stats(); keep their
+                                            // ownership in the fixed native
+                                            // stats ABI to avoid double count.
+                                        }
+                                        else -> {
+                                            failFromWorker(statusCode(status), "Native H.264 ingress rejected the frame.")
+                                            break
+                                        }
                                     }
                                 }
                             }
@@ -329,6 +485,18 @@ internal class AndroidMediaOwner(
         val info = MediaCodec.BufferInfo()
         try {
             while (decoderRunning.get()) {
+                if (decoderResetRequested.compareAndSet(true, false)) {
+                    try {
+                        codec.flush()
+                        synchronized(lock) {
+                            width = 0
+                            height = 0
+                        }
+                    } catch (_: IllegalStateException) {
+                        failFromWorker("decoder_failed", "MediaCodec reset failed.")
+                        break
+                    }
+                }
                 val frame = NativeMediaBridge.pullH264(token)
                 if (frame == null) {
                     Thread.sleep(2)
@@ -420,6 +588,7 @@ internal class AndroidMediaOwner(
         if (identity.direction != "receive") return null
         val worker = synchronized(lock) {
             decoderRunning.set(false)
+            decoderResetRequested.set(false)
             decoderThread to decoderStopAck
         }
         val thread = worker.first
@@ -471,6 +640,8 @@ internal class AndroidMediaOwner(
             }
             encoderSurface = null
             projection = null
+            targetBitrateKbps = 0
+            targetFramerate = 30
             encoderThread = null
             encoderStopAck = null
         }
@@ -514,13 +685,6 @@ internal class AndroidMediaOwner(
         }
     }
 
-    private fun stopNativeAfterFailure(code: String): String {
-        terminalCode = code
-        terminalMessage = "Android media owner could not start."
-        NativeMediaBridge.stopOwner(token)
-        return code
-    }
-
     private fun markCleanupDeferred(message: String) {
         synchronized(lock) {
             terminalCode = "cleanup_deferred"
@@ -535,6 +699,30 @@ internal class AndroidMediaOwner(
                 terminalMessage = null
             }
         }
+    }
+
+    private fun stopNativeAfterFailure(code: String): String {
+        terminalCode = code
+        terminalMessage = "Android media owner could not start."
+        NativeMediaBridge.stopOwner(token)
+        return code
+    }
+
+    private fun setEncoderBitrate(codec: MediaCodec, bitrateKbps: Int): String? = try {
+        codec.setParameters(Bundle().apply {
+            putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bitrateKbps * 1_000)
+        })
+        null
+    } catch (_: IllegalStateException) {
+        "encoder_failed"
+    } catch (_: UnsupportedOperationException) {
+        "encoder_unavailable"
+    }
+
+    private fun markAdaptationRecreateRequired(message: String) {
+        terminalCode = "recreate_required"
+        terminalMessage = message
+        captureRunning.set(false)
     }
 
     private fun displaySize(): Pair<Int, Int> {

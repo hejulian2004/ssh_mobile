@@ -21,9 +21,11 @@ mod realtime_media_owner;
 pub(crate) use realtime_media_owner::invalidate_media_owners;
 #[allow(unused_imports)]
 pub use realtime_media_owner::{
-    ssh_net_realtime_media_owner_attach_renderer, ssh_net_realtime_media_owner_close,
-    ssh_net_realtime_media_owner_detach_renderer, ssh_net_realtime_media_owner_open,
-    ssh_net_realtime_media_owner_pull_h264, ssh_net_realtime_media_owner_push_h264,
+    ssh_net_realtime_media_owner_apply_adaptation, ssh_net_realtime_media_owner_attach_renderer,
+    ssh_net_realtime_media_owner_close, ssh_net_realtime_media_owner_detach_renderer,
+    ssh_net_realtime_media_owner_open, ssh_net_realtime_media_owner_pull_h264,
+    ssh_net_realtime_media_owner_push_h264, ssh_net_realtime_media_owner_read_stats,
+    ssh_net_realtime_media_owner_request_keyframe, ssh_net_realtime_media_owner_reset_decoder,
     ssh_net_realtime_media_owner_start, ssh_net_realtime_media_owner_stop,
     ssh_net_realtime_media_owner_validate,
 };
@@ -48,6 +50,31 @@ pub struct SshNetRealtimeMediaFrameMetadata {
     pub height: u32,
     /// Strict C bool: `0` for a delta frame, `1` for a keyframe.
     pub keyframe: u8,
+}
+
+/// Bounded, payload-free native queue/recovery snapshot for one owner.
+///
+/// Platform owners merge these counters with their local capture/decoder
+/// counters before returning the low-frequency Dart stats snapshot. Packet,
+/// loss, recovered-frame and jitter values are native RTP observations; RTT
+/// remains zero until the rtc integration supplies an authoritative source.
+/// The representation is intentionally fixed-width for the Windows/Android
+/// ABI.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SshNetRealtimeMediaStats {
+    pub enqueued: u64,
+    pub dequeued: u64,
+    pub dropped: u64,
+    pub keyframe_requests: u64,
+    pub packets_sent: u64,
+    pub packets_received: u64,
+    pub packets_lost: u64,
+    pub frames_recovered: u64,
+    pub jitter_ms: u64,
+    pub rtt_ms: u64,
+    pub queue_depth: u32,
+    pub queue_capacity: u32,
 }
 
 /// Return value for a pull when the bounded native egress queue is empty.

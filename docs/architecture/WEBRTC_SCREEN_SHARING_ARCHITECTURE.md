@@ -12,9 +12,11 @@ merged at `352ef4dc9c602f648f0975809ce12553957b2a75` after final head
 owners are implemented on their dedicated branches, but hardware availability,
 device lifecycle, and cross-platform E2E gates remain unaccepted. Phase 5
 typed consent/state-machine work, Phase 6 authenticated TURN issuer/SDK
-contracts, and the Phase 7 bounded statistics/adaptation base are likewise in
-progress; none of these follow-up contracts is a claim that screen sharing is
-shipped. The native plugin remains fail-closed when platform workers are
+contracts, and the Phase 7 bounded statistics/adaptation plus generation-bound
+native keyframe/decoder-reset bridge are likewise in progress; the bridge is
+only a native recovery foundation and does not prove codec/RTCP actuation or
+platform E2E. None of these follow-up contracts is a claim that screen sharing
+is shipped. The native plugin remains fail-closed when platform workers are
 unavailable; native implementation or compilation evidence is not evidence of
 a working capture-to-render pipeline.
 
@@ -117,22 +119,24 @@ native-only H.264 RTP path and fixed screen queue; Phase 2 adds a
 generation-bound native endpoint bridge with native-only H.264 push/pull plus
 the payload-free `realtime_media` lifecycle contract. Phase 5 now adds the
 typed consent/state-machine boundary, Phase 6 adds the authenticated TURN
-issuer/SDK contract, and Phase 7 adds bounded low-frequency statistics and an
-adaptation policy. These are still prerequisites rather than a completed video
-product: platform hardware/E2E, consent UI acceptance, production credential
-deployment, native keyframe recovery, privacy validation, and final gates must
-pass before screen sharing is described as delivered.
+issuer/SDK contract, and Phase 7 adds bounded low-frequency statistics,
+adaptation policy, a generation-bound native keyframe/decoder-reset bridge,
+and native owner wiring for bounded encoder targets plus PLI/IDR requests.
+These are still prerequisites rather than a completed video product: platform
+hardware/device E2E, consent UI acceptance, production credential deployment,
+codec/RTCP device validation, privacy validation, and final gates must pass
+before screen sharing is described as delivered.
 
 | Area | Current verified baseline | Planned screen-share capability |
 | --- | --- | --- |
 | WebRTC owner | network-webrtc owns a sans-I/O peer; RealtimeIoDriver owns that peer and its UDP socket | Keeps the same sole owner; no second peer or runtime |
 | Runtime media | Generic Realtime sessions remain media-neutral; the explicit screen-share integration configures one H.264 screen transceiver on the sole native peer. `RealtimeIoDriver` flushes/receives encoded RTP without DataChannel or event-stream media; a native-only C ABI pushes/pulls encoded access units by opaque endpoint ID | Platform-native capture/codec/render owners invoke that bridge before screen SDP negotiation in later phases |
-| QoS | A separate screen-video queue is fixed to three frames with keyframe-aware dropping; generic MediaFrame's four-frame policy remains unchanged | Phase 7 adaptation and telemetry |
+| QoS | A separate screen-video queue is fixed to three frames with keyframe-aware dropping; generic MediaFrame's four-frame policy remains unchanged. Native owners now accept bounded bitrate/frame-rate targets without resizing the queue | Phase 7 adaptation telemetry, hardware confirmation, and end-to-end recovery |
 | Dart video shape | `network_sdk` exposes only Realtime signaling/state; `realtime_media` exposes opaque endpoint/surface lifecycle with no per-frame Dart path | Concrete platform surface adapter lifecycle notifications |
 | Capture/rendering | Windows Graphics Capture, native H.264 send ingress, receive decoder/D3D11 texture owner, and the Android MediaProjection/MediaCodec/SurfaceTexture owner are implemented but have no accepted hardware/E2E evidence | Windows and Android native capture, hardware codecs, and native surfaces |
 | Consent | Phase 5 now defines the typed signal/payload and Feature operation state machine; UI and platform acceptance remain gated | Explicit accept/reject before answer/capture, with operation and generation replay guards |
 | TURN | Phase 6 has an authenticated short-lived issuer contract and in-memory SDK store; production relay integration remains gated | Per-session production credentials, expiry/refresh, redaction, and relay-only E2E |
-| Recovery | Transport loss terminates Realtime and invalidates every bound native media endpoint before its peer closes | Same rule, plus platform capture/decoder/surface cleanup and Phase 7 keyframe recovery |
+| Recovery | Transport loss terminates Realtime and invalidates every bound native media endpoint before its peer closes; generation-bound native keyframe/decoder-reset requests, receive-side PLI, and send-side hardware IDR/adaptation commands are exposed through the owner port | Same rule, plus platform capture/decoder/surface cleanup, device validation, privacy teardown, and Phase 7 recovery policy |
 
 In particular, a Video SDP m-line, a generic MediaFrame queue, or a
 DataChannel test payload named like a frame is not evidence of H.264 video
@@ -152,7 +156,7 @@ later phase succeeds.
 | 4 | In progress: Android MediaProjection/MediaCodec/SurfaceTexture owner implementation | Device permission/revocation, lifecycle interruption, hardware codec and cross-platform E2E acceptance remain outstanding |
 | 5 | In progress: typed consent protocol, Feature state machine, and App Shell ports | UI/transport acceptance, duplicate/replay/recovery matrix, and Phase 5 PR gate remain outstanding |
 | 6 | In progress: authenticated TURN issuer, SDK parser/store, and redaction contract | Production device-auth integration, secret scan, expiry/refresh, and relay-only E2E remain outstanding |
-| 7 | In progress: bounded low-frequency stats and adaptation policy | Native keyframe/recovery integration, privacy teardown, E2E, and final CI gate remain outstanding |
+| 7 | In progress: bounded low-frequency stats/adaptation, generation-bound native recovery, and platform PLI/IDR/adaptation wiring | Hardware/device confirmation, privacy teardown, E2E, and final CI gate remain outstanding |
 
 ## Layer boundaries
 
@@ -480,7 +484,12 @@ Queue rules are:
 
 A native keyframe request is required after first-track activation, decoder
 reset, source or resolution change, ICE restart, unrecoverable packet loss, or
-viewer reconnect.
+viewer reconnect. The generation-bound owner port now carries explicit
+keyframe-request, decoder-reset, and bounded adaptation commands with native
+rate limiting. Windows and Android owners apply hardware bitrate/frame-rate
+targets, send owners request native IDR frames, and receive owners emit PLI on
+the WebRTC path. Device capability and end-to-end actuation remain acceptance
+gates.
 
 A transport loss is terminal for the affected realtime generation:
 
@@ -504,7 +513,11 @@ endpoint operation, or frame that belongs to an old generation.
 ## QoS, statistics, and telemetry
 
 The first fixed profile is a maximum of 1920 by 1080, 15 FPS, and about 3 Mbps.
-Phase 7 may adapt it using loss, RTT, encoder backlog, and queue pressure:
+Phase 7 may adapt it using loss, RTT, encoder backlog, and queue pressure. The
+low-frequency Dart controller applies three-second congestion hysteresis,
+bounded 25-percent bitrate steps, a severe-loss/RTT 720p10 target, and one-level
+recovery only after ten healthy seconds; native owners remain responsible for
+the actual hardware mutation and the queue never grows beyond three frames:
 
 | Condition | Action |
 | --- | --- |
@@ -513,10 +526,15 @@ Phase 7 may adapt it using loss, RTT, encoder backlog, and queue pressure:
 | Loss at least 10 percent or RTT at least 400 ms | Move to 720p10 |
 | Ten seconds healthy with loss below 2 percent, RTT below 150 ms, and healthy queues | Recover one level only |
 
-Statistics update outside the blocking media hot path. The planned aggregate
-fields include capture, encode, sent, decode, and render FPS; resolution;
-target and actual bitrate; RTT, jitter, loss; frame and keyframe counters;
-codec; and selected ICE path.
+Statistics update outside the blocking media hot path. The current native owner
+bridge exports fixed-width enqueue/dequeue/drop, packet sent/received/lost,
+recovered-frame, keyframe-request, jitter, and bounded queue depth/capacity
+counters into the low-frequency `RealtimeMediaStats` snapshot. RTT remains
+platform-gated until the rtc integration exposes an authoritative RTCP/ICE
+source; it is never synthesized from media arrival timing. The planned
+aggregate fields include capture, encode, sent, decode, and render FPS;
+resolution; target and actual bitrate; RTT, jitter, loss; frame and keyframe
+counters; codec; and selected ICE path.
 
 Telemetry work follows ADR-033 and its contract source. It may emit outcome,
 duration, metric buckets, codec, ICE path, and error category. It may not emit

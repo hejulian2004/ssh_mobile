@@ -1,8 +1,10 @@
 #include <jni.h>
 
-#include <dlfcn.h>
 #include <cstddef>
 #include <cstdint>
+#include <dlfcn.h>
+#include <iterator>
+#include <limits>
 #include <mutex>
 #include <vector>
 
@@ -15,6 +17,38 @@ struct FrameMetadata {
   uint32_t height = 0;
   uint8_t keyframe = 0;
 };
+
+// Keep this layout identical to SshNetRealtimeMediaStats in network-ffi.
+// Counters are metadata only; no encoded frame bytes cross this ABI.
+struct NativeMediaStats {
+  uint64_t enqueued = 0;
+  uint64_t dequeued = 0;
+  uint64_t dropped = 0;
+  uint64_t keyframe_requests = 0;
+  uint64_t packets_sent = 0;
+  uint64_t packets_received = 0;
+  uint64_t packets_lost = 0;
+  uint64_t frames_recovered = 0;
+  uint64_t jitter_ms = 0;
+  uint64_t rtt_ms = 0;
+  uint32_t queue_depth = 0;
+  uint32_t queue_capacity = 3;
+};
+
+static_assert(sizeof(NativeMediaStats) == 88,
+              "NativeMediaStats must match the Rust C ABI");
+static_assert(offsetof(NativeMediaStats, enqueued) == 0);
+static_assert(offsetof(NativeMediaStats, dequeued) == 8);
+static_assert(offsetof(NativeMediaStats, dropped) == 16);
+static_assert(offsetof(NativeMediaStats, keyframe_requests) == 24);
+static_assert(offsetof(NativeMediaStats, packets_sent) == 32);
+static_assert(offsetof(NativeMediaStats, packets_received) == 40);
+static_assert(offsetof(NativeMediaStats, packets_lost) == 48);
+static_assert(offsetof(NativeMediaStats, frames_recovered) == 56);
+static_assert(offsetof(NativeMediaStats, jitter_ms) == 64);
+static_assert(offsetof(NativeMediaStats, rtt_ms) == 72);
+static_assert(offsetof(NativeMediaStats, queue_depth) == 80);
+static_assert(offsetof(NativeMediaStats, queue_capacity) == 84);
 
 // Keep this layout locked to the Rust `#[repr(C)]` frame metadata. A mismatch
 // would corrupt every native push/pull call, so fail the platform build rather
@@ -36,6 +70,9 @@ static_assert(sizeof(NativeBuffer) == sizeof(void*) + sizeof(size_t),
               "NativeBuffer must match the Rust C ABI");
 
 using OwnerStatusFunction = int (*)(uint64_t);
+using StatsFunction = int (*)(uint64_t, NativeMediaStats*);
+using OwnerAdaptationFunction = int (*)(uint64_t, uint32_t, uint32_t, uint32_t,
+                                        uint32_t, uint32_t);
 using PushFunction = int (*)(uint64_t, FrameMetadata, const uint8_t*, size_t);
 using PullFunction = int (*)(uint64_t, FrameMetadata*, NativeBuffer*);
 using BufferFreeFunction = void (*)(NativeBuffer);
@@ -68,6 +105,16 @@ int ResolveOwnerStatus(const char* name, uint64_t owner) {
   return function == nullptr ? kDriverUnavailable : function(owner);
 }
 
+int ResolveOwnerAdaptation(uint64_t owner, uint32_t bitrate_kbps,
+                           uint32_t framerate, uint32_t width, uint32_t height,
+                           uint32_t reason) {
+  const auto function = Resolve<OwnerAdaptationFunction>(
+      "ssh_net_realtime_media_owner_apply_adaptation");
+  return function == nullptr
+             ? kDriverUnavailable
+             : function(owner, bitrate_kbps, framerate, width, height, reason);
+}
+
 jobject NewFrame(JNIEnv* env, jint status, const FrameMetadata& metadata,
                  const uint8_t* payload, size_t payload_length) {
   if (env == nullptr) return nullptr;
@@ -91,6 +138,34 @@ jobject NewFrame(JNIEnv* env, jint status, const FrameMetadata& metadata,
                         static_cast<jlong>(metadata.timestamp),
                         static_cast<jint>(metadata.width),
                         static_cast<jint>(metadata.height), keyframe, bytes);
+}
+
+jlong ToJlong(uint64_t value) {
+  constexpr auto kMax = static_cast<uint64_t>(std::numeric_limits<jlong>::max());
+  return static_cast<jlong>(value > kMax ? kMax : value);
+}
+
+jlongArray NewStats(JNIEnv* env, jint status, const NativeMediaStats& stats) {
+  if (env == nullptr) return nullptr;
+  const jlong values[] = {
+      static_cast<jlong>(status),
+      ToJlong(stats.enqueued),
+      ToJlong(stats.dequeued),
+      ToJlong(stats.dropped),
+      ToJlong(stats.keyframe_requests),
+      ToJlong(stats.packets_sent),
+      ToJlong(stats.packets_received),
+      ToJlong(stats.packets_lost),
+      ToJlong(stats.frames_recovered),
+      ToJlong(stats.jitter_ms),
+      ToJlong(stats.rtt_ms),
+      static_cast<jlong>(stats.queue_depth),
+      static_cast<jlong>(stats.queue_capacity),
+  };
+  auto result = env->NewLongArray(static_cast<jsize>(std::size(values)));
+  if (result == nullptr) return nullptr;
+  env->SetLongArrayRegion(result, 0, static_cast<jsize>(std::size(values)), values);
+  return env->ExceptionCheck() ? nullptr : result;
 }
 
 }  // namespace
@@ -128,6 +203,50 @@ Java_com_hejulian_realtime_1media_1android_NativeMediaBridge_nativeDetachRendere
     JNIEnv*, jclass, jlong owner) {
   return ResolveOwnerStatus("ssh_net_realtime_media_owner_detach_renderer",
                            static_cast<uint64_t>(owner));
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_hejulian_realtime_1media_1android_NativeMediaBridge_nativeRequestKeyframe(
+    JNIEnv*, jclass, jlong owner) {
+  return ResolveOwnerStatus("ssh_net_realtime_media_owner_request_keyframe",
+                           static_cast<uint64_t>(owner));
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_hejulian_realtime_1media_1android_NativeMediaBridge_nativeResetDecoder(
+    JNIEnv*, jclass, jlong owner) {
+  return ResolveOwnerStatus("ssh_net_realtime_media_owner_reset_decoder",
+                           static_cast<uint64_t>(owner));
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_hejulian_realtime_1media_1android_NativeMediaBridge_nativeReadStats(
+    JNIEnv* env, jclass, jlong owner) {
+  NativeMediaStats stats;
+  if (env == nullptr || owner <= 0) {
+    return NewStats(env, -1, stats);
+  }
+  const auto function = Resolve<StatsFunction>(
+      "ssh_net_realtime_media_owner_read_stats");
+  if (function == nullptr) return NewStats(env, kDriverUnavailable, stats);
+  const int status = function(static_cast<uint64_t>(owner), &stats);
+  return NewStats(env, status, stats);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_hejulian_realtime_1media_1android_NativeMediaBridge_nativeApplyAdaptation(
+    JNIEnv*, jclass, jlong owner, jint bitrate_kbps, jint framerate, jint width,
+    jint height, jint reason) {
+  if (owner <= 0 || bitrate_kbps < 0 || framerate < 0 || width < 0 ||
+      height < 0 || reason < 0) {
+    return -1;
+  }
+  return ResolveOwnerAdaptation(static_cast<uint64_t>(owner),
+                                static_cast<uint32_t>(bitrate_kbps),
+                                static_cast<uint32_t>(framerate),
+                                static_cast<uint32_t>(width),
+                                static_cast<uint32_t>(height),
+                                static_cast<uint32_t>(reason));
 }
 
 extern "C" JNIEXPORT jint JNICALL

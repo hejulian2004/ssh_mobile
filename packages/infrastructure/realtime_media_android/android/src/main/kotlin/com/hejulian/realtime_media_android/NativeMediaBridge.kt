@@ -11,6 +11,23 @@ internal data class NativeH264Frame(
     val payload: ByteArray,
 )
 
+/** Bounded payload-free native queue/recovery counters for one owner. */
+internal data class NativeMediaStats(
+    val status: Int,
+    val enqueued: Long,
+    val dequeued: Long,
+    val dropped: Long,
+    val keyframeRequests: Long,
+    val packetsSent: Long,
+    val packetsReceived: Long,
+    val packetsLost: Long,
+    val framesRecovered: Long,
+    val jitterMs: Long,
+    val rttMs: Long,
+    val queueDepth: Int,
+    val queueCapacity: Int,
+)
+
 /**
  * JNI facade for the native-only owner-token port.
  *
@@ -35,6 +52,65 @@ internal object NativeMediaBridge {
     fun attachRenderer(owner: Long): Int = invoke { nativeAttachRenderer(owner) }
 
     fun detachRenderer(owner: Long): Int = invoke { nativeDetachRenderer(owner) }
+
+    fun requestKeyframe(owner: Long): Int = invoke { nativeRequestKeyframe(owner) }
+
+    fun resetDecoder(owner: Long): Int = invoke { nativeResetDecoder(owner) }
+
+    fun readStats(owner: Long): NativeMediaStats {
+        val values = if (!ensureLoaded()) {
+            null
+        } else {
+            try {
+                nativeReadStats(owner)
+            } catch (_: UnsatisfiedLinkError) {
+                null
+            }
+        }
+        if (values == null || values.size < 13) {
+            return NativeMediaStats(
+                status = STATUS_DRIVER_UNAVAILABLE,
+                enqueued = 0,
+                dequeued = 0,
+                dropped = 0,
+                keyframeRequests = 0,
+                packetsSent = 0,
+                packetsReceived = 0,
+                packetsLost = 0,
+                framesRecovered = 0,
+                jitterMs = 0,
+                rttMs = 0,
+                queueDepth = 0,
+                queueCapacity = 3,
+            )
+        }
+        return NativeMediaStats(
+            status = values[0].coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
+            enqueued = values[1].coerceAtLeast(0),
+            dequeued = values[2].coerceAtLeast(0),
+            dropped = values[3].coerceAtLeast(0),
+            keyframeRequests = values[4].coerceAtLeast(0),
+            packetsSent = values[5].coerceAtLeast(0),
+            packetsReceived = values[6].coerceAtLeast(0),
+            packetsLost = values[7].coerceAtLeast(0),
+            framesRecovered = values[8].coerceAtLeast(0),
+            jitterMs = values[9].coerceAtLeast(0),
+            rttMs = values[10].coerceAtLeast(0),
+            queueDepth = values[11].coerceIn(0, Int.MAX_VALUE.toLong()).toInt(),
+            queueCapacity = values[12].coerceIn(0, Int.MAX_VALUE.toLong()).toInt(),
+        )
+    }
+
+    fun applyAdaptation(
+        owner: Long,
+        bitrateKbps: Int,
+        framerate: Int,
+        width: Int,
+        height: Int,
+        reason: Int,
+    ): Int = invoke {
+        nativeApplyAdaptation(owner, bitrateKbps, framerate, width, height, reason)
+    }
 
     fun closeOwner(owner: Long): Int = invoke { nativeCloseOwner(owner) }
 
@@ -105,6 +181,25 @@ internal object NativeMediaBridge {
 
     @JvmStatic
     private external fun nativeDetachRenderer(owner: Long): Int
+
+    @JvmStatic
+    private external fun nativeRequestKeyframe(owner: Long): Int
+
+    @JvmStatic
+    private external fun nativeResetDecoder(owner: Long): Int
+
+    @JvmStatic
+    private external fun nativeReadStats(owner: Long): LongArray?
+
+    @JvmStatic
+    private external fun nativeApplyAdaptation(
+        owner: Long,
+        bitrateKbps: Int,
+        framerate: Int,
+        width: Int,
+        height: Int,
+        reason: Int,
+    ): Int
 
     @JvmStatic
     private external fun nativeCloseOwner(owner: Long): Int

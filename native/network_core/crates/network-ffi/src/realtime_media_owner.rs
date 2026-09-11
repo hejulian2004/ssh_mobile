@@ -7,20 +7,22 @@
 
 use network_core::{RealtimeMediaDirection, RealtimeMediaEndpointId};
 use network_webrtc::{
-    EncodedVideoFrame, VideoCodec, VideoEnqueueResult, MAX_ENCODED_VIDEO_FRAME_BYTES,
+    EncodedVideoFrame, H264AdaptationReason, H264AdaptationTarget, H264ScreenVideoStats,
+    VideoCodec, VideoEnqueueResult, MAX_ENCODED_VIDEO_FRAME_BYTES,
 };
 use std::collections::HashMap;
 use std::panic::catch_unwind;
 use std::slice;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use super::{
-    identifier, map_error, SshNetBuffer, SshNetRealtimeMediaFrameMetadata, SshNetRuntime,
-    SshNetRuntimeHandle, NATIVE_MEDIA_FRAME_MAX_AGE, SSH_NET_REALTIME_MEDIA_DIRECTION_RECEIVE,
-    SSH_NET_REALTIME_MEDIA_DIRECTION_SEND, SSH_NET_REALTIME_MEDIA_FRAME_DROPPED,
-    SSH_NET_REALTIME_MEDIA_NO_FRAME, SSH_NET_REALTIME_MEDIA_STATUS_DIRECTION_MISMATCH,
+    identifier, map_error, SshNetBuffer, SshNetRealtimeMediaFrameMetadata,
+    SshNetRealtimeMediaStats, SshNetRuntime, SshNetRuntimeHandle, NATIVE_MEDIA_FRAME_MAX_AGE,
+    SSH_NET_REALTIME_MEDIA_DIRECTION_RECEIVE, SSH_NET_REALTIME_MEDIA_DIRECTION_SEND,
+    SSH_NET_REALTIME_MEDIA_FRAME_DROPPED, SSH_NET_REALTIME_MEDIA_NO_FRAME,
+    SSH_NET_REALTIME_MEDIA_STATUS_DIRECTION_MISMATCH,
     SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE,
     SSH_NET_REALTIME_MEDIA_STATUS_DUPLICATE_ENDPOINT, SSH_NET_REALTIME_MEDIA_STATUS_INTERNAL,
     SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT, SSH_NET_REALTIME_MEDIA_STATUS_STALE_OWNER,
@@ -35,6 +37,18 @@ fn direction_from_native(value: u32) -> Option<RealtimeMediaDirection> {
 }
 
 static NEXT_MEDIA_OWNER_ID: AtomicU64 = AtomicU64::new(1);
+const MIN_KEYFRAME_REQUEST_INTERVAL: Duration = Duration::from_secs(1);
+
+const ADAPTATION_REASON_STEADY: u32 = 0;
+const ADAPTATION_REASON_CONGESTION: u32 = 1;
+const ADAPTATION_REASON_RECOVERY: u32 = 2;
+
+struct MediaOwnerState {
+    closed: bool,
+    started: bool,
+    renderer_attached: bool,
+    last_keyframe_request: Option<Instant>,
+}
 
 struct MediaOwnerBinding {
     runtime: usize,
@@ -43,38 +57,62 @@ struct MediaOwnerBinding {
     peer_id: String,
     generation: u64,
     direction: RealtimeMediaDirection,
-    started: bool,
-    renderer_attached: bool,
+    state: Mutex<MediaOwnerState>,
 }
 
-static MEDIA_OWNER_REGISTRY: OnceLock<Mutex<HashMap<u64, MediaOwnerBinding>>> = OnceLock::new();
+static MEDIA_OWNER_REGISTRY: OnceLock<Mutex<HashMap<u64, Arc<MediaOwnerBinding>>>> =
+    OnceLock::new();
 
-fn media_owner_registry() -> &'static Mutex<HashMap<u64, MediaOwnerBinding>> {
+fn media_owner_registry() -> &'static Mutex<HashMap<u64, Arc<MediaOwnerBinding>>> {
     MEDIA_OWNER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 pub(crate) fn invalidate_media_owners(runtime: *mut SshNetRuntime) {
-    if let Ok(mut owners) = media_owner_registry().lock() {
+    let invalidated = if let Ok(mut owners) = media_owner_registry().lock() {
         let runtime = runtime as usize;
+        let invalidated = owners
+            .values()
+            .filter(|owner| owner.runtime == runtime)
+            .cloned()
+            .collect::<Vec<_>>();
         owners.retain(|_, owner| owner.runtime != runtime);
+        invalidated
+    } else {
+        return;
+    };
+    for owner in invalidated {
+        if let Ok(mut state) = owner.state.lock() {
+            state.closed = true;
+            state.started = false;
+            state.renderer_attached = false;
+        }
     }
 }
 
 fn owner_with_binding(
     owner: u64,
-    operation: impl FnOnce(&mut MediaOwnerBinding) -> Result<i32, i32>,
+    operation: impl FnOnce(&MediaOwnerBinding, &mut MediaOwnerState) -> Result<i32, i32>,
 ) -> i32 {
     if owner == 0 {
         return SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT;
     }
     let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut owners = media_owner_registry()
+        let owners = media_owner_registry()
             .lock()
             .map_err(|_| SSH_NET_REALTIME_MEDIA_STATUS_INTERNAL)?;
         let binding = owners
-            .get_mut(&owner)
+            .get(&owner)
+            .cloned()
             .ok_or(SSH_NET_REALTIME_MEDIA_STATUS_STALE_OWNER)?;
-        operation(binding)
+        drop(owners);
+        let mut state = binding
+            .state
+            .lock()
+            .map_err(|_| SSH_NET_REALTIME_MEDIA_STATUS_INTERNAL)?;
+        if state.closed {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_STALE_OWNER);
+        }
+        operation(&binding, &mut state)
     }));
     match result {
         Ok(Ok(value)) => value,
@@ -112,7 +150,7 @@ pub unsafe extern "C" fn ssh_net_realtime_media_owner_open(
         return SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT;
     }
 
-    let result = catch_unwind(|| -> Result<i32, i32> {
+    let result = catch_unwind(|| {
         unsafe { *out_owner = 0 };
         let realtime_id = match unsafe { identifier(realtime_id_ptr, realtime_id_len) } {
             Ok(value) => value,
@@ -147,8 +185,12 @@ pub unsafe extern "C" fn ssh_net_realtime_media_owner_open(
             peer_id: peer_id.to_owned(),
             generation: expected_generation,
             direction,
-            started: false,
-            renderer_attached: false,
+            state: Mutex::new(MediaOwnerState {
+                closed: false,
+                started: false,
+                renderer_attached: false,
+                last_keyframe_request: None,
+            }),
         };
         let mut owners = media_owner_registry()
             .lock()
@@ -159,7 +201,7 @@ pub unsafe extern "C" fn ssh_net_realtime_media_owner_open(
         {
             return Ok(SSH_NET_REALTIME_MEDIA_STATUS_DUPLICATE_ENDPOINT);
         }
-        owners.insert(owner, binding);
+        owners.insert(owner, Arc::new(binding));
         unsafe { *out_owner = owner };
         Ok(0)
     });
@@ -187,9 +229,9 @@ fn validate_owner(binding: &MediaOwnerBinding) -> Result<(), i32> {
 /// Starts a native platform owner after generation validation.
 #[no_mangle]
 pub extern "C" fn ssh_net_realtime_media_owner_start(owner: u64) -> i32 {
-    owner_with_binding(owner, |binding| {
+    owner_with_binding(owner, |binding, state| {
         validate_owner(binding)?;
-        binding.started = true;
+        state.started = true;
         Ok(0)
     })
 }
@@ -197,10 +239,10 @@ pub extern "C" fn ssh_net_realtime_media_owner_start(owner: u64) -> i32 {
 /// Stops capture/codec production for a native platform owner.
 #[no_mangle]
 pub extern "C" fn ssh_net_realtime_media_owner_stop(owner: u64) -> i32 {
-    owner_with_binding(owner, |binding| {
+    owner_with_binding(owner, |binding, state| {
         validate_owner(binding)?;
-        binding.started = false;
-        binding.renderer_attached = false;
+        state.started = false;
+        state.renderer_attached = false;
         Ok(0)
     })
 }
@@ -212,8 +254,177 @@ pub extern "C" fn ssh_net_realtime_media_owner_stop(owner: u64) -> i32 {
 /// stats poll from accidentally reviving a stopped capture worker.
 #[no_mangle]
 pub extern "C" fn ssh_net_realtime_media_owner_validate(owner: u64) -> i32 {
-    owner_with_binding(owner, |binding| {
+    owner_with_binding(owner, |binding, _state| {
         validate_owner(binding)?;
+        Ok(0)
+    })
+}
+
+/// Reads bounded native queue/recovery counters for one valid owner.
+///
+/// This is an observational bridge: it does not pull or copy an encoded
+/// access unit and cannot revive a stopped or stale owner. Statistics remain
+/// readable while an owner is stopped so teardown and recovery code can take a
+/// final snapshot. The caller must provide writable storage for the fixed-width
+/// result structure.
+#[no_mangle]
+pub unsafe extern "C" fn ssh_net_realtime_media_owner_read_stats(
+    owner: u64,
+    out_stats: *mut SshNetRealtimeMediaStats,
+) -> i32 {
+    if owner == 0 || out_stats.is_null() {
+        return SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT;
+    }
+    let result = catch_unwind(|| {
+        unsafe { *out_stats = SshNetRealtimeMediaStats::default() };
+        owner_with_binding(owner, |binding, _state| {
+            validate_owner(binding)?;
+            let runtime = unsafe { &*(binding.runtime as *const SshNetRuntime) };
+            let stats = runtime
+                .runtime
+                .read_realtime_media_stats(RealtimeMediaEndpointId::from_raw(binding.endpoint))
+                .map_err(map_error)?;
+            let H264ScreenVideoStats {
+                enqueued,
+                dequeued,
+                dropped,
+                keyframe_requests,
+                packets_sent,
+                packets_received,
+                packets_lost,
+                frames_recovered,
+                jitter_ms,
+                rtt_ms,
+                queue_depth,
+                queue_capacity,
+            } = stats;
+            unsafe {
+                *out_stats = SshNetRealtimeMediaStats {
+                    enqueued,
+                    dequeued,
+                    dropped,
+                    keyframe_requests,
+                    packets_sent,
+                    packets_received,
+                    packets_lost,
+                    frames_recovered,
+                    jitter_ms,
+                    rtt_ms,
+                    queue_depth,
+                    queue_capacity,
+                };
+            }
+            Ok(0)
+        })
+    });
+    match result {
+        Ok(value) => value,
+        Err(_) => SSH_NET_REALTIME_MEDIA_STATUS_INTERNAL,
+    }
+}
+
+/// Requests a fresh H.264 keyframe through the generation-bound owner.
+///
+/// Requests are rate-limited and coalesced by the native queue so a loss burst
+/// cannot create an unbounded control storm. The platform caller receives only
+/// a status code; the request itself never enters Dart or the Relay path.
+#[no_mangle]
+pub extern "C" fn ssh_net_realtime_media_owner_request_keyframe(owner: u64) -> i32 {
+    owner_with_binding(owner, |binding, state| {
+        validate_owner(binding)?;
+        if !state.started {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE);
+        }
+        let now = Instant::now();
+        if state
+            .last_keyframe_request
+            .is_some_and(|last| now.saturating_duration_since(last) < MIN_KEYFRAME_REQUEST_INTERVAL)
+        {
+            return Ok(0);
+        }
+        let runtime = unsafe { &*(binding.runtime as *const SshNetRuntime) };
+        runtime
+            .runtime
+            .request_realtime_media_keyframe(RealtimeMediaEndpointId::from_raw(binding.endpoint))
+            .map_err(map_error)?;
+        state.last_keyframe_request = Some(now);
+        Ok(0)
+    })
+}
+
+/// Resets a receive-side H.264 decoder and requests a recovery keyframe.
+#[no_mangle]
+pub extern "C" fn ssh_net_realtime_media_owner_reset_decoder(owner: u64) -> i32 {
+    owner_with_binding(owner, |binding, state| {
+        if binding.direction != RealtimeMediaDirection::Receive {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_DIRECTION_MISMATCH);
+        }
+        validate_owner(binding)?;
+        if !state.started {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE);
+        }
+        let runtime = unsafe { &*(binding.runtime as *const SshNetRuntime) };
+        runtime
+            .runtime
+            .reset_realtime_media_decoder(RealtimeMediaEndpointId::from_raw(binding.endpoint))
+            .map_err(map_error)?;
+        state.last_keyframe_request = Some(Instant::now());
+        Ok(0)
+    })
+}
+
+fn adaptation_reason_from_native(value: u32) -> Option<H264AdaptationReason> {
+    match value {
+        ADAPTATION_REASON_STEADY => Some(H264AdaptationReason::Steady),
+        ADAPTATION_REASON_CONGESTION => Some(H264AdaptationReason::Congestion),
+        ADAPTATION_REASON_RECOVERY => Some(H264AdaptationReason::Recovery),
+        _ => None,
+    }
+}
+
+/// Applies one bounded H.264 sender target through the native peer owner.
+///
+/// The platform owner remains responsible for changing its hardware encoder;
+/// this call is the generation-bound native source of truth and rejects a
+/// target before any platform codec mutation can occur.
+#[no_mangle]
+pub extern "C" fn ssh_net_realtime_media_owner_apply_adaptation(
+    owner: u64,
+    bitrate_kbps: u32,
+    framerate: u32,
+    width: u32,
+    height: u32,
+    reason: u32,
+) -> i32 {
+    owner_with_binding(owner, |binding, state| {
+        if binding.direction != RealtimeMediaDirection::Send {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_DIRECTION_MISMATCH);
+        }
+        validate_owner(binding)?;
+        if !state.started {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE);
+        }
+        let Some(reason) = adaptation_reason_from_native(reason) else {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT);
+        };
+        let target = H264AdaptationTarget {
+            bitrate_kbps,
+            framerate,
+            width,
+            height,
+            reason,
+        };
+        if !target.is_valid() {
+            return Err(SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT);
+        }
+        let runtime = unsafe { &*(binding.runtime as *const SshNetRuntime) };
+        runtime
+            .runtime
+            .apply_realtime_media_adaptation(
+                RealtimeMediaEndpointId::from_raw(binding.endpoint),
+                target,
+            )
+            .map_err(map_error)?;
         Ok(0)
     })
 }
@@ -221,15 +432,15 @@ pub extern "C" fn ssh_net_realtime_media_owner_validate(owner: u64) -> i32 {
 /// Attaches a native renderer capability to a receive owner.
 #[no_mangle]
 pub extern "C" fn ssh_net_realtime_media_owner_attach_renderer(owner: u64) -> i32 {
-    owner_with_binding(owner, |binding| {
+    owner_with_binding(owner, |binding, state| {
         if binding.direction != RealtimeMediaDirection::Receive {
             return Err(SSH_NET_REALTIME_MEDIA_STATUS_DIRECTION_MISMATCH);
         }
         validate_owner(binding)?;
-        if binding.renderer_attached {
+        if state.renderer_attached {
             return Err(SSH_NET_REALTIME_MEDIA_STATUS_DUPLICATE_ENDPOINT);
         }
-        binding.renderer_attached = true;
+        state.renderer_attached = true;
         Ok(0)
     })
 }
@@ -237,9 +448,9 @@ pub extern "C" fn ssh_net_realtime_media_owner_attach_renderer(owner: u64) -> i3
 /// Detaches a native renderer capability. Detach is idempotent.
 #[no_mangle]
 pub extern "C" fn ssh_net_realtime_media_owner_detach_renderer(owner: u64) -> i32 {
-    owner_with_binding(owner, |binding| {
+    owner_with_binding(owner, |binding, state| {
         validate_owner(binding)?;
-        binding.renderer_attached = false;
+        state.renderer_attached = false;
         Ok(0)
     })
 }
@@ -252,7 +463,15 @@ pub extern "C" fn ssh_net_realtime_media_owner_close(owner: u64) -> i32 {
     }
     match media_owner_registry().lock() {
         Ok(mut owners) => {
-            owners.remove(&owner);
+            let binding = owners.remove(&owner);
+            drop(owners);
+            if let Some(binding) = binding {
+                if let Ok(mut state) = binding.state.lock() {
+                    state.closed = true;
+                    state.started = false;
+                    state.renderer_attached = false;
+                }
+            }
             0
         }
         Err(_) => SSH_NET_REALTIME_MEDIA_STATUS_INTERNAL,
@@ -277,51 +496,46 @@ pub unsafe extern "C" fn ssh_net_realtime_media_owner_push_h264(
     if payload_len > MAX_ENCODED_VIDEO_FRAME_BYTES || metadata.keyframe > 1 {
         return SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT;
     }
-    let result = catch_unwind(|| -> Result<i32, i32> {
-        let owners = media_owner_registry()
-            .lock()
-            .map_err(|_| SSH_NET_REALTIME_MEDIA_STATUS_INTERNAL)?;
-        let binding = owners
-            .get(&owner)
-            .ok_or(SSH_NET_REALTIME_MEDIA_STATUS_STALE_OWNER)?;
-        if binding.direction != RealtimeMediaDirection::Send {
-            return Ok(SSH_NET_REALTIME_MEDIA_STATUS_DIRECTION_MISMATCH);
-        }
-        // Re-validate the complete endpoint identity for every data-plane
-        // operation. A token may outlive a session replacement; checking only
-        // `started` would let a late native callback reach a stale lease.
-        validate_owner(binding)?;
-        if !binding.started {
-            return Ok(SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE);
-        }
-        let runtime = unsafe { &*(binding.runtime as *const SshNetRuntime) };
-        let payload = unsafe { slice::from_raw_parts(payload_ptr, payload_len) }.to_vec();
-        let frame = EncodedVideoFrame::new(
-            VideoCodec::H264,
-            metadata.sequence,
-            metadata.timestamp,
-            metadata.width,
-            metadata.height,
-            metadata.keyframe == 1,
-            payload,
-            Instant::now() + NATIVE_MEDIA_FRAME_MAX_AGE,
-        );
-        match runtime
-            .runtime
-            .push_realtime_media_h264(RealtimeMediaEndpointId::from_raw(binding.endpoint), frame)
-        {
-            Ok(VideoEnqueueResult::Accepted | VideoEnqueueResult::AcceptedAfterDropping { .. }) => {
-                Ok(0)
+    let result = catch_unwind(|| {
+        owner_with_binding(owner, |binding, state| {
+            if binding.direction != RealtimeMediaDirection::Send {
+                return Ok(SSH_NET_REALTIME_MEDIA_STATUS_DIRECTION_MISMATCH);
             }
-            Ok(VideoEnqueueResult::DroppedIncoming | VideoEnqueueResult::DroppedStale) => {
-                Ok(SSH_NET_REALTIME_MEDIA_FRAME_DROPPED)
+            // Re-validate the complete endpoint identity for every data-plane
+            // operation. A token may outlive a session replacement; checking only
+            // `started` would let a late native callback reach a stale lease.
+            validate_owner(binding)?;
+            if !state.started {
+                return Ok(SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE);
             }
-            Err(error) => Ok(map_error(error)),
-        }
+            let runtime = unsafe { &*(binding.runtime as *const SshNetRuntime) };
+            let payload = unsafe { slice::from_raw_parts(payload_ptr, payload_len) }.to_vec();
+            let frame = EncodedVideoFrame::new(
+                VideoCodec::H264,
+                metadata.sequence,
+                metadata.timestamp,
+                metadata.width,
+                metadata.height,
+                metadata.keyframe == 1,
+                payload,
+                Instant::now() + NATIVE_MEDIA_FRAME_MAX_AGE,
+            );
+            match runtime.runtime.push_realtime_media_h264(
+                RealtimeMediaEndpointId::from_raw(binding.endpoint),
+                frame,
+            ) {
+                Ok(
+                    VideoEnqueueResult::Accepted | VideoEnqueueResult::AcceptedAfterDropping { .. },
+                ) => Ok(0),
+                Ok(VideoEnqueueResult::DroppedIncoming | VideoEnqueueResult::DroppedStale) => {
+                    Ok(SSH_NET_REALTIME_MEDIA_FRAME_DROPPED)
+                }
+                Err(error) => Ok(map_error(error)),
+            }
+        })
     });
     match result {
-        Ok(Ok(value)) => value,
-        Ok(Err(value)) => value,
+        Ok(value) => value,
         Err(_) => SSH_NET_REALTIME_MEDIA_STATUS_INTERNAL,
     }
 }
@@ -341,7 +555,7 @@ pub unsafe extern "C" fn ssh_net_realtime_media_owner_pull_h264(
     if owner == 0 || out_metadata.is_null() || out_payload.is_null() {
         return SSH_NET_REALTIME_MEDIA_STATUS_INVALID_ARGUMENT;
     }
-    let result = catch_unwind(|| -> Result<i32, i32> {
+    let result = catch_unwind(|| {
         unsafe {
             *out_metadata = SshNetRealtimeMediaFrameMetadata::default();
             *out_payload = SshNetBuffer {
@@ -349,55 +563,50 @@ pub unsafe extern "C" fn ssh_net_realtime_media_owner_pull_h264(
                 len: 0,
             };
         }
-        let owners = media_owner_registry()
-            .lock()
-            .map_err(|_| SSH_NET_REALTIME_MEDIA_STATUS_INTERNAL)?;
-        let binding = owners
-            .get(&owner)
-            .ok_or(SSH_NET_REALTIME_MEDIA_STATUS_STALE_OWNER)?;
-        if binding.direction != RealtimeMediaDirection::Receive {
-            return Ok(SSH_NET_REALTIME_MEDIA_STATUS_DIRECTION_MISMATCH);
-        }
-        // Pull has the same generation guard as push. Decoder workers can
-        // still have a queued callback after stop/replacement, so never read
-        // from the runtime until the binding is current.
-        validate_owner(binding)?;
-        if !binding.started {
-            return Ok(SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE);
-        }
-        let runtime = unsafe { &*(binding.runtime as *const SshNetRuntime) };
-        match runtime
-            .runtime
-            .pop_realtime_media_h264(RealtimeMediaEndpointId::from_raw(binding.endpoint))
-        {
-            Ok(Some(frame)) => {
-                let metadata = SshNetRealtimeMediaFrameMetadata {
-                    sequence: frame.sequence,
-                    timestamp: frame.timestamp,
-                    width: frame.width,
-                    height: frame.height,
-                    keyframe: u8::from(frame.keyframe),
-                };
-                let mut payload = frame.payload.into_boxed_slice();
-                let payload_len = payload.len();
-                let payload_ptr = payload.as_mut_ptr();
-                std::mem::forget(payload);
-                unsafe {
-                    *out_metadata = metadata;
-                    *out_payload = SshNetBuffer {
-                        ptr: payload_ptr,
-                        len: payload_len,
-                    };
-                }
-                Ok(0)
+        owner_with_binding(owner, |binding, state| {
+            if binding.direction != RealtimeMediaDirection::Receive {
+                return Ok(SSH_NET_REALTIME_MEDIA_STATUS_DIRECTION_MISMATCH);
             }
-            Ok(None) => Ok(SSH_NET_REALTIME_MEDIA_NO_FRAME),
-            Err(error) => Ok(map_error(error)),
-        }
+            // Pull has the same generation guard as push. Decoder workers can
+            // still have a queued callback after stop/replacement, so never read
+            // from the runtime until the binding is current.
+            validate_owner(binding)?;
+            if !state.started {
+                return Ok(SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE);
+            }
+            let runtime = unsafe { &*(binding.runtime as *const SshNetRuntime) };
+            match runtime
+                .runtime
+                .pop_realtime_media_h264(RealtimeMediaEndpointId::from_raw(binding.endpoint))
+            {
+                Ok(Some(frame)) => {
+                    let metadata = SshNetRealtimeMediaFrameMetadata {
+                        sequence: frame.sequence,
+                        timestamp: frame.timestamp,
+                        width: frame.width,
+                        height: frame.height,
+                        keyframe: u8::from(frame.keyframe),
+                    };
+                    let mut payload = frame.payload.into_boxed_slice();
+                    let payload_len = payload.len();
+                    let payload_ptr = payload.as_mut_ptr();
+                    std::mem::forget(payload);
+                    unsafe {
+                        *out_metadata = metadata;
+                        *out_payload = SshNetBuffer {
+                            ptr: payload_ptr,
+                            len: payload_len,
+                        };
+                    }
+                    Ok(0)
+                }
+                Ok(None) => Ok(SSH_NET_REALTIME_MEDIA_NO_FRAME),
+                Err(error) => Ok(map_error(error)),
+            }
+        })
     });
     match result {
-        Ok(Ok(value)) => value,
-        Ok(Err(value)) => value,
+        Ok(value) => value,
         Err(_) => SSH_NET_REALTIME_MEDIA_STATUS_INTERNAL,
     }
 }

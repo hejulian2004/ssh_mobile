@@ -15,9 +15,9 @@ pub use driver::{
     REALTIME_IO_EVENT_CAPACITY,
 };
 pub use media::{
-    EncodedVideoFrame, KeyframeRequestReason, VideoCodec, VideoEnqueueResult, VideoFrameError,
-    VideoFrameMetadata, VideoMediaStats, VideoQueue, MAX_ENCODED_VIDEO_FRAME_BYTES,
-    SCREEN_VIDEO_QUEUE_CAPACITY,
+    EncodedVideoFrame, H264AdaptationReason, H264AdaptationTarget, H264ScreenVideoStats,
+    KeyframeRequestReason, VideoCodec, VideoEnqueueResult, VideoFrameError, VideoFrameMetadata,
+    VideoMediaStats, VideoQueue, MAX_ENCODED_VIDEO_FRAME_BYTES, SCREEN_VIDEO_QUEUE_CAPACITY,
 };
 pub use peer::{
     DataChannelReliability, IceServerConfig, MediaDirection, WebRtcConfig, WebRtcError, WebRtcPeer,

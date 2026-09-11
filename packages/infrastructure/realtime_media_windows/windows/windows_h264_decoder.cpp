@@ -135,6 +135,11 @@ class HardwareH264Decoder final {
     return Drain(output);
   }
 
+  bool Reset() {
+    if (transform_ == nullptr) return false;
+    return SUCCEEDED(transform_->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0));
+  }
+
  private:
   explicit HardwareH264Decoder(winrt::com_ptr<IMFTransform> transform)
       : transform_(std::move(transform)) {}
@@ -267,6 +272,7 @@ struct DecoderState final {
   std::thread worker;
   std::mutex mutex;
   std::atomic<bool> stopped{false};
+  std::atomic<bool> reset_requested{false};
   std::atomic<int> terminal_status{0};
   std::atomic<uint64_t> frames_decoded{0};
   std::atomic<uint64_t> frames_rendered{0};
@@ -306,6 +312,15 @@ struct DecoderState final {
     while (!stopped.load()) {
       const auto state = weak_state.lock();
       if (!state || state.get() != this || stopped.load()) break;
+      if (reset_requested.exchange(false)) {
+        if (!decoder->Reset()) {
+          terminal_status.store(kDecoderTerminalFailed);
+          stopped.store(true);
+          break;
+        }
+        std::lock_guard<std::mutex> lock(mutex);
+        latest_texture = nullptr;
+      }
       NativeH264FrameMetadata metadata;
       NativeH264Buffer payload;
       const int pull_status = pull(owner, &metadata, &payload);
@@ -350,6 +365,7 @@ struct DecoderState final {
 
   void Stop() {
     stopped.store(true);
+    reset_requested.store(false);
     if (worker.joinable()) worker.join();
     if (registrar != nullptr && texture_id >= 0) {
       registrar->UnregisterTexture(texture_id);
@@ -473,6 +489,18 @@ DecoderStatus WindowsDecoderManager::Detach(uint64_t owner) {
 
 DecoderStatus WindowsDecoderManager::Release(uint64_t owner) {
   return Detach(owner);
+}
+
+DecoderStatus WindowsDecoderManager::Reset(uint64_t owner) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  const auto it = impl_->decoders.find(owner);
+  if (it == impl_->decoders.end()) return DecoderStatus::kNotFound;
+  const auto& state = it->second;
+  if (state->stopped.load() || state->decoder == nullptr) {
+    return DecoderStatus::kDecoderFailed;
+  }
+  state->reset_requested.store(true);
+  return DecoderStatus::kOk;
 }
 
 DecoderStatus WindowsDecoderManager::ReadStats(uint64_t owner,

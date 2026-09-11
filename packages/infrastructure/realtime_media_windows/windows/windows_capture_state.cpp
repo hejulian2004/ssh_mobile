@@ -3,6 +3,7 @@
 #include <d3d11.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 
+#include <algorithm>
 #include <chrono>
 #include <vector>
 
@@ -143,6 +144,18 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
                     ? 0
                     : static_cast<uint64_t>(elapsed_ns) * 90'000ULL /
                           1'000'000'000ULL;
+            const auto target_framerate =
+                std::max<uint32_t>(5, state->target_framerate.load());
+            const uint64_t frame_interval = 90'000ULL / target_framerate;
+            const auto next_encode = state->next_encode_timestamp.load();
+            if (timestamp_90khz < next_encode) {
+              state->frames_dropped.fetch_add(1);
+              continue;
+            }
+            state->next_encode_timestamp.store(
+                timestamp_90khz > UINT64_MAX - frame_interval
+                    ? UINT64_MAX
+                    : timestamp_90khz + frame_interval);
             bool encoded = false;
             {
               std::lock_guard<std::mutex> encode_lock(state->encoder_mutex);

@@ -375,6 +375,96 @@ CaptureStatus WindowsCaptureManager::Release(uint64_t owner) {
   return CaptureStatus::kOk;
 }
 
+CaptureStatus WindowsCaptureManager::ApplyAdaptation(uint64_t owner,
+                                                     uint32_t bitrate_kbps,
+                                                     uint32_t framerate,
+                                                     uint32_t width,
+                                                     uint32_t height) {
+  if (owner == 0 || bitrate_kbps < 256 || bitrate_kbps > 3 * 1024 ||
+      framerate < 5 || framerate > 30 ||
+      ((width == 0) != (height == 0))) {
+    return CaptureStatus::kBackendFailure;
+  }
+  std::shared_ptr<CaptureState> capture;
+  {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    const auto it = impl_->captures.find(owner);
+    if (it == impl_->captures.end()) return CaptureStatus::kNotFound;
+    capture = it->second;
+  }
+  if (capture == nullptr || capture->stopped.load()) {
+    return CaptureStatus::kSourceEnded;
+  }
+  const auto current_width = static_cast<uint32_t>(capture->width.load());
+  const auto current_height = static_cast<uint32_t>(capture->height.load());
+  // Resolution changes are an explicit stop/release/recreate operation in
+  // Phase 3. A target of zero keeps the current source dimensions.
+  if ((width != 0 && (width != current_width || height != current_height))) {
+    return CaptureStatus::kUnsupported;
+  }
+  std::lock_guard<std::mutex> encoder_lock(capture->encoder_mutex);
+  if (capture->encoder == nullptr ||
+      !capture->encoder->ApplyAdaptation(bitrate_kbps)) {
+    capture->terminal_status.store(kCaptureTerminalEncoderFailed);
+    capture->stopped.store(true);
+    return CaptureStatus::kEncoderFailed;
+  }
+  capture->target_bitrate_kbps.store(bitrate_kbps);
+  capture->target_framerate.store(framerate);
+  capture->next_encode_timestamp.store(0);
+  return CaptureStatus::kOk;
+}
+
+CaptureStatus WindowsCaptureManager::CurrentAdaptation(uint64_t owner,
+                                                       uint32_t* bitrate_kbps,
+                                                       uint32_t* framerate) {
+  if (owner == 0 || bitrate_kbps == nullptr || framerate == nullptr) {
+    return CaptureStatus::kBackendFailure;
+  }
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  const auto it = impl_->captures.find(owner);
+  if (it == impl_->captures.end()) return CaptureStatus::kNotFound;
+  const auto& capture = it->second;
+  if (capture == nullptr || capture->stopped.load()) {
+    return CaptureStatus::kSourceEnded;
+  }
+  *bitrate_kbps = capture->target_bitrate_kbps.load();
+  *framerate = capture->target_framerate.load();
+  return CaptureStatus::kOk;
+}
+
+CaptureStatus WindowsCaptureManager::RestoreAdaptation(uint64_t owner,
+                                                       uint32_t bitrate_kbps,
+                                                       uint32_t framerate) {
+  return ApplyAdaptation(owner, bitrate_kbps, framerate, 0, 0);
+}
+
+void WindowsCaptureManager::MarkAdaptationRecreateRequired(uint64_t owner) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  const auto it = impl_->captures.find(owner);
+  if (it == impl_->captures.end() || it->second == nullptr) return;
+  it->second->terminal_status.store(kCaptureTerminalRecreateRequired);
+  it->second->stopped.store(true);
+}
+
+CaptureStatus WindowsCaptureManager::RequestKeyframe(uint64_t owner) {
+  if (owner == 0) return CaptureStatus::kBackendFailure;
+  std::shared_ptr<CaptureState> capture;
+  {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    const auto it = impl_->captures.find(owner);
+    if (it == impl_->captures.end()) return CaptureStatus::kNotFound;
+    capture = it->second;
+  }
+  if (capture == nullptr || capture->stopped.load()) {
+    return CaptureStatus::kSourceEnded;
+  }
+  std::lock_guard<std::mutex> encoder_lock(capture->encoder_mutex);
+  if (capture->encoder == nullptr) return CaptureStatus::kEncoderUnavailable;
+  return capture->encoder->RequestKeyframe() ? CaptureStatus::kOk
+                                              : CaptureStatus::kEncoderFailed;
+}
+
 CaptureStatus WindowsCaptureManager::ReadStats(uint64_t owner,
                                                CaptureStats* stats) {
   if (stats == nullptr) return CaptureStatus::kBackendFailure;

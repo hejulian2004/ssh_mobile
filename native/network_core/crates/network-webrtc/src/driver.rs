@@ -152,6 +152,10 @@ pub async fn run_realtime_io(
             // RTP sender before network packets are collected. They never use
             // the DataChannel or this runtime event channel.
             driver.peer.flush_pending_h264_screen_video(now)?;
+            // Packet-loss/decoder recovery requests are emitted as native RTCP
+            // PLI packets. They stay on the WebRTC peer and are collected by
+            // the same UDP write path as RTP; no control payload enters Dart.
+            driver.peer.flush_h264_screen_video_keyframe_requests();
             let mut outbound = Vec::new();
             while let Some(packet) = driver.peer.poll_network_packet() {
                 if packet.transport.transport_protocol != TransportProtocol::UDP {

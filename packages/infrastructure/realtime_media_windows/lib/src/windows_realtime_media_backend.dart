@@ -8,7 +8,11 @@ import 'windows_realtime_media_platform.dart';
 /// Windows owns only capture, codec, decoder, surface, and texture resources;
 /// therefore release first tears down the platform resource and only then
 /// finalizes the endpoint lease.
-final class WindowsRealtimeMediaBackend implements RealtimeMediaBackend {
+final class WindowsRealtimeMediaBackend
+    implements
+        RealtimeMediaBackend,
+        RealtimeMediaKeyframeBackend,
+        RealtimeMediaAdaptationBackend {
   WindowsRealtimeMediaBackend({
     required this.endpointBackend,
     required this.platform,
@@ -58,10 +62,6 @@ final class WindowsRealtimeMediaBackend implements RealtimeMediaBackend {
       );
       if (_owners.containsKey(endpointId)) {
         await ownerBackend.closeNativeOwner(token: token, identity: identity);
-        await endpointBackend.release(
-          endpointId: endpointId,
-          identity: identity,
-        );
         throw const RealtimeMediaException(
           RealtimeMediaErrorCode.duplicateEndpoint,
           'Windows media already owns this endpoint ID.',
@@ -159,6 +159,38 @@ final class WindowsRealtimeMediaBackend implements RealtimeMediaBackend {
   }) => platform.readStats(
     endpointId: endpointId,
     identity: identity,
+    ownerToken: _ownerFor(endpointId, identity),
+  );
+
+  @override
+  Future<void> requestKeyframe({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) => platform.requestKeyframe(
+    endpointId: endpointId,
+    identity: identity,
+    ownerToken: _ownerFor(endpointId, identity),
+  );
+
+  @override
+  Future<void> resetDecoder({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) => platform.resetDecoder(
+    endpointId: endpointId,
+    identity: identity,
+    ownerToken: _ownerFor(endpointId, identity),
+  );
+
+  @override
+  Future<void> applyAdaptation({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+    required RealtimeMediaAdaptationDecision decision,
+  }) => platform.applyAdaptation(
+    endpointId: endpointId,
+    identity: identity,
+    decision: decision,
     ownerToken: _ownerFor(endpointId, identity),
   );
 
