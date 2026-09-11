@@ -281,7 +281,7 @@ final class RealtimeMediaAdaptationController {
       framesRendered: delta(current.framesRendered, previous.framesRendered),
       packetsSent: delta(current.packetsSent, previous.packetsSent),
       packetsReceived: delta(current.packetsReceived, previous.packetsReceived),
-      // Native RTP loss is a finalized total within one endpoint generation.
+      // Native packet loss is a finalized total within one endpoint generation.
       // A lower sample is a defensive rebaseline (for a reset or a stale
       // adapter sample), never a new interval-sized loss burst.
       packetsLost: monotonicDelta(current.packetsLost, previous.packetsLost),

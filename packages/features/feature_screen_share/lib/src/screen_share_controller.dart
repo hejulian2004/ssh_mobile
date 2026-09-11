@@ -8,6 +8,7 @@ import 'screen_share_models.dart';
 import 'screen_share_ports.dart';
 
 part 'screen_share_controller_media.dart';
+part 'screen_share_controller_consent.dart';
 
 /// Coordinates consent and platform-media readiness for one Realtime session.
 ///
@@ -273,82 +274,8 @@ final class ScreenShareController extends ChangeNotifier
     super.dispose();
   }
 
-  void _onConsent(RealtimeConsent consent) {
-    if (_disposed ||
-        consent.realtimeId != realtimeId ||
-        consent.sharedSessionInstanceId != sharedSessionInstanceId ||
-        consent.senderPeerId != remotePeerId ||
-        !consent.isFresh(_now())) {
-      return;
-    }
-    final currentId = _snapshot.operationId;
-    if (consent.decision == RealtimeConsentDecision.request) {
-      if (consent.actionRevision != 1) return;
-      if (state == ScreenShareOperationState.idle) {
-        _lastRemoteActionRevision = consent.actionRevision;
-        _setSnapshot(
-          ScreenShareOperationSnapshot(
-            state: ScreenShareOperationState.incomingPending,
-            role: ScreenShareRole.receiver,
-            realtimeId: realtimeId,
-            generation: generation,
-            operationId: consent.operationId,
-            mediaReady: _snapshot.mediaReady,
-            expiresAt: consent.expiresAt,
-          ),
-        );
-        _armExpiry(consent.expiresAt);
-      } else if (state == ScreenShareOperationState.outgoingPending &&
-          currentId != null) {
-        if (_compareCollision(
-              localOperationId: currentId,
-              remoteOperationId: consent.operationId,
-            ) <
-            0) {
-          // The local tuple wins. The remote request is a losing collision
-          // proposal; no extra response is needed because the winner is
-          // deterministic and the losing operation has not acquired media.
-          return;
-        }
-        _replaceOutgoingWithIncoming(consent);
-      }
-      return;
-    }
-    if (currentId == null || currentId != consent.operationId) return;
-    if (consent.actionRevision <= _lastRemoteActionRevision) return;
-    if (_lastRemoteActionRevision == 0 && consent.actionRevision != 1) {
-      _fail('Screen-share consent action revision is not contiguous.');
-      return;
-    }
-    if (_lastRemoteActionRevision > 0 &&
-        consent.actionRevision != _lastRemoteActionRevision + 1) {
-      _fail('Screen-share consent action revision is not contiguous.');
-      return;
-    }
-    _lastRemoteActionRevision = consent.actionRevision;
-    switch (consent.decision) {
-      case RealtimeConsentDecision.accept:
-        if (state == ScreenShareOperationState.outgoingPending) {
-          _setState(ScreenShareOperationState.accepted);
-          unawaited(_startCaptureIfReady());
-        }
-      case RealtimeConsentDecision.reject:
-        if (state == ScreenShareOperationState.outgoingPending ||
-            state == ScreenShareOperationState.accepted) {
-          ++_operationEpoch;
-          unawaited(_stopMediaIfActive());
-          _setState(ScreenShareOperationState.rejected);
-        }
-      case RealtimeConsentDecision.cancel:
-        if (!snapshot.isTerminal) {
-          ++_operationEpoch;
-          unawaited(_stopMediaIfActive());
-          _setState(ScreenShareOperationState.cancelled);
-        }
-      case RealtimeConsentDecision.request:
-        break;
-    }
-  }
+  void _onConsent(RealtimeConsent consent) =>
+      _handleScreenShareConsent(this, consent);
 
   void _onMediaEvent(ScreenShareMediaEvent event) {
     if (_disposed ||
@@ -425,47 +352,6 @@ final class ScreenShareController extends ChangeNotifier
       return;
     }
     _expiryTimer = Timer(delay, _expire);
-  }
-
-  void _replaceOutgoingWithIncoming(RealtimeConsent consent) {
-    ++_operationEpoch;
-    _expiryTimer?.cancel();
-    _nextLocalActionRevision = 0;
-    _lastRemoteActionRevision = consent.actionRevision;
-    _setSnapshot(
-      ScreenShareOperationSnapshot(
-        state: ScreenShareOperationState.incomingPending,
-        role: ScreenShareRole.receiver,
-        realtimeId: realtimeId,
-        generation: generation,
-        operationId: consent.operationId,
-        mediaReady: _snapshot.mediaReady,
-        expiresAt: consent.expiresAt,
-      ),
-    );
-    _armExpiry(consent.expiresAt);
-  }
-
-  int _compareCollision({
-    required String localOperationId,
-    required String remoteOperationId,
-  }) {
-    final peerComparison = _compareUtf8(localPeerId, remotePeerId);
-    if (peerComparison != 0) return peerComparison;
-    return _compareUtf8(localOperationId, remoteOperationId);
-  }
-
-  static int _compareUtf8(String left, String right) {
-    final leftBytes = utf8.encode(left);
-    final rightBytes = utf8.encode(right);
-    final length = leftBytes.length < rightBytes.length
-        ? leftBytes.length
-        : rightBytes.length;
-    for (var index = 0; index < length; index++) {
-      final comparison = leftBytes[index].compareTo(rightBytes[index]);
-      if (comparison != 0) return comparison;
-    }
-    return leftBytes.length.compareTo(rightBytes.length);
   }
 
   void _expire() {
