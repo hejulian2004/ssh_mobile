@@ -1,14 +1,22 @@
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 # WebRTC Screen Sharing Architecture
 
 ## Status and authority
 
 Status: Accepted architecture for Phase 0 through Phase 7. Phase 0 and Phase 1
-have committed implementation evidence but no separate PR acceptance in the
-current repository state; Phase 2 has implementation evidence on its dedicated
-branch and also awaits its separate PR acceptance. Phase 3–7 remain planned
-and must not be described as shipped capability.
+have committed implementation evidence without separate screen-share PRs; their
+current baseline was accepted together with Phase 2 in PR #67. Phase 2 was
+merged at `352ef4dc9c602f648f0975809ce12553957b2a75` after final head
+`3d9a4a575f303a573371ce843867cf002f3b163d`. Phase 3 is in progress with its
+Dart/native boundary package and runtime-owned opaque owner port; its Windows
+capture/codec/render capability and Phase 4–7 remain unshipped and must not be
+described as delivered. The native plugin now contains Windows Graphics
+Capture for monitor/window sources, native Media Foundation H.264 send ingress,
+and a hardware H.264 receive/D3D11 texture owner. Hardware availability and
+Windows E2E remain unaccepted. The plugin is still fail-closed when those
+workers are unavailable; native implementation or compilation evidence is not
+evidence of a working capture-to-render pipeline.
 
 This is only the Screen Share slice of M8 (RTC) in
 [`NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md`](../NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md).
@@ -119,7 +127,7 @@ pass.
 | Runtime media | Generic Realtime sessions remain media-neutral; the explicit screen-share integration configures one H.264 screen transceiver on the sole native peer. `RealtimeIoDriver` flushes/receives encoded RTP without DataChannel or event-stream media; a native-only C ABI pushes/pulls encoded access units by opaque endpoint ID | Platform-native capture/codec/render owners invoke that bridge before screen SDP negotiation in later phases |
 | QoS | A separate screen-video queue is fixed to three frames with keyframe-aware dropping; generic MediaFrame's four-frame policy remains unchanged | Phase 7 adaptation and telemetry |
 | Dart video shape | `network_sdk` exposes only Realtime signaling/state; `realtime_media` exposes opaque endpoint/surface lifecycle with no per-frame Dart path | Concrete platform surface adapter lifecycle notifications |
-| Capture/rendering | No production platform screen capture, H.264 codec bridge, decoder, or texture chain | Windows and Android native capture, hardware codecs, and native surfaces |
+| Capture/rendering | Windows Graphics Capture, native H.264 send ingress, and the receive decoder/D3D11 texture owner are implemented but have no accepted hardware/E2E evidence | Windows and Android native capture, hardware codecs, and native surfaces |
 | Consent | Existing signaling has no screen-share business intent or user-accept gate | Typed, versioned screen-share consent payload and explicit accept/reject before answer |
 | TURN | Runtime configuration may hold development credentials in memory | Authenticated, short-lived, per-session production credentials |
 | Recovery | Transport loss terminates Realtime and invalidates every bound native media endpoint before its peer closes | Same rule, with platform capture/decoder/surface cleanup in later phases |
@@ -135,10 +143,11 @@ later phase succeeds.
 
 | Phase | Current status | Evidence boundary |
 | --- | --- | --- |
-| 0 | Implementation evidence ready; PR acceptance pending | Accepted architecture, ADR-034, memory routing, and documentation checks |
-| 1 | Implementation evidence ready; PR acceptance pending | Native H.264-only RTP ingress/egress, exact three-frame queue, bounded frame validation, terminal media discard tests, local loopback, and relay-only coturn H.264 coverage |
-| 2 | Implementation ready; PR acceptance pending | Runtime/realtime-generation-bound opaque endpoint leases, native-only FFI create/release/H.264 push/pull controls, Dart lifecycle contract/fake tests, and no per-frame Dart API |
-| 3–7 | Not started | Remain subject to the planned acceptance matrix below |
+| 0 | Implementation evidence accepted with PR #67; no separate screen-share PR | Accepted architecture, ADR-034, memory routing, and documentation checks |
+| 1 | Implementation evidence accepted with PR #67; no separate screen-share PR | Native H.264-only RTP ingress/egress, exact three-frame queue, bounded frame validation, terminal media discard tests, local loopback, and relay-only coturn H.264 coverage |
+| 2 | Accepted in PR #67 and merged to `main` | Runtime/realtime-generation-bound opaque endpoint leases, native-only FFI create/release/H.264 push/pull controls, Dart lifecycle contract/fake tests, and no per-frame Dart API |
+| 3 | In progress: boundary, Windows capture lifecycle, H.264 ingress, and decoder/texture implementation | Hardware availability, Windows E2E, and the complete Phase 3 acceptance matrix remain outstanding |
+| 4–7 | Not started | Remain subject to the planned acceptance matrix below |
 
 ## Layer boundaries
 
@@ -180,10 +189,9 @@ The `realtime_media` infrastructure package currently owns the Dart
 endpoint-lifecycle contract, opaque source/surface descriptors, and payload-free
 statistics snapshots; its independent tests provide the fake backend. It does
 not own platform capture, hardware codecs, a renderer, or the NetworkRuntime.
-Future platform adapters
-under that package will own capture, H.264 encoder/decoder instances, GPU
-surfaces, and Flutter Texture or equivalent rendering while using the existing
-native bridge by endpoint lease.
+The separate `realtime_media_windows` and future Android adapter packages own
+capture, H.264 encoder/decoder instances, GPU surfaces, and Flutter Texture or
+equivalent rendering while using the existing native bridge by endpoint lease.
 
 ### Rust runtime
 
@@ -205,8 +213,8 @@ the session's native resources are released.
 | UDP socket, timer, and I/O task | RealtimeIoDriver | Realtime session | Driver task is cancelled and joined before socket release |
 | Realtime media endpoint | Native runtime/media bridge | Realtime session generation | Revoked on detach, close, replacement, or Runtime stop |
 | ScreenShareOperation | feature_screen_share | Business operation | Stop, reject, cancel, terminal failure, or route disposal |
-| Capture source and encoder | realtime_media platform adapter | Screen-share session | Stop production before encoder/capture release |
-| Decoder, GPU surface, and Texture | realtime_media renderer | Viewer session | Detach decoder, then release surface and texture |
+| Capture source and encoder | platform adapter (`realtime_media_windows` or Android equivalent) | Screen-share session | Stop production before encoder/capture release |
+| Decoder, GPU surface, and Texture | platform adapter renderer | Viewer session | Detach decoder, then release surface and texture |
 | Feature subscriptions and ViewModel | Feature Route scope | Route | Cancel and dispose without closing App resources |
 
 A Feature may stop its own operation through the injected App Shell capability,
@@ -268,6 +276,13 @@ H.264 frames. Phase 2 defines the native-only
 `ssh_net_realtime_media_endpoint_*` C ABI for endpoint create/release and H.264
 push/pull. Its frame metadata and Rust-owned pull buffer are unavailable to the
 Dart FFI facade; platform-native capture and decoder owners use them directly.
+The additive native owner port exposes generation-validated start/stop/close
+and renderer attach/detach gates plus the same native-only push/pull path. Its
+opaque token retains the full endpoint identity; runtime stop and destroy
+invalidate the token registry before the runtime can be released, and every
+push/pull operation revalidates that identity before touching the bounded media
+queue. Dart only uses the low-frequency endpoint owner open/close adapter and
+never declares these frame or renderer functions.
 The boundary must obey these invariants:
 
 - Dart receives only a bounded opaque RealtimeMediaEndpointId, never a pointer,

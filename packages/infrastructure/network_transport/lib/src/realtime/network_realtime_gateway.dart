@@ -44,6 +44,18 @@ abstract interface class NetworkRealtimeGateway {
   NativeOperationStatus releaseMediaEndpoint(
     NativeRealtimeMediaEndpointId endpointId,
   );
+
+  /// Opens the native-only platform owner for an existing endpoint lease.
+  NativeRealtimeMediaOwnerOpenResult openMediaOwner({
+    required NativeRealtimeMediaEndpointId endpointId,
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  });
+
+  /// Closes the platform owner without finalizing the endpoint lease.
+  NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token);
 }
 
 /// Identity and queue-level status for one native Realtime command.
@@ -147,6 +159,29 @@ final class RuntimeNetworkRealtimeGateway implements NetworkRealtimeGateway {
   ) =>
       _media?.releaseMediaEndpoint(endpointId) ??
       NativeOperationStatus.driverUnavailable;
+
+  @override
+  NativeRealtimeMediaOwnerOpenResult openMediaOwner({
+    required NativeRealtimeMediaEndpointId endpointId,
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  }) =>
+      _media?.openMediaOwner(
+        endpointId: endpointId,
+        realtimeId: realtimeId,
+        peerId: peerId,
+        generation: generation,
+        direction: direction,
+      ) ??
+      const NativeRealtimeMediaOwnerOpenResult(
+        status: NativeOperationStatus.driverUnavailable,
+      );
+
+  @override
+  NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token) =>
+      _media?.closeMediaOwner(token) ?? NativeOperationStatus.driverUnavailable;
 
   NativeCommandTicket _send({
     required String commandId,

@@ -1,4 +1,4 @@
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 # WebRTC Screen Share TODO
 
@@ -22,12 +22,12 @@ ADR-034 或原始技术架构文档。
 - [x] 阅读 canonical architecture、ADR-034、仓库维护 Skill、Memory Map 和
   原始 Phase 计划。
 - [x] 使用指定的 Luna/max 子代理完成一次 Phase 2 只读审计。
-- [x] Phase 0 实现证据：架构/ADR/边界文档完成；PR 接受仍待完成。
+- [x] Phase 0 实现证据：架构/ADR/边界文档完成；当前基线随 PR #67 接受。
 - [x] Phase 1 实现证据：Rust H.264-only RTP/ICE、三帧队列、localhost E2E、
-  relay-only coturn E2E 和终止清理测试完成；PR 接受仍待完成。
+  relay-only coturn E2E 和终止清理测试完成；当前基线随 PR #67 接受。
 - [x] Phase 2 本地实现证据：native media bridge、generation-bound endpoint、
   payload-free Dart lifecycle contract、FFI lifecycle 和 owner/checker 更新完成；
-  该项只表示本地实现，不表示 PR 已被接受。
+  PR #67 已接受并合并到 `main`。
 - [x] Phase 2 连接会话丢失竞态修复：session removal 与 media endpoint
   invalidation 在同一 Realtime 锁作用域内完成，并有回归测试。
 - [x] Phase 2 stale-driver 清理保护：旧 I/O teardown 只移除自己拥有的
@@ -43,13 +43,44 @@ ADR-034 或原始技术架构文档。
   `AppRealtimeMediaBackend`/`RealtimeMediaSessionController`；真实 adapter
   status mapping、generation replacement race 和 controller failure-state
   断言已覆盖，不能从 signaling revision 推导 generation。
-- [ ] Phase 0 PR 接受。
-- [ ] Phase 1 PR 接受。
-- [ ] Phase 2 PR 接受。
+- [x] Phase 0/1 基线随 PR #67 接受；仓库没有另开的 screen-share PR。
+- [x] Phase 2 PR #67 已接受并合并：head
+  `3d9a4a575f303a573371ce843867cf002f3b163d`，merge commit
+  `352ef4dc9c602f648f0975809ce12553957b2a75`。
 - [x] 获得授权后提交、推送并创建 Phase 2 PR（GitHub PR #67）。
+- [x] Phase 3 Windows 边界冻结：`realtime_media_windows` 只传递源/端点身份、
+  生命周期、opaque surface ID 和无载荷统计；capture buffer、H.264 数据、
+  native pointer 与 GPU surface 不进入 Dart。
+- [x] Phase 3 native owner capability：现有 runtime 增加 generation-bound opaque
+  owner token；Windows platform channel 只传 token 和 bounded source metadata，
+  native owner start/stop/close、renderer attach/detach 与 push/pull 仍不进入
+  Dart；owner registry 保存完整 identity 并在 runtime destroy 前失效；每次
+  native push/pull 也会重新校验 endpoint identity，旧 generation 的 late
+  callback fail closed。
+- [x] Phase 3.1 native capture lifecycle implementation：Windows Graphics Capture
+  已在 `realtime_media_windows` native owner 中实现 monitor/window source 枚举、
+  generation-bound start/stop/release、FrameArrived native buffer ownership、
+  source close、resolution-change fail-closed restart boundary 和 payload-free
+  stats；C++17/W4 编译通过，Windows 实机与完整 Phase 3 PR 验收仍未完成。
+- [x] Phase 3.2 native Windows H.264 ingress implementation：Media Foundation
+  hardware MFT discovery、native BGRA→NV12 conversion、Annex-B access-unit
+  normalization、bounded Phase 2 owner push 和 typed encoder/native failure
+  mapping 已接入；仅有本地 translation-unit 编译证据，硬件实机吞吐与端到端
+  验收仍未完成。
+- [x] Phase 3.3 native Windows H.264 receive/render implementation：hardware
+  decoder MFT、native owner pull、D3D11 texture surface 和 Flutter texture
+  registrar 已接入；stale owner、decoder terminal failure、texture detach/release
+  均 fail closed，Dart 只收到 opaque surface ID 与低频统计。当前仅有本地
+  translation-unit 编译证据，硬件双端 E2E 仍未完成。
+- [ ] Phase 3 hardware pipeline gate：Media Foundation
+  H.264 send/receive 实机能力、GPU/Texture 双端 E2E 尚未完成；当前 plugin
+  对缺失 codec/renderer capability 只返回 typed failure，不报告虚假的成功。
 
-当前阻塞：Phase 0、Phase 1、Phase 2 的本地实现与 exact-head CI 证据已齐；
-Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，按架构规则不能实现 Phase 3–7。
+当前状态：Phase 0、Phase 1、Phase 2 的实现、exact-head CI 证据和 PR #67
+接受记录已齐；Phase 3.1 capture lifecycle、Phase 3.2 H.264 ingress 与
+Phase 3.3 H.264 decode/Texture implementation 已落地并完成本地 C++/Rust
+复核，但 Phase 3 尚未接受。Windows 双端硬件 E2E 与 Phase 4–7 仍不得描述为
+已交付能力。
 
 ## PR #67 评审修正清单
 
@@ -87,7 +118,7 @@ Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，按架构规则不能
 - [x] 明确唯一 native WebRTC owner、H.264-only、三帧视频队列和 recovery 规则。
 - [x] 明确高频媒体不进入 protobuf event stream，Dart 只持有 opaque endpoint。
 - [x] 完成 ADR-034、架构检查和文档一致性检查。
-- [ ] 独立 PR 验收并记录接受证据。
+- [x] 当前基线的 PR 接受证据记录在 PR #67。
 
 ### Phase 1 — Native H.264/RTP Path
 
@@ -96,7 +127,7 @@ Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，按架构规则不能
 - [x] 固定三帧队列、关键帧保护、过期/超大帧拒绝和 disconnect 清理。
 - [x] localhost video E2E 通过。
 - [x] relay-only coturn video E2E 通过。
-- [ ] 独立 PR 验收并记录接受证据。
+- [x] 当前基线的 PR 接受证据记录在 PR #67。
 
 ### Phase 2 — Native Media Bridge + Dart Contract
 
@@ -115,14 +146,30 @@ Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，按架构规则不能
   不允许异常后继续提交媒体操作。
 - [x] fake backend lifecycle tests、native bridge tests、owner/dependency/architecture
   checks 通过。
-- [ ] 独立 PR 验收并记录接受证据。
+- [x] PR #67 已接受并合并；Phase 2 证据见下方 exact-head CI 记录。
 
-### Phase 3 — Windows Capture / Codec / Render
+### Phase 3 — Windows Capture / Codec / Render（进行中）
 
-- [ ] Windows monitor/window capture。
-- [ ] Hardware H.264 encode/decode。
-- [ ] GPU surface 与 Flutter Texture 链路。
+- [x] 建立独立 `realtime_media_windows` workspace package、App Shell 注入和
+  可替换的 Windows platform owner 接口；缺失 native plugin 时 fail closed。
+- [x] 增加 runtime-owned native owner token port；owner close 与 endpoint release
+  保持分离，generation/stale endpoint 校验仍由既有 native registry 负责。
+- [x] Windows monitor/window capture lifecycle owner（平台实机/E2E 验收待完成）。
+- [x] Hardware H.264 send ingress implementation（硬件实机/端到端验收待完成）。
+- [x] Hardware H.264 receive/decode owner（硬件实机/端到端验收待完成）。
+- [x] D3D11 GPU surface 与 Flutter Texture registrar 链路（实机/E2E 验收待完成）。
 - [ ] raw frames 不经过 Dart；完成 Windows 专属 analyze/test 和手工 E2E 记录。
+
+本轮 Phase 3 boundary/capture 验证（2026-09-08）：`network-ffi` 23 tests passed；
+`network-core` realtime-media focused tests 7 passed；`realtime_media` 与
+`realtime_media_windows` focused tests 32 passed；`network_transport` focused
+tests 16 passed；`ssh_mobile_network_native` native-asset tests 22 passed。
+Dart analyzer 无 error，Rust format、module/resource/architecture checks 和
+Windows plugin 七个 C++17/W4 translation units compile 均通过。Flutter wrapper
+test/analyzer 在当前离线
+环境无法完成 native-asset/pub advisory 阶段，因此不作为 Phase 3 acceptance
+evidence。Windows Graphics Capture、Media Foundation hardware ingress/decode 的
+实机吞吐、GPU Texture 和 Windows 双端 E2E 仍未通过，PR #68 继续保持 draft。
 
 ### Phase 4 — Android Capture / Codec / Render
 
@@ -168,7 +215,12 @@ Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，按架构规则不能
   `10878406f7732d785e3a0d1aa0147574e91605cb` 的 run
   [34100231240](https://github.com/hejulian2004/ssh_mobile/actions/runs/34100231240)
   已完成，全部 jobs success（含 architecture、native/sdk Dart quality、平台
-  build、app tests 和 90% coverage gate）。
+   build、app tests 和 90% coverage gate）。
+- [x] GitHub Actions：PR #67 final exact head
+  `3d9a4a575f303a573371ce843867cf002f3b163d` 的 run
+  [34107278164](https://github.com/hejulian2004/ssh_mobile/actions/runs/34107278164)
+  已完成，全部 jobs success；PR #67 已于 merge commit
+  `352ef4dc9c602f648f0975809ce12553957b2a75` 合并。
 - [x] native binding 的 Flutter FFI 测试从其 package 根目录运行，以便解析
   package native asset；从仓库根目录调用会缺少该 asset。
 - [x] surface generation 不匹配时的 detach/release/fail-closed 回归测试通过。
@@ -191,7 +243,8 @@ Phase 2 PR #67 仍需独立 PR 接受。在 PR 接受前，按架构规则不能
 ## 下一步
 
 1. 保留当前工作树和用户提供的中文架构原文，不混入无关文件。
-2. 保留已完成的 real Dart→native adapter parity 证据，不再扩展 Phase 2 scope。
-3. 等待 Phase 2 PR 被接受；接受前不开始 Phase 3。
-4. PR 接受后更新本清单，再按 Phase 3 的 owner、Windows 工具链和手工 E2E
-   入口推进。
+2. 保留已完成的 real Dart→native adapter parity 和 PR #67 接受证据，不再扩展
+   Phase 2 scope。
+3. 在当前独立 Phase 3 分支继续实现 Windows capture/codec/render，并按 Windows
+   owner、工具链和手工 E2E 入口记录验收证据；当前 boundary package 不等于
+   平台能力已交付。

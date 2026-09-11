@@ -24,6 +24,16 @@ abstract interface class NativeRealtimeMediaPort {
   NativeOperationStatus releaseMediaEndpoint(
     NativeRealtimeMediaEndpointId endpointId,
   );
+
+  NativeRealtimeMediaOwnerOpenResult openMediaOwner({
+    required NativeRealtimeMediaEndpointId endpointId,
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  });
+
+  NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token);
 }
 
 /// 创建一个已启动的 native 网络 handle。
@@ -121,6 +131,31 @@ final class _SshMobileNativeNetworkHandle implements NativeNetworkHandle {
   ) => _closed
       ? NativeOperationStatus.success
       : _runtime.releaseRealtimeMediaEndpoint(endpointId);
+
+  @override
+  NativeRealtimeMediaOwnerOpenResult openMediaOwner({
+    required NativeRealtimeMediaEndpointId endpointId,
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  }) => _closed
+      ? const NativeRealtimeMediaOwnerOpenResult(
+          status: NativeOperationStatus.stopped,
+        )
+      : _runtime.openRealtimeMediaOwner(
+          endpointId: endpointId,
+          realtimeId: realtimeId,
+          peerId: peerId,
+          generation: generation,
+          direction: direction,
+        );
+
+  @override
+  NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token) =>
+      _closed
+      ? NativeOperationStatus.success
+      : _runtime.closeRealtimeMediaOwner(token);
 
   @override
   Future<void> close() async {

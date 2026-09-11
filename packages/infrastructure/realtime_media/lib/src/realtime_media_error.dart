@@ -14,6 +14,16 @@ enum RealtimeMediaErrorCode {
   useAfterRelease,
   failedState,
   sessionReleased,
+  permissionDenied,
+  captureSourceEnded,
+  encoderUnavailable,
+  encoderFailed,
+  decoderUnavailable,
+  decoderFailed,
+  unsupportedCodec,
+  realtimeNegotiationFailed,
+  iceFailed,
+  turnUnavailable,
   backendFailure,
 }
 

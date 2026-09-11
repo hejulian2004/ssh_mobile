@@ -16,6 +16,14 @@ The App Shell native adapter receives a `RealtimeSessionToken` from
 `network_sdk` and forwards its native-authoritative generation unchanged to
 the endpoint ABI. Signaling revisions are not accepted as a substitute.
 
+The Windows phase composes this contract through the separate
+`realtime_media_windows` infrastructure package. That package's
+`WindowsRealtimeMediaBackend` uses a native `WindowsRealtimeMediaPlatform`
+whose method-channel implementation carries only source/endpoint identity,
+lifecycle commands, an opaque renderer ID, and payload-free statistics;
+capture buffers, H.264 data, decoder state, and texture resources remain
+native-owned.
+
 ## Validation
 
 ```sh

@@ -1,8 +1,8 @@
 //! Additive, payload-free C ABI controls for native screen-media endpoint leases.
 //!
-//! The ABI only creates and releases opaque IDs. Encoded media stays in native
-//! capture/codec/render owners and is never copied into the command or event
-//! protobuf queues.
+//! Endpoint lifecycle and native frame ingress/egress remain in this module;
+//! the platform-owner token registry lives in `realtime_media_owner` so each
+//! responsibility has a bounded implementation surface.
 
 use network_core::{RealtimeMediaDirection, RealtimeMediaEndpointId, RealtimeMediaError};
 use network_webrtc::{
@@ -14,6 +14,19 @@ use std::str;
 use std::time::{Duration, Instant};
 
 use super::{SshNetBuffer, SshNetRuntime, SshNetRuntimeHandle};
+
+#[path = "realtime_media_owner.rs"]
+mod realtime_media_owner;
+
+pub(crate) use realtime_media_owner::invalidate_media_owners;
+#[allow(unused_imports)]
+pub use realtime_media_owner::{
+    ssh_net_realtime_media_owner_attach_renderer, ssh_net_realtime_media_owner_close,
+    ssh_net_realtime_media_owner_detach_renderer, ssh_net_realtime_media_owner_open,
+    ssh_net_realtime_media_owner_pull_h264, ssh_net_realtime_media_owner_push_h264,
+    ssh_net_realtime_media_owner_start, ssh_net_realtime_media_owner_stop,
+    ssh_net_realtime_media_owner_validate,
+};
 
 /// Numeric C ABI values for a one-way screen-media lease.
 pub const SSH_NET_REALTIME_MEDIA_DIRECTION_SEND: u32 = 1;
@@ -55,20 +68,20 @@ pub const SSH_NET_REALTIME_MEDIA_STATUS_DUPLICATE_ENDPOINT: i32 = -8;
 pub const SSH_NET_REALTIME_MEDIA_STATUS_DRIVER_UNAVAILABLE: i32 = -9;
 pub const SSH_NET_REALTIME_MEDIA_STATUS_PEER_MISMATCH: i32 = -10;
 pub const SSH_NET_REALTIME_MEDIA_STATUS_FRAME_REJECTED: i32 = -11;
+pub const SSH_NET_REALTIME_MEDIA_STATUS_STALE_OWNER: i32 = -12;
 
-const NATIVE_MEDIA_FRAME_MAX_AGE: Duration = Duration::from_secs(1);
+pub(super) const NATIVE_MEDIA_FRAME_MAX_AGE: Duration = Duration::from_secs(1);
 
 /// Creates an opaque endpoint lease for the active native realtime generation.
 ///
 /// The ID strings are bounded UTF-8 identifiers; no media bytes, socket, peer,
-/// or renderer handle crosses this boundary. Returns zero on success or one of
-/// the stable media status codes below. `expected_generation` is compared
+/// or renderer handle crosses this boundary. `expected_generation` is compared
 /// under the same manager lock as session/driver lookup; it is never inferred
 /// from whichever driver happens to be registered now.
 ///
 /// # Safety
-/// `handle` is a live runtime handle; both identifier ranges and `out_endpoint`
-/// must point to valid memory for the duration of this call.
+/// `handle` must be a live runtime handle. The identifier pointers and
+/// `out_endpoint` must remain valid for the duration of this call.
 #[no_mangle]
 pub unsafe extern "C" fn ssh_net_realtime_media_endpoint_create(
     handle: SshNetRuntimeHandle,
@@ -128,7 +141,7 @@ pub unsafe extern "C" fn ssh_net_realtime_media_endpoint_create(
 /// safe and does not require the realtime session to still exist.
 ///
 /// # Safety
-/// `handle` is a runtime handle created by `ssh_net_runtime_create`.
+/// `handle` must be a runtime handle created by `ssh_net_runtime_create`.
 #[no_mangle]
 pub unsafe extern "C" fn ssh_net_realtime_media_endpoint_release(
     handle: SshNetRuntimeHandle,
@@ -161,9 +174,8 @@ pub unsafe extern "C" fn ssh_net_realtime_media_endpoint_release(
 /// discards the input rather than allowing backlog growth.
 ///
 /// # Safety
-/// `handle` is a live runtime handle and `payload_ptr` must address
-/// `payload_len` readable bytes for this call. The caller retains the input
-/// memory after return.
+/// `handle` must be live and `payload_ptr` must address `payload_len` readable
+/// bytes for the duration of this call. The caller retains the input memory.
 #[no_mangle]
 pub unsafe extern "C" fn ssh_net_realtime_media_endpoint_push_h264(
     handle: SshNetRuntimeHandle,
@@ -220,9 +232,9 @@ pub unsafe extern "C" fn ssh_net_realtime_media_endpoint_push_h264(
 /// is native-only and is not a Dart FFI entry point.
 ///
 /// # Safety
-/// `handle` is a live runtime handle. `out_metadata` and `out_payload` must
-/// point to writable memory for this call. A non-null returned payload pointer
-/// must be passed unchanged to `ssh_net_buffer_free` exactly once.
+/// `handle` must be live. `out_metadata` and `out_payload` must point to
+/// writable memory for this call. A non-null returned payload pointer must be
+/// passed unchanged to `ssh_net_buffer_free` exactly once.
 #[no_mangle]
 pub unsafe extern "C" fn ssh_net_realtime_media_endpoint_pull_h264(
     handle: SshNetRuntimeHandle,
