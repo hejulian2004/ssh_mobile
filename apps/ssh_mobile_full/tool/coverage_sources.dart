@@ -55,7 +55,7 @@ String? resolveCoverageBaseRef({
   Map<String, String>? environment,
 }) {
   final env = environment ?? Platform.environment;
-  for (final candidate in [
+  for (final candidate in <String?>[
     explicitBaseRef,
     env['COVERAGE_BASE_REF'],
     env['CI_BASE_REF'],
@@ -64,22 +64,38 @@ String? resolveCoverageBaseRef({
     env['GITHUB_EVENT_BEFORE'],
     env['GITHUB_BASE_REF'],
   ]) {
-    if (candidate != null && candidate.isNotEmpty && !_isZeroSha(candidate)) {
-      return candidate;
-    }
+    final resolved = _resolveGitCommit(
+      candidate,
+      workingDirectory: workingDirectory,
+    );
+    if (resolved != null) return resolved;
   }
   for (final candidate in const ['origin/main', 'HEAD^']) {
-    final result = Process.runSync('git', [
-      'rev-parse',
-      '--verify',
-      '$candidate^{commit}',
-    ], workingDirectory: workingDirectory);
-    if (result.exitCode == 0) {
-      final resolved = result.stdout.toString().trim();
-      if (resolved.isNotEmpty) return resolved;
-    }
+    final resolved = _resolveGitCommit(
+      candidate,
+      workingDirectory: workingDirectory,
+    );
+    if (resolved != null) return resolved;
   }
   return null;
+}
+
+String? _resolveGitCommit(String? candidate, {String? workingDirectory}) {
+  if (candidate == null ||
+      candidate.isEmpty ||
+      _isZeroSha(candidate) ||
+      candidate.startsWith('-')) {
+    return null;
+  }
+  final result = Process.runSync('git', [
+    'rev-parse',
+    '--verify',
+    '$candidate^{commit}',
+  ], workingDirectory: workingDirectory);
+  if (result.exitCode != 0) return null;
+  final resolved = result.stdout.toString().trim();
+  if (resolved.isEmpty) return null;
+  return resolved;
 }
 
 /// Single-file exclusions whose reasons are recorded in

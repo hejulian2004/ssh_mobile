@@ -293,7 +293,7 @@ void main() {
     r'^\s+- ((?:apps|packages)/[^\s]+)$',
     multiLine: true,
   ).allMatches(pubspec).map((match) => match.group(1)!).toList();
-  _expect(workspaceMembers.length == 23, 'Workspace Member 数量发生漂移');
+  _expect(workspaceMembers.length == 24, 'Workspace Member 数量发生漂移');
   for (final member in workspaceMembers) {
     _expect(
       Directory('${root.path}/$member').existsSync(),

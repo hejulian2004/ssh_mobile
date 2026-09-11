@@ -644,6 +644,214 @@ void main() {
   );
 
   test(
+    'native owner bridge validates tokens and preserves identity metadata',
+    () async {
+      final gateway = _FakeRealtimeGateway(
+        mediaOwnerOpenResult: NativeRealtimeMediaOwnerOpenResult(
+          status: NativeOperationStatus.success,
+          token: NativeRealtimeMediaOwnerToken(88),
+        ),
+      );
+      final adapter = AppRealtimeMediaBackend(
+        networkRuntime: _FakeNetworkRuntime(gateway),
+      );
+      final identity = RealtimeMediaEndpointIdentity(
+        realtimeId: realtimeId,
+        peerId: 'peer-a',
+        generation: 7,
+        direction: RealtimeMediaDirection.send,
+      );
+      final endpoint = await adapter.start(identity);
+      final owner = await adapter.openNativeOwner(
+        endpointId: endpoint,
+        identity: identity,
+      );
+
+      expect(owner.value, '88');
+      await adapter.closeNativeOwner(token: owner, identity: identity);
+      await adapter.release(endpointId: endpoint, identity: identity);
+
+      await expectLater(
+        adapter.closeNativeOwner(
+          token: RealtimeMediaNativeOwnerToken('0'),
+          identity: identity,
+        ),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.invalidArgument,
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'native owner close failure remains typed through the adapter',
+    () async {
+      final gateway = _FakeRealtimeGateway(
+        mediaOwnerOpenResult: NativeRealtimeMediaOwnerOpenResult(
+          status: NativeOperationStatus.success,
+          token: NativeRealtimeMediaOwnerToken(88),
+        ),
+        mediaOwnerCloseStatus: NativeOperationStatus.staleEndpoint,
+      );
+      final adapter = AppRealtimeMediaBackend(
+        networkRuntime: _FakeNetworkRuntime(gateway),
+      );
+      final identity = RealtimeMediaEndpointIdentity(
+        realtimeId: realtimeId,
+        peerId: 'peer-a',
+        generation: 7,
+        direction: RealtimeMediaDirection.send,
+      );
+      final endpoint = await adapter.start(identity);
+      final owner = await adapter.openNativeOwner(
+        endpointId: endpoint,
+        identity: identity,
+      );
+
+      await expectLater(
+        adapter.closeNativeOwner(token: owner, identity: identity),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.staleEndpoint,
+          ),
+        ),
+      );
+      await adapter.release(endpointId: endpoint, identity: identity);
+    },
+  );
+
+  test('unsupported Phase 2 platform operations fail closed', () async {
+    final adapter = AppRealtimeMediaBackend(
+      networkRuntime: _FakeNetworkRuntime(_FakeRealtimeGateway()),
+    );
+    final endpoint = RealtimeMediaEndpointId('77');
+    final identity = RealtimeMediaEndpointIdentity(
+      realtimeId: realtimeId,
+      peerId: 'peer-a',
+      generation: 7,
+      direction: RealtimeMediaDirection.receive,
+    );
+    final source = ScreenCaptureSource(
+      id: ScreenCaptureSourceId('display:1'),
+      kind: ScreenCaptureSourceKind.display,
+    );
+
+    expect(
+      () => adapter.attachCaptureSource(
+        endpointId: endpoint,
+        identity: identity,
+        source: source,
+      ),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.backendFailure,
+        ),
+      ),
+    );
+    expect(
+      () => adapter.attachRemoteVideoSurface(
+        endpointId: endpoint,
+        identity: identity,
+      ),
+      throwsA(isA<RealtimeMediaException>()),
+    );
+    expect(
+      () => adapter.readStats(endpointId: endpoint, identity: identity),
+      throwsA(isA<RealtimeMediaException>()),
+    );
+    await expectLater(
+      adapter.release(
+        endpointId: RealtimeMediaEndpointId('not-a-native-id'),
+        identity: identity,
+      ),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.invalidArgument,
+        ),
+      ),
+    );
+  });
+
+  for (final entry in <(NativeOperationStatus, RealtimeMediaErrorCode)>[
+    (
+      NativeOperationStatus.invalidArgument,
+      RealtimeMediaErrorCode.invalidArgument,
+    ),
+    (
+      NativeOperationStatus.unknownSession,
+      RealtimeMediaErrorCode.unknownSession,
+    ),
+    (NativeOperationStatus.peerMismatch, RealtimeMediaErrorCode.peerMismatch),
+    (NativeOperationStatus.frameRejected, RealtimeMediaErrorCode.frameRejected),
+    (NativeOperationStatus.stopped, RealtimeMediaErrorCode.sessionReleased),
+    (NativeOperationStatus.failure, RealtimeMediaErrorCode.backendFailure),
+  ]) {
+    test('native status ${entry.$1} remains typed', () async {
+      final adapter = AppRealtimeMediaBackend(
+        networkRuntime: _FakeNetworkRuntime(
+          _FakeRealtimeGateway(mediaCreateStatus: entry.$1),
+        ),
+      );
+      await expectLater(
+        adapter.start(
+          RealtimeMediaEndpointIdentity(
+            realtimeId: realtimeId,
+            peerId: 'peer-a',
+            generation: 7,
+            direction: RealtimeMediaDirection.send,
+          ),
+        ),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            entry.$2,
+          ),
+        ),
+      );
+    });
+  }
+
+  test(
+    'successful native endpoint creation without an ID fails closed',
+    () async {
+      final adapter = AppRealtimeMediaBackend(
+        networkRuntime: _FakeNetworkRuntime(
+          _FakeRealtimeGateway(mediaCreateReturnsNoEndpoint: true),
+        ),
+      );
+
+      await expectLater(
+        adapter.start(
+          RealtimeMediaEndpointIdentity(
+            realtimeId: realtimeId,
+            peerId: 'peer-a',
+            generation: 7,
+            direction: RealtimeMediaDirection.send,
+          ),
+        ),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.backendFailure,
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
     'generation token survives native replacement and stale start fails',
     () async {
       final gateway = _FakeRealtimeGateway();
@@ -748,11 +956,16 @@ final class _FakeNetworkRuntime implements NetworkRuntime {
   Future<void> dispose() async {}
 }
 
-final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
+class _FakeRealtimeGateway implements NetworkRealtimeGateway {
   _FakeRealtimeGateway({
     this.startStatus = NativeOperationStatus.success,
     this.mediaCreateStatus = NativeOperationStatus.success,
     this.mediaReleaseStatus = NativeOperationStatus.success,
+    this.mediaOwnerOpenResult = const NativeRealtimeMediaOwnerOpenResult(
+      status: NativeOperationStatus.driverUnavailable,
+    ),
+    this.mediaOwnerCloseStatus = NativeOperationStatus.success,
+    this.mediaCreateReturnsNoEndpoint = false,
   });
 
   final StreamController<NativeNetworkEvent> _events =
@@ -760,6 +973,9 @@ final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
   final NativeOperationStatus startStatus;
   final NativeOperationStatus mediaCreateStatus;
   final NativeOperationStatus mediaReleaseStatus;
+  final NativeRealtimeMediaOwnerOpenResult mediaOwnerOpenResult;
+  final NativeOperationStatus mediaOwnerCloseStatus;
+  final bool mediaCreateReturnsNoEndpoint;
   int? mediaCurrentGeneration;
   int _sequence = 0;
   String? lastStartCommandId;
@@ -803,7 +1019,9 @@ final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
         : mediaCreateStatus;
     return NativeRealtimeMediaEndpointCreateResult(
       status: status,
-      endpointId: status.isSuccess ? NativeRealtimeMediaEndpointId(77) : null,
+      endpointId: status.isSuccess && !mediaCreateReturnsNoEndpoint
+          ? NativeRealtimeMediaEndpointId(77)
+          : null,
     );
   }
 
@@ -819,13 +1037,11 @@ final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
     required String peerId,
     required int generation,
     required NativeRealtimeMediaDirection direction,
-  }) => const NativeRealtimeMediaOwnerOpenResult(
-    status: NativeOperationStatus.driverUnavailable,
-  );
+  }) => mediaOwnerOpenResult;
 
   @override
   NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token) =>
-      NativeOperationStatus.success;
+      mediaOwnerCloseStatus;
 
   void emitCommandResult({
     required String commandId,

@@ -44,6 +44,10 @@ extension _AppRuntimeFactoryCore on _AppRuntimeFactoryContext {
         endpointBackend: endpointBackend,
         platform: const MethodChannelWindowsRealtimeMediaPlatform(),
       ),
+      TargetPlatform.android => AndroidRealtimeMediaBackend(
+        endpointBackend: endpointBackend,
+        platform: const MethodChannelAndroidRealtimeMediaPlatform(),
+      ),
       _ => endpointBackend,
     };
     runtimeRealtimeMediaSessionFactory = AppRealtimeMediaSessionFactory(
