@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_sdk/network_sdk.dart';
@@ -578,6 +579,74 @@ void main() {
     },
   );
 
+  test('native consent adapter encodes and queues typed metadata', () async {
+    final gateway = _ConsentRealtimeGateway();
+    final backend = AppRealtimeSessionBackend(
+      networkRuntime: _FakeNetworkRuntime(gateway),
+      commandResultTimeout: const Duration(seconds: 1),
+    );
+    final consent = _testConsent();
+
+    final resultFuture = backend.sendConsent(
+      peerId: 'peer-a',
+      consent: consent,
+    );
+    await _pump();
+
+    expect(gateway.consentRealtimeId, consent.realtimeId);
+    expect(gateway.consentPeerId, 'peer-a');
+    expect(gateway.consentRevision, 1);
+    expect(gateway.consentPayload, isNotNull);
+    expect(gateway.consentPayload, isNotEmpty);
+
+    gateway.emitCommandResult(commandId: gateway.lastConsentCommandId!);
+    expect(await resultFuture, isA<SdkSuccess<void>>());
+    await backend.dispose();
+  });
+
+  test('legacy gateway reports consent capability failure', () async {
+    final backend = AppRealtimeSessionBackend(
+      networkRuntime: _FakeNetworkRuntime(_FakeRealtimeGateway()),
+    );
+
+    final result = await backend.sendConsent(
+      peerId: 'peer-a',
+      consent: _testConsent(),
+    );
+
+    expect(result, isA<SdkFailure<void>>());
+    expect(
+      (result as SdkFailure<void>).error.code,
+      NetworkErrorCode.invalidArgument,
+    );
+    await backend.dispose();
+  });
+
+  test('native consent signal maps to the typed SDK backend event', () async {
+    final gateway = _FakeRealtimeGateway();
+    final backend = AppRealtimeSessionBackend(
+      networkRuntime: _FakeNetworkRuntime(gateway),
+    );
+    final startFuture = backend.start(realtimeId: realtimeId, peerId: 'peer-a');
+    await _pump();
+    gateway.emitCommandResult(commandId: gateway.lastStartCommandId!);
+    await startFuture;
+
+    final eventFuture = backend.events
+        .where((event) => event is RealtimeConsentBackendEvent)
+        .cast<RealtimeConsentBackendEvent>()
+        .first;
+    gateway.emitConsent(_nativeTestConsent());
+    final event = await eventFuture;
+
+    expect(event.consent.operationId, 'operation-a');
+    expect(event.consent.decision, RealtimeConsentDecision.request);
+    expect(event.consent.purpose, RealtimeConsentPurpose.screenShare);
+    expect(event.consent.media, RealtimeConsentMedia.screenVideo);
+    expect(event.consent.actionRevision, 1);
+    await backend.dispose();
+  });
+
   for (final status in <NativeOperationStatus>[
     NativeOperationStatus.staleGeneration,
     NativeOperationStatus.staleEndpoint,
@@ -918,6 +987,37 @@ void main() {
 
 Future<void> _pump() => Future<void>.delayed(Duration.zero);
 
+RealtimeConsent _testConsent({
+  RealtimeConsentDecision decision = RealtimeConsentDecision.request,
+}) {
+  final issued = DateTime.utc(2030, 1, 1, 12);
+  return RealtimeConsent(
+    operationId: 'operation-a',
+    realtimeId: '00112233445566778899aabbccddeeff',
+    sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
+    issuedAt: issued,
+    expiresAt: issued.add(const Duration(minutes: 1)),
+    decision: decision,
+    senderPeerId: 'peer-a',
+    actionRevision: 1,
+  );
+}
+
+NativeScreenShareConsent _nativeTestConsent() => NativeScreenShareConsent(
+  schemaVersion: 2,
+  operationId: 'operation-a',
+  realtimeId: '00112233445566778899aabbccddeeff',
+  sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
+  issuedAtMs: DateTime.utc(2030, 1, 1, 12).millisecondsSinceEpoch,
+  expiresAtMs: DateTime.utc(2030, 1, 1, 12, 1).millisecondsSinceEpoch,
+  decision: NativeScreenShareConsentDecision.request,
+  senderPeerId: 'peer-a',
+  purpose: NativeScreenShareConsentPurpose.screenShare,
+  media: NativeScreenShareMediaKind.screenVideo,
+  requiresAcceptance: true,
+  actionRevision: 1,
+);
+
 final class _FakeNetworkRuntime implements NetworkRuntime {
   _FakeNetworkRuntime(this.gateway, {this.openError});
 
@@ -1099,6 +1199,51 @@ class _FakeRealtimeGateway implements NetworkRealtimeGateway {
         generation: generation,
         error: error,
       ),
+    );
+  }
+
+  void emitConsent(NativeScreenShareConsent consent) {
+    _events.add(
+      NativeRealtimeSignalEvent(
+        eventId: 'consent-${++_sequence}',
+        timestampMs: 1,
+        protocolVersion: 2,
+        realtimeId: consent.realtimeId,
+        peerId: consent.senderPeerId,
+        kind: NativeRealtimeSignalKind.screenShareConsent,
+        revision: 1,
+        payload: Uint8List(0),
+        consent: consent,
+      ),
+    );
+  }
+}
+
+final class _ConsentRealtimeGateway extends _FakeRealtimeGateway
+    implements NetworkRealtimeConsentGateway {
+  int _consentSequence = 0;
+  String? lastConsentCommandId;
+  String? consentRealtimeId;
+  String? consentPeerId;
+  int? consentRevision;
+  Uint8List? consentPayload;
+
+  @override
+  NativeCommandTicket sendScreenShareConsent({
+    required String realtimeId,
+    required String peerId,
+    required int revision,
+    required Uint8List payload,
+  }) {
+    consentRealtimeId = realtimeId;
+    consentPeerId = peerId;
+    consentRevision = revision;
+    consentPayload = Uint8List.fromList(payload);
+    final commandId = 'consent-${++_consentSequence}';
+    lastConsentCommandId = commandId;
+    return NativeCommandTicket(
+      commandId: commandId,
+      queueStatus: NativeOperationStatus.success,
     );
   }
 }

@@ -13,7 +13,8 @@ const _defaultCommandResultTimeout = Duration(seconds: 30);
 /// Native owns PeerConnection, SDP, ICE, signaling, sockets, and media
 /// resources. This adapter correlates queue tickets with typed command results,
 /// maps lifecycle events, and never forwards native signaling to a Feature.
-final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
+final class AppRealtimeSessionBackend
+    implements RealtimeSessionBackend, RealtimeConsentBackend {
   AppRealtimeSessionBackend({
     required this._networkRuntime,
     this.maxPendingCommands = _defaultMaxPendingCommands,
@@ -36,6 +37,57 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
 
   @override
   Stream<RealtimeBackendEvent> get events => _events.stream;
+
+  @override
+  Future<SdkResult<void>> sendConsent({
+    required String peerId,
+    required RealtimeConsent consent,
+  }) async {
+    _ensureUsable();
+    final gateway = await _ensureGateway();
+    if (gateway is! NetworkRealtimeConsentGateway) {
+      return _failure(
+        code: NetworkErrorCode.invalidArgument,
+        message: 'Native gateway does not support screen-share consent.',
+        operation: NetworkOperation.send,
+        peerId: peerId,
+      );
+    }
+    final revision = _nextConsentRevision(consent.realtimeId);
+    final payload = NativeNetworkProtocol.encodeScreenShareConsent(
+      NativeScreenShareConsent(
+        schemaVersion: consent.schemaVersion,
+        operationId: consent.operationId,
+        realtimeId: consent.realtimeId,
+        sharedSessionInstanceId: consent.sharedSessionInstanceId,
+        issuedAtMs: consent.issuedAtMs,
+        expiresAtMs: consent.expiresAtMs,
+        decision: NativeScreenShareConsentDecision.values.firstWhere(
+          (value) => value.wireValue == consent.decision.wireValue,
+        ),
+        senderPeerId: consent.senderPeerId,
+        purpose: NativeScreenShareConsentPurpose.values.firstWhere(
+          (value) => value.wireValue == consent.purpose.wireValue,
+        ),
+        media: NativeScreenShareMediaKind.values.firstWhere(
+          (value) => value.wireValue == consent.media.wireValue,
+        ),
+        requiresAcceptance: consent.requiresAcceptance,
+        actionRevision: consent.actionRevision,
+      ),
+    );
+    return _sendCommand(
+      operation: NetworkOperation.send,
+      peerId: peerId,
+      send: (_) =>
+          (gateway as NetworkRealtimeConsentGateway).sendScreenShareConsent(
+            realtimeId: consent.realtimeId,
+            peerId: peerId,
+            revision: revision,
+            payload: payload,
+          ),
+    );
+  }
 
   @override
   Future<SdkResult<void>> start({
@@ -141,6 +193,7 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
         :final state,
         :final revision,
         :final generation,
+        :final sharedSessionInstanceId,
         :final error,
       ):
         _events.add(
@@ -150,6 +203,7 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
             state: _mapState(state),
             revision: revision,
             generation: generation,
+            sharedSessionInstanceId: sharedSessionInstanceId,
             error: error == null ? null : _mapError(error),
           ),
         );
@@ -159,6 +213,7 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
         :final state,
         :final revision,
         :final generation,
+        :final sharedSessionInstanceId,
         :final error,
       ):
         // 快照在 session 存在前到达时由 SDK coordinator 忽略；这里只做类型映射。
@@ -170,10 +225,49 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
               state: _mapState(state),
               revision: revision,
               generation: generation,
+              sharedSessionInstanceId: sharedSessionInstanceId,
               error: error == null ? null : _mapError(error),
             ),
           ),
         );
+      case NativeRealtimeSignalEvent event
+          when event.kind == NativeRealtimeSignalKind.screenShareConsent &&
+              event.consent != null:
+        final consent = event.consent!;
+        try {
+          _events.add(
+            RealtimeConsentBackendEvent(
+              RealtimeConsent(
+                schemaVersion: consent.schemaVersion,
+                operationId: consent.operationId,
+                realtimeId: consent.realtimeId,
+                sharedSessionInstanceId: consent.sharedSessionInstanceId,
+                issuedAt: DateTime.fromMillisecondsSinceEpoch(
+                  consent.issuedAtMs,
+                ),
+                expiresAt: DateTime.fromMillisecondsSinceEpoch(
+                  consent.expiresAtMs,
+                ),
+                decision: RealtimeConsentDecision.values.firstWhere(
+                  (value) => value.wireValue == consent.decision.wireValue,
+                ),
+                senderPeerId: consent.senderPeerId,
+                purpose: RealtimeConsentPurpose.values.firstWhere(
+                  (value) => value.wireValue == consent.purpose.wireValue,
+                ),
+                media: RealtimeConsentMedia.values.firstWhere(
+                  (value) => value.wireValue == consent.media.wireValue,
+                ),
+                requiresAcceptance: consent.requiresAcceptance,
+                actionRevision: consent.actionRevision,
+              ),
+            ),
+          );
+        } on Object {
+          // Native decoding is fail-closed; keep this adapter defensive if a
+          // future decoder returns an unknown enum value.
+          return;
+        }
       case NativeCommandResultEvent event:
         _completeCommand(event);
       case NativePeerStateChangedEvent():
@@ -232,6 +326,14 @@ final class AppRealtimeSessionBackend implements RealtimeSessionBackend {
     _gateway = null;
     _gatewayFuture = null;
     await _events.close();
+  }
+
+  final Map<String, int> _consentRevisions = <String, int>{};
+
+  int _nextConsentRevision(String realtimeId) {
+    final next = (_consentRevisions[realtimeId] ?? 0) + 1;
+    _consentRevisions[realtimeId] = next;
+    return next;
   }
 
   void _ensureUsable() {

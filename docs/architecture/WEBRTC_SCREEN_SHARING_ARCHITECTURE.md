@@ -1,4 +1,4 @@
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 
 # WebRTC Screen Sharing Architecture
 
@@ -8,15 +8,15 @@ Status: Accepted architecture for Phase 0 through Phase 7. Phase 0 and Phase 1
 have committed implementation evidence without separate screen-share PRs; their
 current baseline was accepted together with Phase 2 in PR #67. Phase 2 was
 merged at `352ef4dc9c602f648f0975809ce12553957b2a75` after final head
-`3d9a4a575f303a573371ce843867cf002f3b163d`. Phase 3 is in progress with its
-Dart/native boundary package and runtime-owned opaque owner port; its Windows
-capture/codec/render capability and Phase 4–7 remain unshipped and must not be
-described as delivered. The native plugin now contains Windows Graphics
-Capture for monitor/window sources, native Media Foundation H.264 send ingress,
-and a hardware H.264 receive/D3D11 texture owner. Hardware availability and
-Windows E2E remain unaccepted. The plugin is still fail-closed when those
-workers are unavailable; native implementation or compilation evidence is not
-evidence of a working capture-to-render pipeline.
+`3d9a4a575f303a573371ce843867cf002f3b163d`. Phase 3 and Phase 4 platform
+owners are implemented on their dedicated branches, but hardware availability,
+device lifecycle, and cross-platform E2E gates remain unaccepted. Phase 5
+typed consent/state-machine work, Phase 6 authenticated TURN issuer/SDK
+contracts, and the Phase 7 bounded statistics/adaptation base are likewise in
+progress; none of these follow-up contracts is a claim that screen sharing is
+shipped. The native plugin remains fail-closed when platform workers are
+unavailable; native implementation or compilation evidence is not evidence of
+a working capture-to-render pipeline.
 
 This is only the Screen Share slice of M8 (RTC) in
 [`NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md`](../NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md).
@@ -115,11 +115,13 @@ Rust RealtimeManager, native network-webrtc, RealtimeIoDriver, authenticated
 Relay signaling, and typed Dart Realtime session coordination. Phase 1 adds the
 native-only H.264 RTP path and fixed screen queue; Phase 2 adds a
 generation-bound native endpoint bridge with native-only H.264 push/pull plus
-the payload-free `realtime_media` lifecycle contract. These are prerequisites,
-not a completed video product:
-capture, decoding/rendering, consent UI, production TURN credentials, and QoS
-hardening remain future work until their phase contract and acceptance evidence
-pass.
+the payload-free `realtime_media` lifecycle contract. Phase 5 now adds the
+typed consent/state-machine boundary, Phase 6 adds the authenticated TURN
+issuer/SDK contract, and Phase 7 adds bounded low-frequency statistics and an
+adaptation policy. These are still prerequisites rather than a completed video
+product: platform hardware/E2E, consent UI acceptance, production credential
+deployment, native keyframe recovery, privacy validation, and final gates must
+pass before screen sharing is described as delivered.
 
 | Area | Current verified baseline | Planned screen-share capability |
 | --- | --- | --- |
@@ -128,9 +130,9 @@ pass.
 | QoS | A separate screen-video queue is fixed to three frames with keyframe-aware dropping; generic MediaFrame's four-frame policy remains unchanged | Phase 7 adaptation and telemetry |
 | Dart video shape | `network_sdk` exposes only Realtime signaling/state; `realtime_media` exposes opaque endpoint/surface lifecycle with no per-frame Dart path | Concrete platform surface adapter lifecycle notifications |
 | Capture/rendering | Windows Graphics Capture, native H.264 send ingress, receive decoder/D3D11 texture owner, and the Android MediaProjection/MediaCodec/SurfaceTexture owner are implemented but have no accepted hardware/E2E evidence | Windows and Android native capture, hardware codecs, and native surfaces |
-| Consent | Existing signaling has no screen-share business intent or user-accept gate | Typed, versioned screen-share consent payload and explicit accept/reject before answer |
-| TURN | Runtime configuration may hold development credentials in memory | Authenticated, short-lived, per-session production credentials |
-| Recovery | Transport loss terminates Realtime and invalidates every bound native media endpoint before its peer closes | Same rule, with platform capture/decoder/surface cleanup in later phases |
+| Consent | Phase 5 now defines the typed signal/payload and Feature operation state machine; UI and platform acceptance remain gated | Explicit accept/reject before answer/capture, with operation and generation replay guards |
+| TURN | Phase 6 has an authenticated short-lived issuer contract and in-memory SDK store; production relay integration remains gated | Per-session production credentials, expiry/refresh, redaction, and relay-only E2E |
+| Recovery | Transport loss terminates Realtime and invalidates every bound native media endpoint before its peer closes | Same rule, plus platform capture/decoder/surface cleanup and Phase 7 keyframe recovery |
 
 In particular, a Video SDP m-line, a generic MediaFrame queue, or a
 DataChannel test payload named like a frame is not evidence of H.264 video
@@ -148,7 +150,9 @@ later phase succeeds.
 | 2 | Accepted in PR #67 and merged to `main` | Runtime/realtime-generation-bound opaque endpoint leases, native-only FFI create/release/H.264 push/pull controls, Dart lifecycle contract/fake tests, and no per-frame Dart API |
 | 3 | In progress: boundary, Windows capture lifecycle, H.264 ingress, and decoder/texture implementation | Hardware availability, Windows E2E, and the complete Phase 3 acceptance matrix remain outstanding |
 | 4 | In progress: Android MediaProjection/MediaCodec/SurfaceTexture owner implementation | Device permission/revocation, lifecycle interruption, hardware codec and cross-platform E2E acceptance remain outstanding |
-| 5–7 | Not started | Remain subject to the planned acceptance matrix below |
+| 5 | In progress: typed consent protocol, Feature state machine, and App Shell ports | UI/transport acceptance, duplicate/replay/recovery matrix, and Phase 5 PR gate remain outstanding |
+| 6 | In progress: authenticated TURN issuer, SDK parser/store, and redaction contract | Production device-auth integration, secret scan, expiry/refresh, and relay-only E2E remain outstanding |
+| 7 | In progress: bounded low-frequency stats and adaptation policy | Native keyframe/recovery integration, privacy teardown, E2E, and final CI gate remain outstanding |
 
 ## Layer boundaries
 
@@ -250,7 +254,7 @@ The existing protobuf command/event ABI remains the low-frequency control plane:
 
 - current start, stop, state, signaling, command completion, errors, and bounded
   statistics;
-- a planned typed consent message and media endpoint/state extension, both
+- the typed `ScreenShareConsentV2` message and media endpoint/state extension,
   authored in the protocol source schema before generated artifacts;
 - surface-ready, resolution-change, paused, resumed, and endpoint lifecycle
   notifications once the planned media contract exists;
@@ -371,40 +375,39 @@ logged.
 ## Consent and signaling
 
 Existing authenticated signaling carries offer, answer, ICE candidate, ICE
-restart, and close. Phase 5 adds a dedicated, authenticated `RealtimeConsentV1`
-control payload through the protocol source of truth. It is not a
-`RelayDataFrame`, a video payload, or a sixth `RealtimeSignal` kind; the existing
-Relay `RealtimeSignal` remains `realtime_id` + `target_device_id` + `kind` +
-`revision` + bounded `payload`, with no sender field on that wire. The typed
-consent payload is:
+restart, and close. Phase 5 adds the dedicated
+`REALTIME_SIGNAL_KIND_SCREEN_SHARE_CONSENT` signal and its authenticated
+`ScreenShareConsentV2` control payload through the protocol source of truth. It
+is not a `RelayDataFrame` or a video payload; the existing Relay `RealtimeSignal`
+still carries `realtime_id` + `target_device_id` + `kind` + `revision` + bounded
+`payload`, with no sender field on that wire. The typed consent payload is:
 
 ~~~text
-version = 1                         # payload schema version, not Relay v2
-action = REQUEST | ACCEPT | REJECT | CANCEL
+schema_version = 2                  # payload schema version, not Relay v2
+decision = REQUEST | ACCEPT | REJECT | CANCEL
 purpose = SCREEN_SHARE               # typed enum, not free-form text
-intent_id                            # non-empty, <= 128 bytes
+operation_id                         # non-empty, <= 128 bytes
 sender_peer_id                       # non-empty, <= 128 bytes
-realtime_id                          # non-empty, <= 128 bytes
+realtime_id                          # canonical 32-char shared session identity
 media = SCREEN_VIDEO                 # typed enum
 requires_acceptance = true
 issued_at_ms
-expires_at_ms                        # issued <= expires <= issued + 120 s
-action_revision >= 1                 # monotonic within (intent_id, sender_peer_id)
+expires_at_ms                        # issued < expires <= issued + 120 s
+action_revision >= 1                 # monotonic within (operation_id, sender_peer_id)
 ~~~
 
 The whole typed payload is at most 4 KiB, below the existing 256 KiB
-`RealtimeSignal` payload bound. `sender_peer_id` always means the peer that owns
-the screen content and originated the REQUEST; ACCEPT/REJECT/CANCEL echo that
-value. The actual actor for each action is obtained from the authenticated
-control connection and its peer binding, so no `peer_id` or `sender_device_id`
-alias is introduced. The payload contains no bearer token, private key, or
-reusable credential.
+`RealtimeSignal` payload bound. `sender_peer_id` identifies the authenticated
+peer that authored the individual action (the REQUEST origin is therefore the
+sender of the screen content). The operation ID binds later ACCEPT/REJECT/CANCEL
+actions to that request; no `peer_id` or `sender_device_id` alias is introduced.
+The payload contains no bearer token, private key, or reusable credential.
 
-The receiver keeps at most 32 live provisional intents, with no more than one
-for a given `(sender_peer_id, intent_id)`, and stores only typed metadata plus a
+The receiver keeps at most 32 live provisional operations, with no more than one
+for a given `(sender_peer_id, operation_id)`, and stores only typed metadata plus a
 protected pending-offer handle. A bounded replay cache keeps at most 256 keys
 per authenticated peer for five minutes; its key is
-`(sender_peer_id, target_device_id, realtime_id, intent_id, action,
+`(sender_peer_id, target_device_id, realtime_id, operation_id, decision,
 action_revision)`. Expiry deletes provisional state and cannot be renewed.
 Replay-cache failure, duplicate or out-of-order action, expired intent, unknown
 version/purpose/media, oversized payload, or a non-contiguous action revision
@@ -413,12 +416,13 @@ fails closed.
 Authentication and binding checks are mandatory: the outer authenticated source
 and target must match the expected peers; `sender_peer_id` must match the
 authenticated content sender and the pending operation; `realtime_id` must map
-to that peer and the current session generation; REQUEST alone creates
-provisional state; ACCEPT/REJECT only acts on a matching, non-terminal,
-non-expired REQUEST. `version`, action replay, and the local generation guard
-are separate checks. The Phase 5 Relay extension will authenticate and route this
-future control message but will not trust, rewrite, parse, store, or forward
-media payload.
+to the current shared session. REQUEST alone creates provisional state;
+ACCEPT/REJECT only acts on a matching, non-terminal, non-expired REQUEST.
+`schema_version`, action replay, and the local native-generation guard are
+separate checks. Native generation is process-local media-lease freshness and
+never appears in the consent wire payload. The Relay routes this bounded
+control message but does not trust, rewrite, parse, store, or forward media
+payload.
 
 The accepted receiving flow is:
 
@@ -426,7 +430,7 @@ The accepted receiving flow is:
 Incoming screen-share request
   -> feature presents accept and reject
   -> user reject: close/reject without an accepted media session
-  -> user accept: validate intent, sender_peer_id, realtime ID, and generation
+  -> user accept: validate operation, authenticated sender, realtime ID, and generation
   -> only then permit WebRTC answer and negotiation
   -> native ready: attach remote decode/render path
 ~~~
@@ -434,15 +438,16 @@ Incoming screen-share request
 An incoming Offer may be retained only as bounded provisional signaling state
 needed to ask the user. It must not automatically create a final accepted media
 session, auto-answer, auto-display a screen, or start local capture. Stale,
-duplicate, oversized, unknown, or mismatched intent actions fail closed.
+duplicate, oversized, unknown, or mismatched operation actions fail closed.
 
 The accepted sending flow is:
 
 ~~~text
 User explicitly starts sharing
-  -> select peer and source, obtain OS permission
+  -> select peer and source metadata
   -> create ScreenShareOperation and outgoing intent
   -> receiver explicitly accepts
+  -> validate consent and obtain OS permission
   -> WebRTC answer, ICE, DTLS-SRTP, and native media endpoint are ready
   -> begin actual capture and H.264 encoding
 ~~~
@@ -544,11 +549,10 @@ Relay backend: device authentication, identity/presence, and bounded signaling
 coturn: standard ICE relay for encrypted WebRTC packets
 ~~~
 
-Relay never carries RTP or media payload. It does not store SDP, ICE, intent
-history, or any screen content. The future consent extension may retain only the
-bounded live intent routing state required by its owner; it must not create
-history. Delivery, Transfer, file resume, and RelayDataFrame remain unrelated
-to the video data plane.
+Relay never carries RTP or media payload. It does not store SDP, ICE, consent
+history, or any screen content. The consent signal is bounded live control
+metadata only; it must not create history. Delivery, Transfer, file resume, and
+RelayDataFrame remain unrelated to the video data plane.
 
 Development may retain the existing in-memory runtime TURN configuration.
 Phase 6 replaces a production static client credential with a device-authenticated

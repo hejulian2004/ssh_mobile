@@ -1267,3 +1267,31 @@ async fn signal_webrtc_uses_authenticated_control_context() {
     };
     assert_eq!(signal.target_device_id, "device-b");
 }
+
+#[tokio::test]
+async fn signal_webrtc_wire_kind_forwards_future_network_signal() {
+    let mut client = RelayControlClient::new(
+        "https://relay.example.test".into(),
+        "device-a".into(),
+        "credential".into(),
+        [0u8; 32],
+    )
+    .expect("client");
+    let (outbound, mut frames) = mpsc::channel(1);
+    client.outbound = Some(outbound);
+
+    client
+        .signal_webrtc_wire_kind("rt-1234", "device-b", 6, 2, b"consent")
+        .await
+        .expect("future signal frame");
+
+    let Message::Binary(frame) = frames.recv().await.expect("outbound frame") else {
+        panic!("expected binary realtime signal frame");
+    };
+    let frame = decode_control_frame(&frame).expect("decode signal frame");
+    let relay_frame::Kind::RealtimeSignal(signal) = frame.kind.expect("signal kind") else {
+        panic!("expected realtime signal kind");
+    };
+    assert_eq!(signal.kind, 6);
+    assert_eq!(signal.payload, b"consent");
+}

@@ -16,6 +16,7 @@ final class _NativeRealtimeEventDecoder {
     var state = 0;
     var revision = 0;
     var generation = 0;
+    var sharedSessionInstanceId = '';
     NativeNetworkError? error;
     while (!reader.isDone) {
       final field = reader.field();
@@ -32,6 +33,11 @@ final class _NativeRealtimeEventDecoder {
           error = _values.decodeError(reader.bytes(field.wireType));
         case 6:
           generation = reader.varint(field.wireType);
+        case 7:
+          sharedSessionInstanceId = reader.string(
+            field.wireType,
+            _sharedSessionInstanceIdBytes,
+          );
         default:
           reader.skip(field.wireType);
       }
@@ -43,6 +49,7 @@ final class _NativeRealtimeEventDecoder {
         'Realtime session generation must be positive.',
       );
     }
+    _values.validateDecodedSharedSessionInstanceId(sharedSessionInstanceId);
     return NativeRealtimeStateChangedEvent(
       eventId: eventId,
       timestampMs: timestampMs,
@@ -52,6 +59,7 @@ final class _NativeRealtimeEventDecoder {
       state: NativeRealtimeSessionState.fromWire(state),
       revision: revision,
       generation: generation,
+      sharedSessionInstanceId: sharedSessionInstanceId,
       error: error,
     );
   }
@@ -98,15 +106,130 @@ final class _NativeRealtimeEventDecoder {
     if (revision <= 0) {
       throw const FormatException('Realtime signal revision must be positive.');
     }
+    final signalKind = NativeRealtimeSignalKind.fromWire(kind);
+    final consent = signalKind == NativeRealtimeSignalKind.screenShareConsent
+        ? _decodeScreenShareConsent(payload, realtimeId)
+        : null;
     return NativeRealtimeSignalEvent(
       eventId: eventId,
       timestampMs: timestampMs,
       protocolVersion: protocolVersion,
       realtimeId: realtimeId,
       peerId: peerId,
-      kind: NativeRealtimeSignalKind.fromWire(kind),
+      kind: signalKind,
       revision: revision,
       payload: payload,
+      consent: consent,
+    );
+  }
+
+  static NativeScreenShareConsent _decodeScreenShareConsent(
+    Uint8List bytes,
+    String expectedRealtimeId,
+  ) {
+    if (bytes.isEmpty || bytes.length > _maxScreenShareConsentPayloadBytes) {
+      throw const FormatException(
+        'Screen-share consent payload is outside bounds.',
+      );
+    }
+    final reader = _ProtoReader(bytes);
+    var schemaVersion = 0;
+    var operationId = '';
+    var realtimeId = '';
+    var issuedAtMs = 0;
+    var expiresAtMs = 0;
+    var decision = 0;
+    var senderPeerId = '';
+    var purpose = 0;
+    var media = 0;
+    var requiresAcceptance = false;
+    var actionRevision = 0;
+    var sharedSessionInstanceId = '';
+    while (!reader.isDone) {
+      final field = reader.field();
+      switch (field.number) {
+        case 1:
+          schemaVersion = reader.varint(field.wireType);
+        case 2:
+          operationId = reader.string(
+            field.wireType,
+            _maxScreenShareOperationIdBytes,
+          );
+        case 3:
+          realtimeId = reader.string(field.wireType, _realtimeIdBytes);
+        case 4:
+          issuedAtMs = reader.varint(field.wireType);
+        case 5:
+          expiresAtMs = reader.varint(field.wireType);
+        case 6:
+          decision = reader.varint(field.wireType);
+        case 7:
+          senderPeerId = reader.string(field.wireType, _maxPeerIdBytes);
+        case 8:
+          purpose = reader.varint(field.wireType);
+        case 9:
+          media = reader.varint(field.wireType);
+        case 10:
+          requiresAcceptance = reader.varint(field.wireType) != 0;
+        case 11:
+          actionRevision = reader.varint(field.wireType);
+        case 12:
+          sharedSessionInstanceId = reader.string(
+            field.wireType,
+            _sharedSessionInstanceIdBytes,
+          );
+        default:
+          reader.skip(field.wireType);
+      }
+    }
+    if (schemaVersion != 2) {
+      throw const FormatException(
+        'Unsupported screen-share consent schema version.',
+      );
+    }
+    if (operationId.isEmpty) {
+      throw const FormatException(
+        'Screen-share consent operation is required.',
+      );
+    }
+    if (realtimeId != expectedRealtimeId) {
+      throw const FormatException(
+        'Screen-share consent realtime ID does not match signal.',
+      );
+    }
+    if (issuedAtMs <= 0 ||
+        expiresAtMs <= issuedAtMs ||
+        expiresAtMs - issuedAtMs > const Duration(minutes: 2).inMilliseconds) {
+      throw const FormatException(
+        'Screen-share consent expiration is invalid.',
+      );
+    }
+    if (senderPeerId.isEmpty ||
+        sharedSessionInstanceId.isEmpty ||
+        NativeScreenShareConsentDecision.fromWire(decision) ==
+            NativeScreenShareConsentDecision.unspecified ||
+        NativeScreenShareConsentPurpose.fromWire(purpose) !=
+            NativeScreenShareConsentPurpose.screenShare ||
+        NativeScreenShareMediaKind.fromWire(media) !=
+            NativeScreenShareMediaKind.screenVideo ||
+        !requiresAcceptance ||
+        actionRevision <= 0) {
+      throw const FormatException('Screen-share consent fields are invalid.');
+    }
+    _values.validateDecodedSharedSessionInstanceId(sharedSessionInstanceId);
+    return NativeScreenShareConsent(
+      schemaVersion: schemaVersion,
+      operationId: operationId,
+      realtimeId: realtimeId,
+      sharedSessionInstanceId: sharedSessionInstanceId,
+      issuedAtMs: issuedAtMs,
+      expiresAtMs: expiresAtMs,
+      decision: NativeScreenShareConsentDecision.fromWire(decision),
+      senderPeerId: senderPeerId,
+      purpose: NativeScreenShareConsentPurpose.fromWire(purpose),
+      media: NativeScreenShareMediaKind.fromWire(media),
+      requiresAcceptance: requiresAcceptance,
+      actionRevision: actionRevision,
     );
   }
 
@@ -122,6 +245,7 @@ final class _NativeRealtimeEventDecoder {
     var state = 0;
     var revision = 0;
     var generation = 0;
+    var sharedSessionInstanceId = '';
     NativeNetworkError? error;
     while (!reader.isDone) {
       final field = reader.field();
@@ -138,6 +262,11 @@ final class _NativeRealtimeEventDecoder {
           error = _values.decodeError(reader.bytes(field.wireType));
         case 6:
           generation = reader.varint(field.wireType);
+        case 7:
+          sharedSessionInstanceId = reader.string(
+            field.wireType,
+            _sharedSessionInstanceIdBytes,
+          );
         default:
           reader.skip(field.wireType);
       }
@@ -149,6 +278,7 @@ final class _NativeRealtimeEventDecoder {
         'Realtime session generation must be positive.',
       );
     }
+    _values.validateDecodedSharedSessionInstanceId(sharedSessionInstanceId);
     return NativeRealtimeSnapshotEvent(
       eventId: eventId,
       timestampMs: timestampMs,
@@ -158,6 +288,7 @@ final class _NativeRealtimeEventDecoder {
       state: NativeRealtimeSessionState.fromWire(state),
       revision: revision,
       generation: generation,
+      sharedSessionInstanceId: sharedSessionInstanceId,
       error: error,
     );
   }

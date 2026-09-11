@@ -141,6 +141,31 @@ pub enum RealtimeSignalKind {
     IceCandidate = 3,
     IceRestart = 4,
     WebRtcClose = 5,
+    ScreenShareConsent = 6,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration)]
+#[repr(i32)]
+pub enum ScreenShareConsentDecision {
+    Unspecified = 0,
+    Request = 1,
+    Accept = 2,
+    Reject = 3,
+    Cancel = 4,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration)]
+#[repr(i32)]
+pub enum ScreenShareConsentPurpose {
+    Unspecified = 0,
+    ScreenShare = 1,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration)]
+#[repr(i32)]
+pub enum ScreenShareMediaKind {
+    Unspecified = 0,
+    ScreenVideo = 1,
 }
 
 /// 应用消息进入 Delivery Manager 后采用的可靠性策略。

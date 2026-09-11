@@ -56,3 +56,44 @@ pub struct NetworkErrorEnvelope {
     #[prost(message, optional, tag = "1")]
     pub error: Option<NetworkError>,
 }
+
+/// Native-only envelope carried as opaque Relay signaling payload bytes. It
+/// binds SDP/ICE/close signaling to the same cross-device session instance;
+/// the process-local native generation is intentionally not serialized here.
+#[derive(Clone, PartialEq, Message)]
+pub struct RealtimeSignalEnvelope {
+    #[prost(string, tag = "1")]
+    pub shared_session_instance_id: String,
+    #[prost(bytes = "vec", tag = "2")]
+    pub payload: Vec<u8>,
+}
+
+/// Current screen-share consent metadata carried by the dedicated realtime
+/// consent signal. This message never contains media, SDP, ICE or secrets.
+#[derive(Clone, PartialEq, Message)]
+pub struct ScreenShareConsentV2 {
+    #[prost(uint32, tag = "1")]
+    pub schema_version: u32,
+    #[prost(string, tag = "2")]
+    pub operation_id: String,
+    #[prost(string, tag = "3")]
+    pub realtime_id: String,
+    #[prost(uint64, tag = "4")]
+    pub issued_at_ms: u64,
+    #[prost(uint64, tag = "5")]
+    pub expires_at_ms: u64,
+    #[prost(enumeration = "ScreenShareConsentDecision", tag = "6")]
+    pub decision: i32,
+    #[prost(string, tag = "7")]
+    pub sender_peer_id: String,
+    #[prost(enumeration = "ScreenShareConsentPurpose", tag = "8")]
+    pub purpose: i32,
+    #[prost(enumeration = "ScreenShareMediaKind", tag = "9")]
+    pub media: i32,
+    #[prost(bool, tag = "10")]
+    pub requires_acceptance: bool,
+    #[prost(uint64, tag = "11")]
+    pub action_revision: u64,
+    #[prost(string, tag = "12")]
+    pub shared_session_instance_id: String,
+}

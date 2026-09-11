@@ -58,6 +58,19 @@ abstract interface class NetworkRealtimeGateway {
   NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token);
 }
 
+/// Optional extension for authenticated, typed screen-share consent. Keeping
+/// it separate means older/synthetic gateways remain valid while production
+/// gateways can add the new signal kind without exposing protocol bytes to a
+/// Feature.
+abstract interface class NetworkRealtimeConsentGateway {
+  NativeCommandTicket sendScreenShareConsent({
+    required String realtimeId,
+    required String peerId,
+    required int revision,
+    required Uint8List payload,
+  });
+}
+
 /// Identity and queue-level status for one native Realtime command.
 ///
 /// The ticket deliberately does not contain an operation result. Callers must
@@ -76,7 +89,8 @@ final class NativeCommandTicket {
 }
 
 /// Runtime-owned implementation backed by a borrowed command gateway.
-final class RuntimeNetworkRealtimeGateway implements NetworkRealtimeGateway {
+final class RuntimeNetworkRealtimeGateway
+    implements NetworkRealtimeGateway, NetworkRealtimeConsentGateway {
   RuntimeNetworkRealtimeGateway(this._gateway, [this._media]);
 
   final NetworkCommandGateway _gateway;
@@ -182,6 +196,34 @@ final class RuntimeNetworkRealtimeGateway implements NetworkRealtimeGateway {
   @override
   NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token) =>
       _media?.closeMediaOwner(token) ?? NativeOperationStatus.driverUnavailable;
+
+  @override
+  NativeCommandTicket sendScreenShareConsent({
+    required String realtimeId,
+    required String peerId,
+    required int revision,
+    required Uint8List payload,
+  }) {
+    final commandId = _nextCommandId('realtime-consent');
+    try {
+      return _send(
+        commandId: commandId,
+        command: NativeNetworkProtocol.sendRealtimeSignalCommand(
+          commandId: commandId,
+          realtimeId: realtimeId,
+          peerId: peerId,
+          kind: NativeRealtimeSignalKind.screenShareConsent,
+          revision: revision,
+          payload: payload,
+        ),
+      );
+    } on ArgumentError {
+      return NativeCommandTicket(
+        commandId: commandId,
+        queueStatus: NativeOperationStatus.invalidArgument,
+      );
+    }
+  }
 
   NativeCommandTicket _send({
     required String commandId,

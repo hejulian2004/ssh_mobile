@@ -21,7 +21,9 @@ pub(crate) use peer::{
     emit_network_environment_changed, emit_peer_diagnostics, emit_peer_lifecycle, emit_peer_state,
     emit_peer_state_profile,
 };
-pub(crate) use realtime::{emit_realtime_signal, emit_realtime_snapshot, emit_realtime_state};
+pub(crate) use realtime::{
+    emit_realtime_signal, emit_realtime_snapshot, emit_realtime_state, RealtimeSessionIdentity,
+};
 pub(crate) use relay_presence::{
     emit_peer_presence_changed, emit_peer_presence_snapshot, emit_relay_state,
 };

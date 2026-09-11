@@ -11,8 +11,10 @@ import 'package:ssh_mobile_network_native/ssh_mobile_network_native.dart';
 /// encoded frames, capture buffers, and renderer handles never enter Dart.
 final class AppRealtimeMediaBackend
     implements RealtimeMediaBackend, RealtimeMediaNativeOwnerBackend {
+  // The public named parameter is part of the adapter API; using an
+  // initializing formal here would expose the private field name.
   AppRealtimeMediaBackend({required NetworkRuntime networkRuntime})
-    : _networkRuntime = networkRuntime;
+    : _networkRuntime = networkRuntime; // ignore: prefer_initializing_formals
 
   final NetworkRuntime _networkRuntime;
   NetworkRealtimeGateway? _gateway;
