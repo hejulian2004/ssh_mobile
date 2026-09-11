@@ -1015,7 +1015,7 @@ jobs:
           if [[ ! -x ./gradlew || ! -f ./gradle/wrapper/gradle-wrapper.jar ]]; then
             flutter precache --android
             cp "$wrapper_source/gradlew" ./gradlew
-            cp "$wrapper_source/gradle-wrapper.jar" \
+            cp "$wrapper_source/gradle/wrapper/gradle-wrapper.jar" \
               ./gradle/wrapper/gradle-wrapper.jar
             chmod +x ./gradlew
           fi
