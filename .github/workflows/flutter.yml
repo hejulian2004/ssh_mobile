@@ -986,8 +986,8 @@ jobs:
           fi
 
           mapfile -d '' isolated_files < <(find "$GITHUB_WORKSPACE/coverage-shards" -type f -name 'isolated-*.info' -print0 | sort -z)
-          if [ "${#isolated_files[@]}" -ne 2 ]; then
-            echo "Expected 2 isolated coverage files, found ${#isolated_files[@]}."
+          if [ "${#isolated_files[@]}" -ne 4 ]; then
+            echo "Expected 4 isolated coverage files, found ${#isolated_files[@]}."
             exit 1
           fi
 
