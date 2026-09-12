@@ -34,12 +34,17 @@ final class AppScreenShareIncomingRequestHost extends StatefulWidget {
       _AppScreenShareIncomingRequestHostState();
 }
 
+enum _IncomingOfferState { pending, resolving, handedOff, terminal }
+
 final class _AppScreenShareIncomingRequestHostState
     extends State<AppScreenShareIncomingRequestHost> {
   StreamSubscription<RealtimeIncomingSessionOffer>? _subscription;
   RealtimeIncomingSessionOffer? _offer;
   RealtimeIncomingSessionOffer? _activeOffer;
-  final Set<String> _seenOffers = <String>{};
+  final Map<String, DateTime> _seenOffers = <String, DateTime>{};
+  Timer? _offerExpiryTimer;
+  _IncomingOfferState _offerState = _IncomingOfferState.terminal;
+  int _hostEpoch = 0;
   bool _busy = false;
 
   @override
@@ -51,63 +56,78 @@ final class _AppScreenShareIncomingRequestHostState
   }
 
   void _onOffer(RealtimeIncomingSessionOffer offer) {
+    final now = DateTime.now().toUtc();
     if (!mounted ||
         !widget.screenSharePort.canReceiveScreenShareFrom(
           offer.authenticatedPeerId,
         )) {
-      unawaited(widget.runtime.realtimeClient.discardIncomingOffer(offer));
+      _discardBestEffort(offer);
+      return;
+    }
+    _pruneSeenOffers(now);
+    final effectiveExpiry = _effectiveExpiry(offer);
+    if (!effectiveExpiry.isAfter(now)) {
+      _discardBestEffort(offer);
       return;
     }
     final key = _offerKey(offer);
-    if (!_seenOffers.add(key)) {
-      unawaited(widget.runtime.realtimeClient.discardIncomingOffer(offer));
+    if (_seenOffers.containsKey(key)) {
+      _discardBestEffort(offer);
       return;
     }
+    if (_offer != null && _offerState != _IncomingOfferState.pending) {
+      // A claim/reject resolution already owns the current offer. Do not let
+      // a later notification replace it or discard its provisional binding.
+      _discardBestEffort(offer);
+      return;
+    }
+    _rememberOffer(key, effectiveExpiry, now);
+    final candidateEpoch = ++_hostEpoch;
     final acquired = widget.arbitration.acquire(
       remotePeerId: offer.authenticatedPeerId,
       initiatorPeerId: offer.request.senderPeerId,
       operationId: offer.request.operationId,
       onReplaced: () async {
-        await widget.runtime.realtimeClient.discardIncomingOffer(offer);
-        if (mounted && identical(_offer, offer)) {
-          setState(() => _offer = null);
-        }
-        if (mounted && identical(_activeOffer, offer)) {
+        if (_isExactPending(offer, candidateEpoch)) {
+          await _expirePending(offer, candidateEpoch);
+        } else if (mounted && identical(_activeOffer, offer)) {
           unawaited(widget.navigatorKey.currentState?.maybePop());
         }
       },
     );
     if (!acquired) {
-      unawaited(widget.runtime.realtimeClient.discardIncomingOffer(offer));
+      _discardBestEffort(offer);
       return;
     }
     final previous = _offer;
     if (previous != null && !identical(previous, offer)) {
-      widget.arbitration.release(
-        remotePeerId: previous.authenticatedPeerId,
-        initiatorPeerId: previous.request.senderPeerId,
-        operationId: previous.request.operationId,
-      );
-      unawaited(widget.runtime.realtimeClient.discardIncomingOffer(previous));
+      _finishPending(previous);
     }
-    setState(() => _offer = offer);
+    _offer = offer;
+    _offerState = _IncomingOfferState.pending;
+    _busy = false;
+    _armExpiryTimer(offer, candidateEpoch, effectiveExpiry);
+    setState(() {});
   }
 
   @override
   void dispose() {
+    _offerExpiryTimer?.cancel();
+    _offerExpiryTimer = null;
     unawaited(_subscription?.cancel());
-    final offers = <RealtimeIncomingSessionOffer>{
-      if (_offer != null) _offer!,
-      if (_activeOffer != null) _activeOffer!,
-    };
-    for (final offer in offers) {
+    final pending = _offer;
+    final active = _activeOffer;
+    if (pending != null && _offerState == _IncomingOfferState.pending) {
+      _discardBestEffort(pending);
+    }
+    for (final offer in <RealtimeIncomingSessionOffer>{?pending, ?active}) {
       widget.arbitration.release(
         remotePeerId: offer.authenticatedPeerId,
         initiatorPeerId: offer.request.senderPeerId,
         operationId: offer.request.operationId,
       );
-      unawaited(widget.runtime.realtimeClient.discardIncomingOffer(offer));
     }
+    _offerState = _IncomingOfferState.terminal;
     super.dispose();
   }
 
@@ -161,7 +181,7 @@ final class _AppScreenShareIncomingRequestHostState
   );
 
   Future<void> _reject(RealtimeIncomingSessionOffer offer) async {
-    setState(() => _busy = true);
+    if (!_beginResolving(offer)) return;
     try {
       await widget.runtime.realtimeClient.rejectIncomingOffer(offer);
     } finally {
@@ -170,7 +190,7 @@ final class _AppScreenShareIncomingRequestHostState
   }
 
   Future<void> _accept(RealtimeIncomingSessionOffer offer) async {
-    setState(() => _busy = true);
+    if (!_beginResolving(offer)) return;
     AppScreenShareSessionLease? lease;
     RealtimeSession? session;
     var handedOff = false;
@@ -204,6 +224,7 @@ final class _AppScreenShareIncomingRequestHostState
       handedOff = true;
       lease = null;
       _activeOffer = offer;
+      _offerState = _IncomingOfferState.handedOff;
       if (mounted && identical(_offer, offer)) {
         setState(() {
           _offer = null;
@@ -227,6 +248,9 @@ final class _AppScreenShareIncomingRequestHostState
   }
 
   void _finish(RealtimeIncomingSessionOffer offer) {
+    _offerExpiryTimer?.cancel();
+    _offerExpiryTimer = null;
+    _offerState = _IncomingOfferState.terminal;
     widget.arbitration.release(
       remotePeerId: offer.authenticatedPeerId,
       initiatorPeerId: offer.request.senderPeerId,
@@ -238,6 +262,106 @@ final class _AppScreenShareIncomingRequestHostState
       if (identical(_offer, offer)) _offer = null;
       if (identical(_activeOffer, offer)) _activeOffer = null;
     });
+  }
+
+  bool _beginResolving(RealtimeIncomingSessionOffer offer) {
+    if (!mounted ||
+        !identical(_offer, offer) ||
+        _offerState != _IncomingOfferState.pending) {
+      return false;
+    }
+    _offerExpiryTimer?.cancel();
+    _offerExpiryTimer = null;
+    _offerState = _IncomingOfferState.resolving;
+    _busy = true;
+    setState(() {});
+    return true;
+  }
+
+  bool _isExactPending(RealtimeIncomingSessionOffer offer, int hostEpoch) =>
+      mounted &&
+      identical(_offer, offer) &&
+      _offerState == _IncomingOfferState.pending &&
+      hostEpoch == _hostEpoch;
+
+  Future<void> _expirePending(
+    RealtimeIncomingSessionOffer offer,
+    int hostEpoch,
+  ) async {
+    if (!_isExactPending(offer, hostEpoch)) return;
+    _offerExpiryTimer?.cancel();
+    _offerExpiryTimer = null;
+    _offerState = _IncomingOfferState.terminal;
+    _offer = null;
+    _busy = false;
+    widget.arbitration.release(
+      remotePeerId: offer.authenticatedPeerId,
+      initiatorPeerId: offer.request.senderPeerId,
+      operationId: offer.request.operationId,
+    );
+    if (mounted) setState(() {});
+    try {
+      await widget.runtime.realtimeClient.discardIncomingOffer(offer);
+    } catch (_) {
+      // Native expiry is authoritative; this is only the UX cleanup path.
+    }
+  }
+
+  void _finishPending(RealtimeIncomingSessionOffer offer) {
+    widget.arbitration.release(
+      remotePeerId: offer.authenticatedPeerId,
+      initiatorPeerId: offer.request.senderPeerId,
+      operationId: offer.request.operationId,
+    );
+    _discardBestEffort(offer);
+  }
+
+  void _discardBestEffort(RealtimeIncomingSessionOffer offer) {
+    unawaited(() async {
+      try {
+        await widget.runtime.realtimeClient.discardIncomingOffer(offer);
+      } catch (_) {
+        // Native expiry/terminal cleanup is authoritative; this callback only
+        // releases the Host's best-effort UI owner.
+      }
+    }());
+  }
+
+  void _armExpiryTimer(
+    RealtimeIncomingSessionOffer offer,
+    int hostEpoch,
+    DateTime expiry,
+  ) {
+    _offerExpiryTimer?.cancel();
+    final delay = expiry.difference(DateTime.now().toUtc());
+    _offerExpiryTimer = Timer(
+      delay.isNegative ? Duration.zero : delay,
+      () => unawaited(_expirePending(offer, hostEpoch)),
+    );
+  }
+
+  DateTime _effectiveExpiry(RealtimeIncomingSessionOffer offer) {
+    final binding = offer.bindingExpiresAt.toUtc();
+    final request = offer.request.expiresAt.toUtc();
+    return binding.isBefore(request) ? binding : request;
+  }
+
+  void _rememberOffer(String key, DateTime effectiveExpiry, DateTime now) {
+    final retention =
+        effectiveExpiry.isAfter(now.add(const Duration(minutes: 5)))
+        ? effectiveExpiry
+        : now.add(const Duration(minutes: 5));
+    _seenOffers[key] = retention;
+    _pruneSeenOffers(now);
+    if (_seenOffers.length <= 256) return;
+    final oldest = _seenOffers.entries.reduce(
+      (left, right) => left.value.isBefore(right.value) ? left : right,
+    );
+    _seenOffers.remove(oldest.key);
+  }
+
+  void _pruneSeenOffers(DateTime now) {
+    _seenOffers.removeWhere((_, expiry) => !expiry.isAfter(now));
   }
 
   Future<void> _waitForIdentity(RealtimeSession session) async {

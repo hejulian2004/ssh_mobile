@@ -110,10 +110,11 @@ final class AppRealtimeSessionBackend
         peerId: offer.authenticatedPeerId,
       );
     }
+    final incomingGateway = gateway as NetworkRealtimeIncomingOfferGateway;
     return _sendCommand(
       operation: NetworkOperation.connect,
       peerId: offer.authenticatedPeerId,
-      send: (_) => gateway.claimIncomingRealtimeOffer(
+      send: (_) => incomingGateway.claimIncomingRealtimeOffer(
         realtimeId: offer.realtimeId,
         peerId: session.peerId,
         claimToken: offer.claimToken,
@@ -136,10 +137,11 @@ final class AppRealtimeSessionBackend
         peerId: offer.authenticatedPeerId,
       );
     }
+    final incomingGateway = gateway as NetworkRealtimeIncomingOfferGateway;
     return _sendCommand(
       operation: NetworkOperation.send,
       peerId: offer.authenticatedPeerId,
-      send: (_) => gateway.rejectIncomingRealtimeOffer(
+      send: (_) => incomingGateway.rejectIncomingRealtimeOffer(
         realtimeId: offer.realtimeId,
         peerId: offer.authenticatedPeerId,
         claimToken: offer.claimToken,
@@ -152,10 +154,11 @@ final class AppRealtimeSessionBackend
     _ensureUsable();
     final gateway = await _ensureGateway();
     if (gateway is! NetworkRealtimeIncomingOfferGateway) return;
+    final incomingGateway = gateway as NetworkRealtimeIncomingOfferGateway;
     await _sendCommand(
       operation: NetworkOperation.disconnect,
       peerId: offer.authenticatedPeerId,
-      send: (_) => gateway.discardIncomingRealtimeOffer(
+      send: (_) => incomingGateway.discardIncomingRealtimeOffer(
         realtimeId: offer.realtimeId,
         peerId: offer.authenticatedPeerId,
         claimToken: offer.claimToken,

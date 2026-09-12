@@ -26,9 +26,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use std::time::Duration;
 #[cfg(test)]
 use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::{mpsc, Notify};
+use tokio::time::Instant;
 
 use crate::events::{
     emit_realtime_signal, emit_realtime_snapshot, emit_realtime_state, protocol_error,
@@ -45,6 +47,8 @@ pub(crate) const MAX_PROVISIONAL_ICE_CANDIDATE_BYTES: usize = MAX_ICE_CANDIDATE_
 pub(crate) const MAX_PROVISIONAL_ICE_TOTAL_BYTES: usize = 256 * 1024;
 pub(crate) const MAX_PROVISIONAL_BINDING_LIFETIME_MS: u64 = 120_000;
 const MAX_PROVISIONAL_OPERATIONS: usize = 32;
+const MAX_PROVISIONAL_REPLAY_KEYS_PER_PEER: usize = 256;
+const PROVISIONAL_REPLAY_TTL_MS: u64 = 5 * 60 * 1000;
 static NEXT_REALTIME_SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 struct RealtimeSession {
@@ -94,6 +98,7 @@ struct ProvisionalIceCandidate {
 /// and the claim token out of Dart until a user-facing REQUEST has paired with
 /// the authenticated Offer.
 struct ProvisionalScreenShareBinding {
+    provisional_epoch: u64,
     offer_id: String,
     claim_token: String,
     authenticated_peer_id: String,
@@ -106,6 +111,7 @@ struct ProvisionalScreenShareBinding {
     request: Option<ScreenShareConsentV2>,
     binding_expires_at_ms: u64,
     effective_expires_at_ms: u64,
+    expiry_deadline: Instant,
     published_to_app: bool,
     state: ProvisionalBindingState,
 }
@@ -145,24 +151,164 @@ impl ProvisionalScreenShareBinding {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct RealtimeManager {
     sessions: HashMap<String, RealtimeSession>,
     provisional: HashMap<String, ProvisionalScreenShareBinding>,
     provisional_requests: HashMap<String, ProvisionalPendingRequest>,
+    provisional_replay_cache: HashMap<String, VecDeque<ProvisionalReplayEntry>>,
+    next_provisional_epoch: u64,
+    provisional_expiry_wake: Arc<Notify>,
+    provisional_expiry_worker_started: bool,
     /// Generation is owned by the live Realtime manager, not inferred by the
     /// media registry. It changes whenever a new session is inserted for an ID.
     session_generations: HashMap<String, u64>,
 }
 
 struct ProvisionalPendingRequest {
+    provisional_epoch: u64,
     authenticated_peer_id: String,
     shared_session_instance_id: String,
     request: ScreenShareConsentV2,
     expires_at_ms: u64,
+    expiry_deadline: Instant,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct ProvisionalReplayKey {
+    sender_peer_id: String,
+    target_device_id: String,
+    realtime_id: String,
+    operation_id: String,
+    decision: i32,
+    action_revision: u64,
+}
+
+struct ProvisionalReplayEntry {
+    key: ProvisionalReplayKey,
+    expires_at_ms: u64,
+}
+
+impl Default for RealtimeManager {
+    fn default() -> Self {
+        Self {
+            sessions: HashMap::new(),
+            provisional: HashMap::new(),
+            provisional_requests: HashMap::new(),
+            provisional_replay_cache: HashMap::new(),
+            next_provisional_epoch: 0,
+            provisional_expiry_wake: Arc::new(Notify::new()),
+            provisional_expiry_worker_started: false,
+            session_generations: HashMap::new(),
+        }
+    }
 }
 
 impl RealtimeManager {
+    fn next_provisional_epoch(&mut self) -> u64 {
+        self.next_provisional_epoch = self.next_provisional_epoch.wrapping_add(1);
+        if self.next_provisional_epoch == 0 {
+            self.next_provisional_epoch = 1;
+        }
+        self.next_provisional_epoch
+    }
+
+    fn provisional_slot_count(&self) -> usize {
+        self.provisional
+            .keys()
+            .chain(self.provisional_requests.keys())
+            .collect::<HashSet<_>>()
+            .len()
+    }
+
+    fn wake_provisional_expiry(&self) {
+        self.provisional_expiry_wake.notify_waiters();
+    }
+
+    fn next_provisional_expiry(&self) -> Option<(String, u64, Instant)> {
+        self.provisional
+            .iter()
+            .map(|(realtime_id, binding)| {
+                (
+                    realtime_id.clone(),
+                    binding.provisional_epoch,
+                    binding.expiry_deadline,
+                )
+            })
+            .chain(
+                self.provisional_requests
+                    .iter()
+                    .map(|(realtime_id, request)| {
+                        (
+                            realtime_id.clone(),
+                            request.provisional_epoch,
+                            request.expiry_deadline,
+                        )
+                    }),
+            )
+            .min_by_key(|(_, _, deadline)| *deadline)
+    }
+
+    fn current_provisional_epoch(&self, realtime_id: &str) -> Option<u64> {
+        self.provisional
+            .get(realtime_id)
+            .map(|binding| binding.provisional_epoch)
+            .or_else(|| {
+                self.provisional_requests
+                    .get(realtime_id)
+                    .map(|request| request.provisional_epoch)
+            })
+    }
+
+    fn prune_replay_cache(&mut self, now_ms: u64) {
+        self.provisional_replay_cache.retain(|_, entries| {
+            entries.retain(|entry| entry.expires_at_ms > now_ms);
+            !entries.is_empty()
+        });
+    }
+
+    fn remember_provisional_action(
+        &mut self,
+        key: ProvisionalReplayKey,
+        now_ms: u64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.prune_replay_cache(now_ms);
+        let peer_entries = self
+            .provisional_replay_cache
+            .entry(key.sender_peer_id.clone())
+            .or_default();
+        if peer_entries.iter().any(|entry| entry.key == key) {
+            return Err(boxed_message("replayed provisional screen-share action"));
+        }
+        if peer_entries.len() >= MAX_PROVISIONAL_REPLAY_KEYS_PER_PEER {
+            return Err(boxed_message("provisional replay cache is full"));
+        }
+        peer_entries.push_back(ProvisionalReplayEntry {
+            key,
+            expires_at_ms: now_ms.saturating_add(PROVISIONAL_REPLAY_TTL_MS),
+        });
+        Ok(())
+    }
+
+    fn latest_provisional_action_revision(
+        &self,
+        sender_peer_id: &str,
+        realtime_id: &str,
+        operation_id: &str,
+    ) -> Option<u64> {
+        self.provisional_replay_cache
+            .get(sender_peer_id)
+            .and_then(|entries| {
+                entries
+                    .iter()
+                    .filter(|entry| {
+                        entry.key.realtime_id == realtime_id
+                            && entry.key.operation_id == operation_id
+                    })
+                    .map(|entry| entry.key.action_revision)
+                    .max()
+            })
+    }
+
     /// Resolves the current native I/O driver only while the caller still owns
     /// this manager lock. Endpoint creation keeps that lock through registry
     /// insertion so a terminal session removal cannot race a new lease into a
@@ -254,6 +400,7 @@ impl RealtimeManager {
         }
         self.provisional.clear();
         self.provisional_requests.clear();
+        self.wake_provisional_expiry();
         for (_, mut session) in self.sessions.drain() {
             let _ = with_session_peer(&mut session, WebRtcPeer::close);
         }
@@ -294,6 +441,7 @@ impl RealtimeManager {
         }
         self.provisional_requests
             .retain(|_, request| request.authenticated_peer_id != peer_id);
+        self.wake_provisional_expiry();
         let mut closed = Vec::new();
         let matching = self
             .sessions
@@ -323,6 +471,90 @@ impl RealtimeManager {
     }
 }
 
+fn provisional_deadline(now_ms: u64, expires_at_ms: u64) -> Instant {
+    Instant::now() + Duration::from_millis(expires_at_ms.saturating_sub(now_ms))
+}
+
+/// The provisional registry has an independent runtime task namespace. It is
+/// intentionally not a `realtime-io` session task: before claim there is no
+/// formal RealtimeSession to own this resource, and expiry must remain alive
+/// while the control plane is otherwise quiet.
+async fn ensure_provisional_expiry_worker(
+    state: &Arc<RuntimeState>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let (wake, should_spawn) = {
+        let mut manager = state.realtime.lock().await;
+        if manager.provisional_expiry_worker_started {
+            (Arc::clone(&manager.provisional_expiry_wake), false)
+        } else {
+            manager.provisional_expiry_worker_started = true;
+            (Arc::clone(&manager.provisional_expiry_wake), true)
+        }
+    };
+    if !should_spawn {
+        return Ok(());
+    }
+    let worker_state = Arc::clone(state);
+    if state
+        .task_supervisor
+        .spawn_runtime(
+            "provisional-expiry",
+            run_provisional_expiry_worker(worker_state, wake),
+        )
+        .is_none()
+    {
+        state
+            .realtime
+            .lock()
+            .await
+            .provisional_expiry_worker_started = false;
+        return Err(boxed_message(
+            "runtime task supervisor is stopping provisional expiry",
+        ));
+    }
+    Ok(())
+}
+
+async fn run_provisional_expiry_worker(state: Arc<RuntimeState>, wake: Arc<Notify>) {
+    loop {
+        let notified = wake.notified();
+        let expiry = state.realtime.lock().await.next_provisional_expiry();
+        match expiry {
+            Some((realtime_id, provisional_epoch, deadline)) => {
+                tokio::select! {
+                    _ = notified => {}
+                    _ = tokio::time::sleep_until(deadline) => {
+                        let now_ms = crate::events::unix_timestamp_ms().max(0) as u64;
+                        let now = Instant::now();
+                        let mut manager = state.realtime.lock().await;
+                        if manager.current_provisional_epoch(&realtime_id)
+                            == Some(provisional_epoch)
+                            && manager
+                                .provisional
+                                .get(&realtime_id)
+                                .map(|binding| binding.expiry_deadline <= now)
+                                .or_else(|| {
+                                    manager
+                                        .provisional_requests
+                                        .get(&realtime_id)
+                                        .map(|request| request.expiry_deadline <= now)
+                                })
+                                == Some(true)
+                        {
+                            if let Some(mut binding) = manager.provisional.remove(&realtime_id) {
+                                binding.state = ProvisionalBindingState::Terminal;
+                            }
+                            manager.provisional_requests.remove(&realtime_id);
+                        }
+                        manager.prune_replay_cache(now_ms);
+                    }
+                }
+            }
+            None => notified.await,
+        }
+    }
+}
+
 struct OutboundSignal {
     realtime_id: String,
     peer_id: String,
@@ -346,7 +578,10 @@ struct SignalOutcome {
     shared_session_instance_id: String,
     revision: u64,
     generation: u64,
-    state: RealtimeSessionState,
+    /// `None` means that the signal only mutated the exact PeerConnection.
+    /// Trickle ICE must not manufacture a lifecycle regression after an
+    /// authoritative Connected event.
+    state: Option<RealtimeSessionState>,
     outbound: Option<OutboundSignal>,
 }
 
@@ -594,9 +829,10 @@ pub(crate) async fn stop_session(
 
 /// Atomically promotes one metadata-paired provisional binding into the exact
 /// responder generation registered by the SDK. The binding remains `Claiming`
-/// while the Answer is sent so late ICE can continue entering the same
-/// protected queue; only after that queue is drained is it committed as a
-/// formal session.
+/// while the Answer is sent. ICE arriving before the exact responder owns the
+/// realtime ID stays in the protected provisional queue; after registration,
+/// matching ICE is routed directly to that exact claiming generation. The
+/// binding is externally committed only after the Answer is sent successfully.
 pub(crate) async fn claim_incoming_offer(
     state: Arc<RuntimeState>,
     command: ClaimIncomingRealtimeOfferCommand,
@@ -643,6 +879,7 @@ pub(crate) async fn claim_incoming_offer(
             let mut manager = state.realtime.lock().await;
             if let Some(mut binding) = manager.provisional.remove(&command.realtime_id) {
                 binding.state = ProvisionalBindingState::Terminal;
+                manager.wake_provisional_expiry();
             }
             return Err(realtime_error(
                 network_protocol::NetworkErrorCode::IoError,
@@ -845,6 +1082,7 @@ pub(crate) async fn claim_incoming_offer(
                 binding.state = ProvisionalBindingState::Claimed;
             }
             manager.provisional.remove(&command.realtime_id);
+            manager.wake_provisional_expiry();
         }
     }
     if let Some(error) = late_ice_failed {
@@ -896,12 +1134,17 @@ async fn rollback_incoming_claim(
 ) {
     let removed = {
         let mut manager = state.realtime.lock().await;
+        let mut provisional_removed = false;
         if manager.provisional.get(realtime_id).is_some_and(|binding| {
             binding.claim_token == claim_token && binding.state == ProvisionalBindingState::Claiming
         }) {
             if let Some(mut binding) = manager.provisional.remove(realtime_id) {
                 binding.state = ProvisionalBindingState::Terminal;
+                provisional_removed = true;
             }
+        }
+        if provisional_removed {
+            manager.wake_provisional_expiry();
         }
         let removed = take_realtime_session_if_owned(&mut manager, realtime_id, peer_id, driver);
         if removed.is_some() {
@@ -1039,6 +1282,7 @@ pub(crate) async fn reject_incoming_offer(
         {
             if let Some(mut binding) = manager.provisional.remove(&command.realtime_id) {
                 binding.state = ProvisionalBindingState::Terminal;
+                manager.wake_provisional_expiry();
             }
         }
         return Err(error);
@@ -1062,6 +1306,7 @@ pub(crate) async fn reject_incoming_offer(
     {
         if let Some(mut binding) = manager.provisional.remove(&command.realtime_id) {
             binding.state = ProvisionalBindingState::Terminal;
+            manager.wake_provisional_expiry();
         }
     }
     Ok(())
@@ -1089,6 +1334,7 @@ pub(crate) async fn discard_incoming_offer(
     }
     if let Some(mut binding) = manager.provisional.remove(&command.realtime_id) {
         binding.state = ProvisionalBindingState::Terminal;
+        manager.wake_provisional_expiry();
     }
     Ok(())
 }
@@ -1188,6 +1434,19 @@ pub(crate) async fn handle_v2_realtime_signal(
     state: &Arc<RuntimeState>,
     signal: &V2RealtimeSignal,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let local_device_id = state
+        .lifecycle
+        .identity
+        .read()
+        .await
+        .as_ref()
+        .map(|identity| identity.device_id.clone())
+        .ok_or_else(|| boxed_message("local realtime identity is unavailable"))?;
+    if signal.target_device_id != local_device_id {
+        return Err(boxed_message(
+            "v2 WebRTC signal target does not match local authenticated identity",
+        ));
+    }
     let bound_peer_id = state
         .realtime
         .lock()
@@ -1267,6 +1526,49 @@ async fn handle_provisional_realtime_signal(
         .await
         .map_err(boxed_protocol_error)?;
     validate_signal(kind, revision, &payload).map_err(boxed_protocol_error)?;
+    ensure_provisional_expiry_worker(state).await?;
+    let local_device_id = state
+        .lifecycle
+        .identity
+        .read()
+        .await
+        .as_ref()
+        .map(|identity| identity.device_id.clone())
+        .ok_or_else(|| boxed_message("local realtime identity is unavailable"))?;
+
+    // The v2 dispatcher chooses the provisional path from an initial registry
+    // lookup. A responder claim can register the exact session after that
+    // lookup but before this handler acquires the manager lock. Re-check the
+    // formal binding here so a concurrently arriving ICE/close/consent signal
+    // cannot fall through the claim transition and be rejected or stranded.
+    let formal_binding = {
+        let manager = state.realtime.lock().await;
+        manager.sessions.get(realtime_id).map(|session| {
+            (
+                session.peer_id.clone(),
+                session.shared_session_instance_id.clone(),
+            )
+        })
+    };
+    if let Some((formal_peer_id, formal_shared_session_instance_id)) = formal_binding {
+        if formal_peer_id != authenticated_peer_id
+            || formal_shared_session_instance_id != shared_session_instance_id
+        {
+            return Err(boxed_message(
+                "provisional signal conflicts with formal realtime binding",
+            ));
+        }
+        return handle_realtime_signal(
+            state,
+            kind,
+            realtime_id,
+            authenticated_peer_id,
+            revision,
+            shared_session_instance_id,
+            payload,
+        )
+        .await;
+    }
 
     let now_ms = crate::events::unix_timestamp_ms().max(0) as u64;
     let mut publish: Option<(
@@ -1297,11 +1599,28 @@ async fn handle_provisional_realtime_signal(
                 }
                 return Err(boxed_message("conflicting provisional realtime Offer"));
             }
-            if manager.provisional.len() >= MAX_PROVISIONAL_OPERATIONS {
+            if let Some(existing) = manager.provisional_requests.get(realtime_id) {
+                if existing.authenticated_peer_id != authenticated_peer_id
+                    || existing.shared_session_instance_id != shared_session_instance_id
+                {
+                    return Err(boxed_message(
+                        "provisional Offer conflicts with authenticated REQUEST",
+                    ));
+                }
+            }
+            if manager.provisional_slot_count() >= MAX_PROVISIONAL_OPERATIONS
+                && !manager.provisional_requests.contains_key(realtime_id)
+            {
                 return Err(boxed_message("too many provisional realtime operations"));
             }
             let binding_expires_at_ms = now_ms.saturating_add(MAX_PROVISIONAL_BINDING_LIFETIME_MS);
+            let provisional_epoch = manager
+                .provisional_requests
+                .get(realtime_id)
+                .map(|pending| pending.provisional_epoch)
+                .unwrap_or_else(|| manager.next_provisional_epoch());
             let mut binding = ProvisionalScreenShareBinding {
+                provisional_epoch,
                 offer_id: new_shared_session_instance_id(),
                 claim_token: new_shared_session_instance_id(),
                 authenticated_peer_id: authenticated_peer_id.to_owned(),
@@ -1314,21 +1633,16 @@ async fn handle_provisional_realtime_signal(
                 request: None,
                 binding_expires_at_ms,
                 effective_expires_at_ms: binding_expires_at_ms,
+                expiry_deadline: provisional_deadline(now_ms, binding_expires_at_ms),
                 published_to_app: false,
                 state: ProvisionalBindingState::Pending,
             };
             if let Some(pending) = manager.provisional_requests.remove(realtime_id) {
-                if pending.authenticated_peer_id == authenticated_peer_id
-                    && pending.shared_session_instance_id == shared_session_instance_id
-                {
-                    binding.effective_expires_at_ms =
-                        binding_expires_at_ms.min(pending.expires_at_ms);
-                    binding.request = Some(pending.request);
-                } else {
-                    manager
-                        .provisional_requests
-                        .insert(realtime_id.to_owned(), pending);
-                }
+                binding.provisional_epoch = pending.provisional_epoch;
+                binding.effective_expires_at_ms = binding_expires_at_ms.min(pending.expires_at_ms);
+                binding.expiry_deadline =
+                    provisional_deadline(now_ms, binding.effective_expires_at_ms);
+                binding.request = Some(pending.request);
             }
             let should_publish = binding.request.is_some();
             if let Some(request) = binding.request.as_ref() {
@@ -1344,6 +1658,7 @@ async fn handle_provisional_realtime_signal(
             }
             binding.published_to_app = should_publish;
             manager.provisional.insert(realtime_id.to_owned(), binding);
+            manager.wake_provisional_expiry();
         }
         RealtimeSignalKind::IceCandidate => {
             let Some(binding) = manager.provisional.get_mut(realtime_id) else {
@@ -1380,7 +1695,19 @@ async fn handle_provisional_realtime_signal(
                             "initial screen-share REQUEST revision is invalid",
                         ));
                     }
-                    if let Some(binding) = manager.provisional.get_mut(realtime_id) {
+                    let replay_key = ProvisionalReplayKey {
+                        sender_peer_id: authenticated_peer_id.to_owned(),
+                        target_device_id: local_device_id.clone(),
+                        realtime_id: realtime_id.to_owned(),
+                        operation_id: consent.operation_id.clone(),
+                        decision: consent.decision,
+                        action_revision: consent.action_revision,
+                    };
+                    if manager.provisional.contains_key(realtime_id) {
+                        let binding = manager
+                            .provisional
+                            .get(realtime_id)
+                            .expect("provisional binding exists");
                         if binding.authenticated_peer_id != authenticated_peer_id
                             || binding.shared_session_instance_id
                                 != consent.shared_session_instance_id
@@ -1393,15 +1720,22 @@ async fn handle_provisional_realtime_signal(
                             return Err(boxed_message("screen-share REQUEST binding mismatch"));
                         }
                         if let Some(existing) = binding.request.as_ref() {
-                            if existing.operation_id == consent.operation_id
-                                && existing.action_revision == consent.action_revision
+                            if existing.operation_id != consent.operation_id
+                                || existing.action_revision != consent.action_revision
                             {
-                                return Ok(());
+                                return Err(boxed_message("conflicting provisional REQUEST"));
                             }
-                            return Err(boxed_message("conflicting provisional REQUEST"));
+                            return Err(boxed_message("replayed provisional screen-share REQUEST"));
                         }
+                        manager.remember_provisional_action(replay_key, now_ms)?;
+                        let binding = manager
+                            .provisional
+                            .get_mut(realtime_id)
+                            .expect("provisional binding exists");
                         binding.effective_expires_at_ms =
                             binding.effective_expires_at_ms.min(consent.expires_at_ms);
+                        binding.expiry_deadline =
+                            provisional_deadline(now_ms, binding.effective_expires_at_ms);
                         binding.request = Some(consent.clone());
                         if !binding.published_to_app {
                             binding.published_to_app = true;
@@ -1416,31 +1750,41 @@ async fn handle_provisional_realtime_signal(
                             ));
                         }
                     } else {
-                        if manager.provisional_requests.len() >= MAX_PROVISIONAL_OPERATIONS {
+                        if manager.provisional_slot_count() >= MAX_PROVISIONAL_OPERATIONS
+                            && !manager.provisional_requests.contains_key(realtime_id)
+                        {
                             return Err(boxed_message("too many provisional realtime operations"));
                         }
                         if let Some(existing) = manager.provisional_requests.get(realtime_id) {
-                            if existing.authenticated_peer_id == authenticated_peer_id
-                                && existing.shared_session_instance_id
-                                    == consent.shared_session_instance_id
-                                && existing.request.operation_id == consent.operation_id
+                            if existing.authenticated_peer_id != authenticated_peer_id
+                                || existing.shared_session_instance_id
+                                    != consent.shared_session_instance_id
+                                || existing.request.operation_id != consent.operation_id
                             {
-                                return Ok(());
+                                return Err(boxed_message("conflicting provisional REQUEST"));
                             }
-                            return Err(boxed_message("conflicting provisional REQUEST"));
+                            return Err(boxed_message("replayed provisional screen-share REQUEST"));
                         }
+                        manager.remember_provisional_action(replay_key, now_ms)?;
+                        let provisional_epoch = manager.next_provisional_epoch();
                         manager.provisional_requests.insert(
                             realtime_id.to_owned(),
                             ProvisionalPendingRequest {
+                                provisional_epoch,
                                 authenticated_peer_id: authenticated_peer_id.to_owned(),
                                 shared_session_instance_id: consent
                                     .shared_session_instance_id
                                     .clone(),
                                 expires_at_ms: consent.expires_at_ms,
+                                expiry_deadline: provisional_deadline(
+                                    now_ms,
+                                    consent.expires_at_ms,
+                                ),
                                 request: consent,
                             },
                         );
                     }
+                    manager.wake_provisional_expiry();
                 }
                 ScreenShareConsentDecision::Cancel => {
                     let matches_binding =
@@ -1448,24 +1792,11 @@ async fn handle_provisional_realtime_signal(
                             binding.authenticated_peer_id == authenticated_peer_id
                                 && binding.shared_session_instance_id
                                     == consent.shared_session_instance_id
-                                && binding.request.as_ref().is_some_and(|request| {
+                                && binding.request.as_ref().is_none_or(|request| {
                                     request.operation_id == consent.operation_id
                                 })
                         });
-                    if matches_binding {
-                        if let Some(mut binding) = manager.provisional.remove(realtime_id) {
-                            binding.state = ProvisionalBindingState::Terminal;
-                        }
-                    } else if manager.provisional.get(realtime_id).is_some_and(|binding| {
-                        binding.authenticated_peer_id == authenticated_peer_id
-                            && binding.shared_session_instance_id
-                                == consent.shared_session_instance_id
-                            && binding.request.is_none()
-                    }) {
-                        if let Some(mut binding) = manager.provisional.remove(realtime_id) {
-                            binding.state = ProvisionalBindingState::Terminal;
-                        }
-                    } else if manager
+                    let matches_request = manager
                         .provisional_requests
                         .get(realtime_id)
                         .is_some_and(|request| {
@@ -1473,12 +1804,44 @@ async fn handle_provisional_realtime_signal(
                                 && request.shared_session_instance_id
                                     == consent.shared_session_instance_id
                                 && request.request.operation_id == consent.operation_id
-                        })
-                    {
-                        manager.provisional_requests.remove(realtime_id);
-                    } else {
+                        });
+                    if !matches_binding && !matches_request {
                         return Err(boxed_message("screen-share CANCEL binding does not match"));
                     }
+                    let expected_revision = manager
+                        .latest_provisional_action_revision(
+                            authenticated_peer_id,
+                            realtime_id,
+                            &consent.operation_id,
+                        )
+                        .ok_or_else(|| {
+                            boxed_message("screen-share CANCEL REQUEST lane is missing")
+                        })?
+                        .saturating_add(1);
+                    if consent.action_revision != expected_revision || expected_revision != 2 {
+                        return Err(boxed_message(
+                            "screen-share CANCEL action revision is not contiguous",
+                        ));
+                    }
+                    manager.remember_provisional_action(
+                        ProvisionalReplayKey {
+                            sender_peer_id: authenticated_peer_id.to_owned(),
+                            target_device_id: local_device_id.clone(),
+                            realtime_id: realtime_id.to_owned(),
+                            operation_id: consent.operation_id.clone(),
+                            decision: consent.decision,
+                            action_revision: consent.action_revision,
+                        },
+                        now_ms,
+                    )?;
+                    if matches_binding {
+                        if let Some(mut binding) = manager.provisional.remove(realtime_id) {
+                            binding.state = ProvisionalBindingState::Terminal;
+                        }
+                    } else {
+                        manager.provisional_requests.remove(realtime_id);
+                    }
+                    manager.wake_provisional_expiry();
                 }
                 ScreenShareConsentDecision::Accept
                 | ScreenShareConsentDecision::Reject
@@ -1490,12 +1853,14 @@ async fn handle_provisional_realtime_signal(
             }
         }
         RealtimeSignalKind::WebRtcClose => {
+            let mut removed = false;
             if manager.provisional.get(realtime_id).is_some_and(|binding| {
                 binding.authenticated_peer_id == authenticated_peer_id
                     && binding.shared_session_instance_id == shared_session_instance_id
             }) {
                 if let Some(mut binding) = manager.provisional.remove(realtime_id) {
                     binding.state = ProvisionalBindingState::Terminal;
+                    removed = true;
                 }
             }
             if manager
@@ -1507,6 +1872,10 @@ async fn handle_provisional_realtime_signal(
                 })
             {
                 manager.provisional_requests.remove(realtime_id);
+                removed = true;
+            }
+            if removed {
+                manager.wake_provisional_expiry();
             }
         }
         RealtimeSignalKind::WebRtcAnswer | RealtimeSignalKind::IceRestart => {
@@ -1526,13 +1895,15 @@ async fn handle_provisional_realtime_signal(
     {
         crate::events::emit_realtime_incoming_session_offer(
             &state.event_tx,
-            &offer_id,
-            &claim_token,
-            &realtime_id,
-            &peer_id,
-            &shared_id,
-            expires,
-            &request,
+            crate::events::RealtimeIncomingSessionOfferMetadata {
+                offer_id: &offer_id,
+                claim_token: &claim_token,
+                realtime_id: &realtime_id,
+                authenticated_peer_id: &peer_id,
+                shared_session_instance_id: &shared_id,
+                binding_expires_at_ms: expires,
+                request: &request,
+            },
         );
     }
     Ok(())
@@ -1545,14 +1916,20 @@ fn prune_provisional_bindings(manager: &mut RealtimeManager, now_ms: u64) {
         .filter(|(_, binding)| binding.is_expired(now_ms))
         .map(|(realtime_id, _)| realtime_id.clone())
         .collect::<Vec<_>>();
+    let mut removed = !expired.is_empty();
     for realtime_id in expired {
         if let Some(mut binding) = manager.provisional.remove(&realtime_id) {
             binding.state = ProvisionalBindingState::Terminal;
         }
     }
+    let before_requests = manager.provisional_requests.len();
     manager
         .provisional_requests
         .retain(|_, request| request.expires_at_ms > now_ms);
+    removed |= before_requests != manager.provisional_requests.len();
+    if removed {
+        manager.wake_provisional_expiry();
+    }
 }
 
 /// WebRTC signaling 协商核心 for an already-bound RealtimeSession.
@@ -1741,15 +2118,17 @@ async fn handle_realtime_signal(
         revision,
         payload,
     );
-    emit_realtime_state(
-        &state.event_tx,
-        realtime_id,
-        &outcome.peer_id,
-        outcome.state as i32,
-        outcome.revision,
-        RealtimeSessionIdentity::new(outcome.generation, &outcome.shared_session_instance_id),
-        None,
-    );
+    if let Some(state_value) = outcome.state {
+        emit_realtime_state(
+            &state.event_tx,
+            realtime_id,
+            &outcome.peer_id,
+            state_value as i32,
+            outcome.revision,
+            RealtimeSessionIdentity::new(outcome.generation, &outcome.shared_session_instance_id),
+            None,
+        );
+    }
     if let Some(outbound) = outcome.outbound {
         if let Err(error) = send_signal(state, &outbound).await {
             if spawned_io {
@@ -1890,7 +2269,7 @@ fn apply_signal_with_driver(
             shared_session_instance_id,
             revision,
             generation,
-            state: RealtimeSessionState::Closed,
+            state: Some(RealtimeSessionState::Closed),
             outbound: None,
         });
     }
@@ -2009,7 +2388,7 @@ fn apply_signal_with_driver(
                 shared_session_instance_id: shared_session_instance_id.clone(),
                 revision: answer_revision,
                 generation,
-                state: RealtimeSessionState::Negotiating,
+                state: Some(RealtimeSessionState::Negotiating),
                 outbound: Some(OutboundSignal {
                     realtime_id: realtime_id.to_string(),
                     peer_id,
@@ -2039,7 +2418,7 @@ fn apply_signal_with_driver(
                 shared_session_instance_id: session.shared_session_instance_id.clone(),
                 revision: session.revision,
                 generation,
-                state: RealtimeSessionState::Connected,
+                state: Some(RealtimeSessionState::Connected),
                 outbound: None,
             })
         }
@@ -2060,7 +2439,7 @@ fn apply_signal_with_driver(
                 shared_session_instance_id: session.shared_session_instance_id.clone(),
                 revision: session.revision,
                 generation,
-                state: RealtimeSessionState::Negotiating,
+                state: None,
                 outbound: None,
             })
         }
@@ -2084,7 +2463,7 @@ fn apply_signal_with_driver(
                 shared_session_instance_id: session.shared_session_instance_id.clone(),
                 revision: session.revision,
                 generation,
-                state: RealtimeSessionState::Restarting,
+                state: Some(RealtimeSessionState::Restarting),
                 outbound: Some(OutboundSignal {
                     realtime_id: realtime_id.to_string(),
                     peer_id: session.peer_id.clone(),

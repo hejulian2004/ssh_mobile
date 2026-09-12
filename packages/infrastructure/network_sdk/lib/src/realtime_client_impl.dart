@@ -58,7 +58,7 @@ final class RealtimeClientImpl implements RealtimeClient {
     if (session is! _RealtimeSession || !identical(session._client, this)) {
       return;
     }
-    await session._dispose();
+    await session._requestRelease();
   }
 
   @override
@@ -97,7 +97,11 @@ final class RealtimeClientImpl implements RealtimeClient {
       session: session,
     );
     if (result is SdkFailure<void>) {
-      await releaseSession(session);
+      // The native provisional backend has already rolled back its exact
+      // responder generation on claim/Answer failure. This is the one
+      // bounded rollback path that may force-remove the pre-registered SDK
+      // object; public releaseSession remains authoritative-terminal only.
+      await (session as _RealtimeSession)._dispose(force: true);
       return SdkFailure(result.error);
     }
     return SdkSuccess<RealtimeSession>(session);
@@ -136,7 +140,7 @@ final class RealtimeClientImpl implements RealtimeClient {
 
   Future<void> _disposeResources() async {
     for (final session in _sessions.values.toList()) {
-      await session._dispose();
+      await session._dispose(force: true);
     }
     _sessions.clear();
     await _backendSubscription.cancel();

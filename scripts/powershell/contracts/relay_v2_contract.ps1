@@ -30,8 +30,9 @@ if (Get-Command protoc -ErrorAction SilentlyContinue) {
     $frozenDescriptor = Join-Path $run 'frozen.desc'
     Invoke-CommandChecked protoc @('--proto_path=protocol', "--descriptor_set_out=$currentDescriptor", $protoRelative) $root
     Invoke-CommandChecked protoc @('--proto_path=protocol', "--descriptor_set_out=$frozenDescriptor", $protoRelative) $run
-    if ((Get-FileHash $currentDescriptor).Hash -ne (Get-FileHash $frozenDescriptor).Hash) { throw 'Relay V2 descriptor drift.' }
-    $status = "byte-equal to $commit"
+    if (-not (Get-Command go -ErrorAction SilentlyContinue)) { throw 'Go is required for the shared Relay V2 descriptor helper.' }
+    Invoke-CommandChecked go @('run', './cmd/relay-v2-descriptor-check', "--current=$currentDescriptor", "--frozen=$frozenDescriptor") (Join-Path $root 'relay')
+    $status = "additive source_device_id=7 compatible with $commit"
   } finally {
     Remove-Item $run -Recurse -Force -ErrorAction SilentlyContinue
   }

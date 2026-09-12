@@ -120,7 +120,10 @@ client values must be empty, Relay writes authenticated sender identity, and
 unknown-session signals without source fail closed while established bindings
 remain compatible with old Relay. Native retains Offer, bounded provisional ICE
 (128 / 8 KiB / 256 KiB / 120 s), and matched typed REQUEST in
-`pending → claiming → claimed/terminal` state. No Dart session, Answer, or media
-endpoint exists before explicit Accept. SDK claim pre-registers the responder,
-and normalized snapshots expose Negotiating identity without waiting for
-Connected.
+`pending → claiming → claimed/terminal` state. A native expiry worker uses a
+provisional epoch, one shared 32-operation budget, and a five-minute bounded
+per-peer consent replay cache; REQUEST is revision 1 and same-author CANCEL is
+revision 2. No Dart session, Answer, or media endpoint exists before explicit
+Accept. SDK claim pre-registers the responder, normalized snapshots expose
+Negotiating identity without waiting for Connected, and `releaseSession` keeps
+the exact registry entry until authoritative stopped/failed.

@@ -23,7 +23,7 @@ pub(crate) use peer::{
 };
 pub(crate) use realtime::{
     emit_realtime_incoming_session_offer, emit_realtime_signal, emit_realtime_snapshot,
-    emit_realtime_state, RealtimeSessionIdentity,
+    emit_realtime_state, RealtimeIncomingSessionOfferMetadata, RealtimeSessionIdentity,
 };
 pub(crate) use relay_presence::{
     emit_peer_presence_changed, emit_peer_presence_snapshot, emit_relay_state,

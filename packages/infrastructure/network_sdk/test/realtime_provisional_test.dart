@@ -54,38 +54,57 @@ void main() {
     },
   );
 
-  test(
-    'releaseSession cannot remove a replacement with the same realtime ID',
-    () async {
-      final backend = _ClaimBackend();
-      final client = RealtimeClientImpl(backend: backend);
-      addTearDown(client.dispose);
-      final first = client.createSession(
+  test('releaseSession waits for an authoritative terminal event', () async {
+    final backend = _ClaimBackend();
+    final client = RealtimeClientImpl(backend: backend);
+    addTearDown(client.dispose);
+    final first = client.createSession(
+      realtimeId: _realtimeId,
+      peerId: 'peer-a',
+    );
+    await client.releaseSession(first);
+    expect(
+      () => client.createSession(realtimeId: _realtimeId, peerId: 'peer-a'),
+      throwsStateError,
+    );
+
+    backend.emit(
+      const RealtimeSessionStateChangedEvent(
         realtimeId: _realtimeId,
         peerId: 'peer-a',
-      );
-      await client.releaseSession(first);
-      final replacement = client.createSession(
-        realtimeId: _realtimeId,
-        peerId: 'peer-a',
-      );
+        state: RealtimeSessionState.stopped,
+        generation: 13,
+        sharedSessionInstanceId: _sharedId,
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
 
-      await client.releaseSession(first);
-      backend.emit(
-        const RealtimeSessionStateChangedEvent(
-          realtimeId: _realtimeId,
-          peerId: 'peer-a',
-          state: RealtimeSessionState.negotiating,
-          generation: 13,
-          sharedSessionInstanceId: _sharedId,
-        ),
-      );
-      await Future<void>.delayed(Duration.zero);
+    final replacement = client.createSession(
+      realtimeId: _realtimeId,
+      peerId: 'peer-a',
+    );
+    expect(replacement.state, RealtimeSessionState.idle);
+    await client.releaseSession(first);
+    expect(replacement.state, RealtimeSessionState.idle);
+  });
 
-      expect(replacement.state, RealtimeSessionState.negotiating);
-      expect(replacement.generation, 13);
-    },
-  );
+  test('releaseSession does not wait for a command timeout', () async {
+    final backend = _ClaimBackend(blockStop: true);
+    final client = RealtimeClientImpl(backend: backend);
+    addTearDown(client.dispose);
+    final session = client.createSession(
+      realtimeId: _realtimeId,
+      peerId: 'peer-a',
+    );
+    await session.start();
+
+    await expectLater(client.releaseSession(session), completes);
+    expect(backend.stopCalled, isTrue);
+    expect(
+      () => client.createSession(realtimeId: _realtimeId, peerId: 'peer-a'),
+      throwsStateError,
+    );
+  });
 }
 
 const _realtimeId = '00112233445566778899aabbccddeeff';
@@ -115,12 +134,18 @@ RealtimeIncomingSessionOffer _offer() {
 
 final class _ClaimBackend
     implements RealtimeSessionBackend, RealtimeIncomingSessionBackend {
-  _ClaimBackend({this.emitSynchronouslyDuringClaim = false});
+  _ClaimBackend({
+    this.emitSynchronouslyDuringClaim = false,
+    this.blockStop = false,
+  });
 
   final bool emitSynchronouslyDuringClaim;
+  final bool blockStop;
   final StreamController<RealtimeBackendEvent> _events =
       StreamController<RealtimeBackendEvent>.broadcast();
   RealtimeSession? claimedSession;
+  bool stopCalled = false;
+  final Completer<void> _stopRelease = Completer<void>();
 
   @override
   Stream<RealtimeBackendEvent> get events => _events.stream;
@@ -132,8 +157,11 @@ final class _ClaimBackend
   }) async => const SdkSuccess<void>(null);
 
   @override
-  Future<SdkResult<void>> stop({required String realtimeId}) async =>
-      const SdkSuccess<void>(null);
+  Future<SdkResult<void>> stop({required String realtimeId}) async {
+    stopCalled = true;
+    if (blockStop) await _stopRelease.future;
+    return const SdkSuccess<void>(null);
+  }
 
   @override
   Future<SdkResult<void>> claimIncomingOffer({

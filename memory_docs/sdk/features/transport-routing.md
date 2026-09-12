@@ -66,4 +66,7 @@ ICE bounds; matching typed REQUEST is required before Dart notification.
 `ACCEPT` is a user decision and is sent immediately after claim/identity, while
 Connected/native readiness is a separate media gate. Sender CANCEL, native
 claim rollback, late ICE, and generation replacement must preserve exact-owner
-cleanup and must not migrate candidates to a replacement session.
+cleanup and must not migrate candidates to a replacement session. Claiming ICE
+uses a hybrid owner rule: queue until exact responder registration, then route
+matching candidates only to that exact claiming generation. Provisional expiry
+is native-authoritative; App timers only remove stale UI/arbitration state.

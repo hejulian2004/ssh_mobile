@@ -17,6 +17,8 @@ final class _RealtimeSession implements RealtimeSession {
   Future<SdkResult<void>>? _startFuture;
   Future<SdkResult<void>>? _stopFuture;
   bool _stopCommandCompleted = false;
+  bool _releaseRequested = false;
+  bool _authoritativeTerminal = false;
   bool _disposed = false;
   final StreamController<RealtimeConsent> _consents =
       StreamController<RealtimeConsent>.broadcast();
@@ -93,6 +95,8 @@ final class _RealtimeSession implements RealtimeSession {
     _sharedSessionInstanceId = null;
     _awaitingGenerationAdvance = _generation != null;
     _stopCommandCompleted = false;
+    _releaseRequested = false;
+    _authoritativeTerminal = false;
     _state = RealtimeSessionState.starting;
     final future = _startInternal();
     _startFuture = future;
@@ -154,6 +158,32 @@ final class _RealtimeSession implements RealtimeSession {
     return result;
   }
 
+  /// Requests release without pretending that a command result is a terminal
+  /// native lifecycle event. The registry entry remains present until the
+  /// authoritative stopped/failed event is folded by [_applyState].
+  Future<void> _requestRelease() async {
+    if (_disposed) return;
+    _releaseRequested = true;
+    if (_authoritativeTerminal) {
+      await _finalizeRelease();
+      return;
+    }
+    // Release is intentionally bounded by the caller's lifecycle. The stop
+    // command may be in flight or may never produce a terminal event; the
+    // registry is finalized only by the authoritative native event below.
+    unawaited(_issueReleaseStop());
+  }
+
+  Future<void> _issueReleaseStop() async {
+    try {
+      await stop();
+    } catch (_) {
+      // The release remains pending. Runtime/client disposal is the final
+      // force-cleanup owner when native cannot produce a terminal event.
+    }
+    if (_authoritativeTerminal) await _finalizeRelease();
+  }
+
   bool _applyState(
     RealtimeSessionState state,
     NetworkError? error, {
@@ -190,6 +220,11 @@ final class _RealtimeSession implements RealtimeSession {
       return false;
     }
     _state = error == null ? state : RealtimeSessionState.failed;
+    if (state == RealtimeSessionState.stopped ||
+        state == RealtimeSessionState.failed ||
+        error != null) {
+      _authoritativeTerminal = true;
+    }
     if (revision > _revision) _revision = revision;
     if (sharedSessionInstanceId != null) {
       _sharedSessionInstanceId = sharedSessionInstanceId;
@@ -210,6 +245,9 @@ final class _RealtimeSession implements RealtimeSession {
     );
     _currentSnapshot = snapshot;
     _snapshots.add(snapshot);
+    if (_releaseRequested && _authoritativeTerminal) {
+      unawaited(_finalizeRelease());
+    }
     return true;
   }
 
@@ -236,8 +274,12 @@ final class _RealtimeSession implements RealtimeSession {
     _consents.add(consent);
   }
 
-  Future<void> _dispose() async {
+  Future<void> _dispose({bool force = false}) async {
     if (_disposed) return;
+    if (!force && !_authoritativeTerminal) {
+      _releaseRequested = true;
+      return;
+    }
     final shouldStop =
         _state != RealtimeSessionState.idle &&
         _state != RealtimeSessionState.stopped;
@@ -256,6 +298,8 @@ final class _RealtimeSession implements RealtimeSession {
     await _consents.close();
     await _snapshots.close();
   }
+
+  Future<void> _finalizeRelease() => _dispose(force: true);
 
   void _ensureUsable() {
     if (_disposed) throw const SdkClientDisposedException();

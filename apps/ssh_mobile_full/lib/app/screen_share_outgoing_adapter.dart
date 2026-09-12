@@ -14,8 +14,7 @@ import 'screen_share_route_scope.dart';
 import 'screen_share_session_lease.dart';
 
 /// App-owned peer action that turns the LAN secondary action into a route.
-final class ScreenShareEntryCoordinator
-    implements lan.LanShareScreenSharePort {
+final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
   ScreenShareEntryCoordinator({
     required this.runtime,
     required this.navigatorKey,
@@ -190,6 +189,7 @@ final class ScreenShareEntryCoordinator
     );
     final sources = await capabilities.listCaptureSources();
     if (sources.isEmpty) throw StateError('No screen source is available.');
+    if (!context.mounted) return null;
     final options = <_SelectedScreenShareSource>[
       for (var index = 0; index < sources.length; index++)
         _SelectedScreenShareSource(
@@ -211,9 +211,7 @@ final class ScreenShareEntryCoordinator
     return showModalBottomSheet<_SelectedScreenShareSource>(
       context: context,
       builder: (context) => ScreenShareSourcePicker(
-        options: [
-          for (final selected in options) selected.option,
-        ],
+        options: [for (final selected in options) selected.option],
         onSelected: (option) {
           final selected = options.firstWhere(
             (candidate) => candidate.option.opaqueId == option.opaqueId,

@@ -24,4 +24,7 @@ metadata-only and use a provisional backend for claim/reject/discard; the SDK
 registers the responder session before native claim and removes only the exact
 registered object on rollback. `RealtimeSession.currentSnapshot` and
 `snapshots` are normalized state/full-snapshot projections, not a raw native
-full-snapshot stream.
+full-snapshot stream. Public `releaseSession` records a pending release and
+requests stop, but keeps the exact registry object until an authoritative
+stopped/failed lifecycle event; command completion and bounded App waits are not
+terminal. Runtime disposal is the final force-cleanup owner.

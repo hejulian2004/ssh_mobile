@@ -114,29 +114,36 @@ pub(crate) fn emit_realtime_snapshot(
 
 /// Publishes only the metadata needed by the App incoming-request host. The
 /// native provisional binding retains SDP, ICE and the claim handle.
+pub(crate) struct RealtimeIncomingSessionOfferMetadata<'a> {
+    pub(crate) offer_id: &'a str,
+    pub(crate) claim_token: &'a str,
+    pub(crate) realtime_id: &'a str,
+    pub(crate) authenticated_peer_id: &'a str,
+    pub(crate) shared_session_instance_id: &'a str,
+    pub(crate) binding_expires_at_ms: u64,
+    pub(crate) request: &'a ScreenShareConsentV2,
+}
+
 pub(crate) fn emit_realtime_incoming_session_offer(
     event_tx: &EventSender,
-    offer_id: &str,
-    claim_token: &str,
-    realtime_id: &str,
-    authenticated_peer_id: &str,
-    shared_session_instance_id: &str,
-    binding_expires_at_ms: u64,
-    request: &ScreenShareConsentV2,
+    metadata: RealtimeIncomingSessionOfferMetadata<'_>,
 ) {
     let _ = event_tx.send(NetworkEvent {
-        event_id: format!("realtime/{realtime_id}/incoming-offer/{offer_id}"),
+        event_id: format!(
+            "realtime/{}/incoming-offer/{}",
+            metadata.realtime_id, metadata.offer_id
+        ),
         timestamp_ms: unix_timestamp_ms(),
         protocol_version: NETWORK_PROTOCOL_VERSION,
         payload: Some(network_event::Payload::RealtimeIncomingSessionOffer(
             RealtimeIncomingSessionOfferEvent {
-                offer_id: offer_id.to_owned(),
-                claim_token: claim_token.to_owned(),
-                realtime_id: realtime_id.to_owned(),
-                authenticated_peer_id: authenticated_peer_id.to_owned(),
-                shared_session_instance_id: shared_session_instance_id.to_owned(),
-                binding_expires_at_ms,
-                request: request.encode_to_vec(),
+                offer_id: metadata.offer_id.to_owned(),
+                claim_token: metadata.claim_token.to_owned(),
+                realtime_id: metadata.realtime_id.to_owned(),
+                authenticated_peer_id: metadata.authenticated_peer_id.to_owned(),
+                shared_session_instance_id: metadata.shared_session_instance_id.to_owned(),
+                binding_expires_at_ms: metadata.binding_expires_at_ms,
+                request: metadata.request.encode_to_vec(),
             },
         )),
     });

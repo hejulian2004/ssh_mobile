@@ -161,6 +161,12 @@ enum-name prefix so value identifiers stay unique within the package)
   protocol violation and is rejected; Relay-forwarded source is authoritative;
   old clients ignore the additive field; existing bound sessions continue to
   use their established `realtime_id → peer_id` binding when source is absent.
+- Descriptor compatibility is checked structurally, not by deleting text or
+  comparing the whole descriptor byte-for-byte: the shared Go helper parses
+  `FileDescriptorSet`, verifies `relay.v2.RealtimeSignal.source_device_id` is
+  singular string tag 7, removes only that field from the current descriptor,
+  deterministically serializes both sets, and compares the result with the
+  frozen descriptor. Bash and PowerShell invoke that same helper.
 - `ConnectivityOffer` has no target field. It is accepted only after a
   successful `ResolvePeerRequest`/READY response on the same control
   connection; the server forwards it through that Resolve → Offer gate. The

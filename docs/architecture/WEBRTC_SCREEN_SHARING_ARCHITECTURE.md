@@ -425,12 +425,16 @@ actions to that request; no `peer_id` or `sender_device_id` alias is introduced.
 wire field.
 The payload contains no bearer token, private key, or reusable credential.
 
-The receiver keeps at most 32 live provisional operations, with no more than one
-for a given `(sender_peer_id, operation_id)`, and stores only typed metadata plus a
-protected pending-offer handle. A bounded replay cache keeps at most 256 keys
-per authenticated peer for five minutes; its key is
-`(sender_peer_id, target_device_id, realtime_id, operation_id, decision,
-action_revision)`. Expiry deletes provisional state and cannot be renewed.
+The receiver keeps at most 32 live provisional operations, where one
+authenticated provisional `realtime_id` consumes one slot whether it is
+Offer-only, REQUEST-only, or paired. Offer and REQUEST storage therefore share
+one budget, and an identity mismatch on the other half of an existing
+`realtime_id` fails closed. A bounded replay cache keeps at most 256 keys per
+authenticated peer for five minutes; its key is
+`(sender_peer_id, local_authenticated_device_id, realtime_id, operation_id,
+decision, action_revision)`. Expiry deletes provisional state and cannot be
+renewed. A native-only entry epoch makes expiry deletion exact across
+REQUEST-before-Offer pairing and replacement.
 Replay-cache failure, duplicate or out-of-order action, expired intent, unknown
 version/purpose/media, oversized payload, or a non-contiguous action revision
 fails closed.
@@ -478,10 +482,13 @@ session, auto-answer, auto-display a screen, or start local capture. Before
 claim, authenticated matching ICE remains native-only in a bounded queue:
 128 candidates, 8 KiB per candidate, 256 KiB total, and a 120-second binding
 lifetime. Offer and ICE share the formal signaling validation. A claim uses the
-state machine `pending -> claiming -> claimed`; late matching ICE remains in the
-same protected queue during `claiming`, drains exactly once into the exact
-responder generation, and is destroyed on reject, CANCEL, close, expiry, or
-rollback. A sender CANCEL must also remove an unclaimed provisional binding.
+state machine `pending -> claiming -> claimed`; ICE arriving before exact
+responder registration remains in the protected queue, while later matching ICE
+may route directly to that exact claiming generation. Answer success is the
+external claim commit; rollback destroys the exact generation and any remaining
+provisional queue. A sender CANCEL must also remove an unclaimed provisional
+binding. A runtime-supervised native expiry worker is authoritative; App expiry
+only removes stale UI/arbitration state.
 Stale, duplicate, oversized, unknown, or mismatched operation actions fail
 closed.
 
@@ -493,6 +500,12 @@ handle never enter Dart. Reject has a provisional wire side effect and then
 terminates the binding; discard is silent local cleanup. Answer-send failure
 rolls back the exact responder generation and exact SDK registry entry, without
 touching a replacement session.
+
+`releaseSession` is not a command-completion shortcut: it records a pending
+release, requests stop, and waits for the exact session's authoritative
+stopped/failed lifecycle event before removing the SDK registry entry. A
+bounded route teardown may return while that release remains pending; runtime
+dispose is the final force-cleanup owner.
 
 The accepted sending flow is:
 

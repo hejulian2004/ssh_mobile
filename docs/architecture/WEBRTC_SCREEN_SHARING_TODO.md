@@ -170,6 +170,14 @@ macOS/iOS、Relay video forwarding 或 QoS/codec。
   effect；CANCEL/Close/expiry/disconnect 清理 Offer 与 ICE。
 - [x] SDK normalized `currentSnapshot + snapshots` 覆盖 state/full snapshot，
   claim 先注册 session，exact-object release 不删除 replacement。
+- [x] native late ICE 不再制造 Connected→Negotiating lifecycle regression；
+  provisional worker、native epoch、8 KiB ICE queue bounds、bounded replay/CANCEL
+  revision 和 unified 32-operation budget 已进入修复实现与 focused regression。
+- [x] SDK release 改为 authoritative-terminal：command completion 或 App timeout
+  不移除 registry；stopped/failed event 才 finalize exact session，runtime dispose
+  保留最终 force cleanup。
+- [x] hybrid claiming ICE contract、Host pending/resolving expiry guard、Relay
+  descriptor additive-field helper 已同步实现；远端 PR head 的完整 CI 结果仍待绑定。
 - [ ] Windows/Android 双真机 capture、permission、trickle ICE、Answer、Texture/
   render、断线和资源释放 evidence 待补；在证据完成前只称为 flow/preview available。
 
