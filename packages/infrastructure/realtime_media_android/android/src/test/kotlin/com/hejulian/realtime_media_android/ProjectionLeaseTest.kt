@@ -36,6 +36,59 @@ class ProjectionLeaseTest {
     }
 
     @Test
+    fun capturedGrantCompensationRunsTheBoundActionOnlyForCurrentGrantedLease() {
+        val captured = Any()
+        val other = Any()
+        var releaseCalls = 0
+
+        assertTrue(
+            compensateCapturedProjectionGrant(
+                capturedLease = captured,
+                currentLease = captured,
+                capturedState = ProjectionLeaseState.GRANTED,
+                releaseIfGranted = {
+                    releaseCalls++
+                    true
+                },
+            ),
+        )
+        assertEquals(1, releaseCalls)
+
+        assertFalse(
+            compensateCapturedProjectionGrant(
+                capturedLease = captured,
+                currentLease = captured,
+                capturedState = ProjectionLeaseState.GRANTED,
+                releaseIfGranted = {
+                    releaseCalls++
+                    false
+                },
+            ),
+        )
+        assertEquals(2, releaseCalls)
+
+        listOf(
+            other to ProjectionLeaseState.GRANTED,
+            captured to ProjectionLeaseState.CONSUMED,
+            captured to ProjectionLeaseState.REVOKED,
+            captured to ProjectionLeaseState.RELEASED,
+        ).forEach { (current, state) ->
+            assertFalse(
+                compensateCapturedProjectionGrant(
+                    capturedLease = captured,
+                    currentLease = current,
+                    capturedState = state,
+                    releaseIfGranted = {
+                        releaseCalls++
+                        true
+                    },
+                ),
+            )
+        }
+        assertEquals(2, releaseCalls)
+    }
+
+    @Test
     fun releaseIfGrantedCompetesWithConsumeAndRevokeAtOneTransitionBoundary() {
         val executor = Executors.newFixedThreadPool(2)
         try {

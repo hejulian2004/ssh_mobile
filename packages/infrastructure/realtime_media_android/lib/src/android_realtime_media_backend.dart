@@ -53,45 +53,55 @@ final class AndroidRealtimeMediaBackend
     AndroidProjectionPreparationGuard? isCurrent,
   }) async {
     final guard = isCurrent ?? _alwaysCurrent;
-    final previous = _projectionPreparation;
-    if (previous != null) await previous.completion.future;
-    if (!guard()) return AndroidProjectionPreparationResult.invalidated;
+    while (true) {
+      final previous = _projectionPreparation;
+      if (previous != null) {
+        await previous.completion.future;
+        if (!guard()) return AndroidProjectionPreparationResult.invalidated;
+        continue;
+      }
 
-    final preparation = _ProjectionPreparation();
-    _projectionPreparation = preparation;
-    var callerOwnsPreparation = false;
-    var platformRequestStarted = false;
-    var cleanupStarted = false;
-
-    Future<void> cleanupGrant() async {
-      if (cleanupStarted) return;
-      cleanupStarted = true;
-      await _abandonPlatformGrant();
-    }
-
-    try {
+      // Keep the slot claim synchronous: there must be no await between
+      // observing an empty slot and publishing this preparation.
       if (!guard()) return AndroidProjectionPreparationResult.invalidated;
-      platformRequestStarted = true;
-      await platform.requestProjection();
-      if (!guard()) {
-        await cleanupGrant();
-        return AndroidProjectionPreparationResult.invalidated;
+      final preparation = _ProjectionPreparation();
+      _projectionPreparation = preparation;
+      var callerOwnsPreparation = false;
+      var platformRequestStarted = false;
+      var cleanupStarted = false;
+
+      Future<void> cleanupGrant() async {
+        if (cleanupStarted) return;
+        cleanupStarted = true;
+        await _abandonPlatformGrant();
       }
-      callerOwnsPreparation = true;
-      return AndroidProjectionPreparationResult.acquired;
-    } catch (_) {
-      if (platformRequestStarted && !callerOwnsPreparation && !cleanupStarted) {
-        try {
+
+      try {
+        if (!guard()) return AndroidProjectionPreparationResult.invalidated;
+        platformRequestStarted = true;
+        await platform.requestProjection();
+        if (!guard()) {
           await cleanupGrant();
-        } catch (_) {
-          // Preserve the original preparation failure. The slot is still
-          // finalized below, and the platform cleanup is idempotent.
+          return AndroidProjectionPreparationResult.invalidated;
         }
-      }
-      rethrow;
-    } finally {
-      if (!callerOwnsPreparation) {
-        _finishProjectionPreparation(preparation);
+        callerOwnsPreparation = true;
+        return AndroidProjectionPreparationResult.acquired;
+      } catch (_) {
+        if (platformRequestStarted &&
+            !callerOwnsPreparation &&
+            !cleanupStarted) {
+          try {
+            await cleanupGrant();
+          } catch (_) {
+            // Preserve the original preparation failure. The slot is still
+            // finalized below, and the platform cleanup is idempotent.
+          }
+        }
+        rethrow;
+      } finally {
+        if (!callerOwnsPreparation) {
+          _finishProjectionPreparation(preparation);
+        }
       }
     }
   }
@@ -153,14 +163,16 @@ final class AndroidRealtimeMediaBackend
     required RealtimeMediaEndpointIdentity identity,
     required ScreenCaptureSource source,
   }) async {
-    final preparation = _projectionPreparation;
+    final capturedPreparation = _projectionPreparation;
     await platform.startCapture(
       endpointId: endpointId,
       identity: identity,
       source: source,
       ownerToken: _ownerFor(endpointId, identity),
     );
-    if (preparation != null) _finishProjectionPreparation(preparation);
+    if (capturedPreparation != null) {
+      _finishProjectionPreparation(capturedPreparation);
+    }
   }
 
   @override

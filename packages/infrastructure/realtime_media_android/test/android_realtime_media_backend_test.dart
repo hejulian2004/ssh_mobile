@@ -316,23 +316,15 @@ void main() {
       final permissionGate = Completer<void>();
       platform.projectionGate = permissionGate;
       var firstCurrent = true;
-      final first = backend.requestProjection(
-        isCurrent: () => firstCurrent,
-      );
+      final first = backend.requestProjection(isCurrent: () => firstCurrent);
       await Future<void>.delayed(Duration.zero);
       firstCurrent = false;
       final second = backend.requestProjection(isCurrent: () => true);
 
       permissionGate.complete();
 
-      expect(
-        await first,
-        AndroidProjectionPreparationResult.invalidated,
-      );
-      expect(
-        await second,
-        AndroidProjectionPreparationResult.acquired,
-      );
+      expect(await first, AndroidProjectionPreparationResult.invalidated);
+      expect(await second, AndroidProjectionPreparationResult.acquired);
       expect(platform.operations, <String>[
         'projection',
         'abandon-projection',
@@ -342,32 +334,89 @@ void main() {
     },
   );
 
-  test('serializes preparation callers across a shared backend instance', () async {
-    expect(
-      await backend.requestProjection(isCurrent: () => true),
-      AndroidProjectionPreparationResult.acquired,
-    );
+  test(
+    'serializes preparation callers across a shared backend instance',
+    () async {
+      expect(
+        await backend.requestProjection(isCurrent: () => true),
+        AndroidProjectionPreparationResult.acquired,
+      );
 
-    var secondCompleted = false;
-    final second = backend.requestProjection(isCurrent: () => true).then((value) {
-      secondCompleted = true;
-      return value;
-    });
-    await Future<void>.delayed(Duration.zero);
-    expect(secondCompleted, isFalse);
+      var secondCompleted = false;
+      final second = backend.requestProjection(isCurrent: () => true).then((
+        value,
+      ) {
+        secondCompleted = true;
+        return value;
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(secondCompleted, isFalse);
 
-    await backend.abandonProjectionGrant();
-    expect(
-      await second,
-      AndroidProjectionPreparationResult.acquired,
-    );
-    expect(platform.operations, <String>[
-      'projection',
-      'abandon-projection',
-      'projection',
-    ]);
-    await backend.abandonProjectionGrant();
-  });
+      await backend.abandonProjectionGrant();
+      expect(await second, AndroidProjectionPreparationResult.acquired);
+      expect(platform.operations, <String>[
+        'projection',
+        'abandon-projection',
+        'projection',
+      ]);
+      await backend.abandonProjectionGrant();
+    },
+  );
+
+  test(
+    'reclaims the preparation slot after each of multiple waiters',
+    () async {
+      expect(
+        await backend.requestProjection(isCurrent: () => true),
+        AndroidProjectionPreparationResult.acquired,
+      );
+
+      final firstWaiterGate = Completer<void>();
+      platform.projectionGate = firstWaiterGate;
+      var secondCompleted = false;
+      var thirdCompleted = false;
+      final second = backend.requestProjection(isCurrent: () => true).then((
+        value,
+      ) {
+        secondCompleted = true;
+        return value;
+      });
+      final third = backend.requestProjection(isCurrent: () => true).then((
+        value,
+      ) {
+        thirdCompleted = true;
+        return value;
+      });
+
+      await Future<void>.delayed(Duration.zero);
+      expect(platform.projectionRequestCount, 1);
+      expect(secondCompleted, isFalse);
+      expect(thirdCompleted, isFalse);
+
+      await backend.abandonProjectionGrant();
+      await Future<void>.delayed(Duration.zero);
+      expect(platform.projectionRequestCount, 2);
+      expect(platform.maxConcurrentProjectionRequests, 1);
+      expect(secondCompleted, isFalse);
+      expect(thirdCompleted, isFalse);
+
+      firstWaiterGate.complete();
+      await Future.any<AndroidProjectionPreparationResult>([second, third]);
+      await Future<void>.delayed(Duration.zero);
+      expect(secondCompleted ^ thirdCompleted, isTrue);
+      expect(platform.projectionRequestCount, 2);
+      expect(platform.maxConcurrentProjectionRequests, 1);
+
+      await backend.abandonProjectionGrant();
+      await Future<void>.delayed(Duration.zero);
+      expect(platform.projectionRequestCount, 3);
+      expect(platform.maxConcurrentProjectionRequests, 1);
+
+      final lastWaiter = secondCompleted ? third : second;
+      expect(await lastWaiter, AndroidProjectionPreparationResult.acquired);
+      await backend.abandonProjectionGrant();
+    },
+  );
 
   test('a failed projection request releases its preparation slot', () async {
     platform.failure = const RealtimeMediaException(
@@ -394,29 +443,29 @@ void main() {
     ]);
   });
 
-  test('a guard exception after permission self-cleans without caller ownership', () async {
-    var checks = 0;
-    await expectLater(
-      backend.requestProjection(
-        isCurrent: () {
-          checks++;
-          if (checks >= 3) throw StateError('stale guard failed');
-          return true;
-        },
-      ),
-      throwsA(isA<StateError>()),
-    );
-    expect(platform.operations, <String>[
-      'projection',
-      'abandon-projection',
-    ]);
+  test(
+    'a guard exception after permission self-cleans without caller ownership',
+    () async {
+      var checks = 0;
+      await expectLater(
+        backend.requestProjection(
+          isCurrent: () {
+            checks++;
+            if (checks >= 3) throw StateError('stale guard failed');
+            return true;
+          },
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(platform.operations, <String>['projection', 'abandon-projection']);
 
-    expect(
-      await backend.requestProjection(isCurrent: () => true),
-      AndroidProjectionPreparationResult.acquired,
-    );
-    await backend.abandonProjectionGrant();
-  });
+      expect(
+        await backend.requestProjection(isCurrent: () => true),
+        AndroidProjectionPreparationResult.acquired,
+      );
+      await backend.abandonProjectionGrant();
+    },
+  );
 
   test('successful capture attachment releases the preparation slot', () async {
     expect(
@@ -609,15 +658,27 @@ final class RecordingAndroidPlatform implements AndroidRealtimeMediaPlatform {
   RealtimeMediaException? releaseFailure;
   RealtimeMediaException? abandonFailure;
   Completer<void>? projectionGate;
+  int projectionRequestCount = 0;
+  int _activeProjectionRequests = 0;
+  int maxConcurrentProjectionRequests = 0;
   int rendererDetachCalls = 0;
 
   @override
   Future<void> requestProjection() async {
     operations.add('projection');
-    final gate = projectionGate;
-    if (gate != null) await gate.future;
-    final error = failure;
-    if (error != null) throw error;
+    projectionRequestCount++;
+    _activeProjectionRequests++;
+    if (_activeProjectionRequests > maxConcurrentProjectionRequests) {
+      maxConcurrentProjectionRequests = _activeProjectionRequests;
+    }
+    try {
+      final gate = projectionGate;
+      if (gate != null) await gate.future;
+      final error = failure;
+      if (error != null) throw error;
+    } finally {
+      _activeProjectionRequests--;
+    }
   }
 
   @override

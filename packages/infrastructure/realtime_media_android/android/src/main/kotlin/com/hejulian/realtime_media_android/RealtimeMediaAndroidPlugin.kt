@@ -313,10 +313,15 @@ class RealtimeMediaAndroidPlugin :
     }
 
     private fun releaseCapturedGrantIfStillCurrent(capturedLease: ProjectionLease?) {
-        if (capturedLease == null || projectionLease !== capturedLease) return
-        if (capturedLease.state == ProjectionLeaseState.GRANTED &&
-            capturedLease.releaseIfGranted()
-        ) {
+        val released = capturedLease?.let { lease ->
+            compensateCapturedProjectionGrant(
+                capturedLease = lease,
+                currentLease = projectionLease,
+                capturedState = lease.state,
+                releaseIfGranted = lease::releaseIfGranted,
+            )
+        } ?: false
+        if (released) {
             stopForegroundServiceIfUnused()
         }
     }

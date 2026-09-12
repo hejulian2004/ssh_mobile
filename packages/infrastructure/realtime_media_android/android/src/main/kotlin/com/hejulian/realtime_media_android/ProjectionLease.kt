@@ -9,6 +9,25 @@ internal enum class ProjectionLeaseState {
     RELEASED,
 }
 
+/**
+ * Applies pre-consume projection cleanup only to the lease captured by the
+ * failing operation. The action is already bound to that lease by the caller.
+ */
+internal fun compensateCapturedProjectionGrant(
+    capturedLease: Any?,
+    currentLease: Any?,
+    capturedState: ProjectionLeaseState?,
+    releaseIfGranted: () -> Boolean,
+): Boolean {
+    if (capturedLease == null ||
+        capturedLease !== currentLease ||
+        capturedState != ProjectionLeaseState.GRANTED
+    ) {
+        return false
+    }
+    return releaseIfGranted()
+}
+
 internal data class ProjectionLeaseRevocation(
     val changed: Boolean,
     val ownerToken: Long?,
