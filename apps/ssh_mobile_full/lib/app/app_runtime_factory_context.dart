@@ -21,6 +21,7 @@ final class _AppRuntimeFactoryContext {
     this.mcpDatabaseFactory,
     this.lanShareReceiverEnabled,
     required this.disposeLogger,
+    required this.startPendingInitialization,
     this.lifecycleObserver,
   });
 
@@ -39,6 +40,7 @@ final class _AppRuntimeFactoryContext {
   final feature_mcp.McpModuleDatabaseFactory? mcpDatabaseFactory;
   final bool? lanShareReceiverEnabled;
   final bool disposeLogger;
+  final bool startPendingInitialization;
   final void Function(String event)? lifecycleObserver;
 
   late final AppLogService logger;
@@ -131,7 +133,9 @@ final class _AppRuntimeFactoryContext {
 
       final runtime = _buildRuntime();
       cleanup.commit();
-      pendingInitialization.start();
+      if (startPendingInitialization) {
+        pendingInitialization.start();
+      }
       return runtime;
     } catch (error, stackTrace) {
       // Construction failed: cancel and bounded-wait every initializer before

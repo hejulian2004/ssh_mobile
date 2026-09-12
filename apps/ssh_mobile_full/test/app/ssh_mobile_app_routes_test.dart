@@ -41,6 +41,7 @@ void main() {
       // per test and leave its asynchronous teardown overlapping the next
       // route tree in this Flutter tester process.
       networkRuntime: FakeNetworkRuntime(),
+      startPendingInitialization: false,
     );
     runtime = await harness.createFuture;
   });
@@ -109,6 +110,7 @@ void main() {
   Future<void> disposeTree(WidgetTester tester) async {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
+    await runtime.dispose();
     // The AppLogService singleton installs a debugPrint bridge; with
     // disposeLogger: false the runtime never restores it. The test binding
     // asserts foundation debug variables are unchanged, so restore the

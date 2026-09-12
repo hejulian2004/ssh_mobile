@@ -214,6 +214,7 @@ Future<RuntimeHarness> newRuntimeHarness({
   String? relayCredential,
   String relayDeviceId = 'runtime-test-device',
   bool disposeLogger = true,
+  bool startPendingInitialization = true,
   void Function(String event)? lifecycleObserver,
 }) async {
   final preferences = <String, Object>{'relay_endpoint': relayEndpoint};
@@ -255,6 +256,7 @@ Future<RuntimeHarness> newRuntimeHarness({
           NativeDatabase.memory(),
         ),
     lanShareReceiverEnabled: false,
+    startPendingInitialization: startPendingInitialization,
     playbookDatabaseFactory: () =>
         feature_playbook.PlaybookDatabase.forTesting(NativeDatabase.memory()),
     ragDatabaseFactory: () =>
