@@ -4,6 +4,8 @@ import 'package:network_sdk/network_sdk.dart';
 import 'package:network_transport/network_transport.dart';
 import 'package:ssh_mobile_network_native/ssh_mobile_network_native.dart';
 
+part 'realtime_feature_adapters_events.dart';
+
 const _defaultMaxPendingCommands = 32;
 const _defaultCommandResultTimeout = Duration(seconds: 30);
 
@@ -14,7 +16,10 @@ const _defaultCommandResultTimeout = Duration(seconds: 30);
 /// resources. This adapter correlates queue tickets with typed command results,
 /// maps lifecycle events, and never forwards native signaling to a Feature.
 final class AppRealtimeSessionBackend
-    implements RealtimeSessionBackend, RealtimeConsentBackend {
+    implements
+        RealtimeSessionBackend,
+        RealtimeConsentBackend,
+        RealtimeIncomingSessionBackend {
   AppRealtimeSessionBackend({
     required this._networkRuntime,
     this.maxPendingCommands = _defaultMaxPendingCommands,
@@ -90,6 +95,75 @@ final class AppRealtimeSessionBackend
   }
 
   @override
+  Future<SdkResult<void>> claimIncomingOffer({
+    required RealtimeIncomingSessionOffer offer,
+    required RealtimeSession session,
+  }) async {
+    _ensureUsable();
+    final gateway = await _ensureGateway();
+    if (gateway is! NetworkRealtimeIncomingOfferGateway) {
+      return _failure(
+        code: NetworkErrorCode.invalidArgument,
+        message:
+            'Native gateway does not support incoming screen-share offers.',
+        operation: NetworkOperation.connect,
+        peerId: offer.authenticatedPeerId,
+      );
+    }
+    return _sendCommand(
+      operation: NetworkOperation.connect,
+      peerId: offer.authenticatedPeerId,
+      send: (_) => gateway.claimIncomingRealtimeOffer(
+        realtimeId: offer.realtimeId,
+        peerId: session.peerId,
+        claimToken: offer.claimToken,
+      ),
+    );
+  }
+
+  @override
+  Future<SdkResult<void>> rejectIncomingOffer(
+    RealtimeIncomingSessionOffer offer,
+  ) async {
+    _ensureUsable();
+    final gateway = await _ensureGateway();
+    if (gateway is! NetworkRealtimeIncomingOfferGateway) {
+      return _failure(
+        code: NetworkErrorCode.invalidArgument,
+        message:
+            'Native gateway does not support incoming screen-share offers.',
+        operation: NetworkOperation.send,
+        peerId: offer.authenticatedPeerId,
+      );
+    }
+    return _sendCommand(
+      operation: NetworkOperation.send,
+      peerId: offer.authenticatedPeerId,
+      send: (_) => gateway.rejectIncomingRealtimeOffer(
+        realtimeId: offer.realtimeId,
+        peerId: offer.authenticatedPeerId,
+        claimToken: offer.claimToken,
+      ),
+    );
+  }
+
+  @override
+  Future<void> discardIncomingOffer(RealtimeIncomingSessionOffer offer) async {
+    _ensureUsable();
+    final gateway = await _ensureGateway();
+    if (gateway is! NetworkRealtimeIncomingOfferGateway) return;
+    await _sendCommand(
+      operation: NetworkOperation.disconnect,
+      peerId: offer.authenticatedPeerId,
+      send: (_) => gateway.discardIncomingRealtimeOffer(
+        realtimeId: offer.realtimeId,
+        peerId: offer.authenticatedPeerId,
+        claimToken: offer.claimToken,
+      ),
+    );
+  }
+
+  @override
   Future<SdkResult<void>> start({
     required String realtimeId,
     required String peerId,
@@ -112,16 +186,22 @@ final class AppRealtimeSessionBackend
   }) async {
     _ensureUsable();
     if (_pendingCommands.length >= maxPendingCommands) {
-      return _pendingCapacityFailure(operation: operation, peerId: peerId);
+      return _realtimePendingCapacityFailure(
+        operation: operation,
+        peerId: peerId,
+      );
     }
     final gateway = await _ensureGateway();
     _ensureUsable();
     if (_pendingCommands.length >= maxPendingCommands) {
-      return _pendingCapacityFailure(operation: operation, peerId: peerId);
+      return _realtimePendingCapacityFailure(
+        operation: operation,
+        peerId: peerId,
+      );
     }
 
     final ticket = send(gateway);
-    final queueResult = _mapQueueStatus(
+    final queueResult = _mapRealtimeQueueStatus(
       ticket.queueStatus,
       operation: operation,
       peerId: peerId,
@@ -184,134 +264,6 @@ final class AppRealtimeSessionBackend
     return future;
   }
 
-  void _onNativeEvent(NativeNetworkEvent event) {
-    if (_disposed) return;
-    switch (event) {
-      case NativeRealtimeStateChangedEvent(
-        :final realtimeId,
-        :final peerId,
-        :final state,
-        :final revision,
-        :final generation,
-        :final sharedSessionInstanceId,
-        :final error,
-      ):
-        _events.add(
-          RealtimeSessionStateChangedEvent(
-            realtimeId: realtimeId,
-            peerId: peerId,
-            state: _mapState(state),
-            revision: revision,
-            generation: generation,
-            sharedSessionInstanceId: sharedSessionInstanceId,
-            error: error == null ? null : _mapError(error),
-          ),
-        );
-      case NativeRealtimeSnapshotEvent(
-        :final realtimeId,
-        :final peerId,
-        :final state,
-        :final revision,
-        :final generation,
-        :final sharedSessionInstanceId,
-        :final error,
-      ):
-        // 快照在 session 存在前到达时由 SDK coordinator 忽略；这里只做类型映射。
-        _events.add(
-          RealtimeSnapshotBackendEvent(
-            RealtimeSnapshot(
-              realtimeId: realtimeId,
-              peerId: peerId,
-              state: _mapState(state),
-              revision: revision,
-              generation: generation,
-              sharedSessionInstanceId: sharedSessionInstanceId,
-              error: error == null ? null : _mapError(error),
-            ),
-          ),
-        );
-      case NativeRealtimeSignalEvent event
-          when event.kind == NativeRealtimeSignalKind.screenShareConsent &&
-              event.consent != null:
-        final consent = event.consent!;
-        try {
-          _events.add(
-            RealtimeConsentBackendEvent(
-              RealtimeConsent(
-                schemaVersion: consent.schemaVersion,
-                operationId: consent.operationId,
-                realtimeId: consent.realtimeId,
-                sharedSessionInstanceId: consent.sharedSessionInstanceId,
-                issuedAt: DateTime.fromMillisecondsSinceEpoch(
-                  consent.issuedAtMs,
-                ),
-                expiresAt: DateTime.fromMillisecondsSinceEpoch(
-                  consent.expiresAtMs,
-                ),
-                decision: RealtimeConsentDecision.values.firstWhere(
-                  (value) => value.wireValue == consent.decision.wireValue,
-                ),
-                senderPeerId: consent.senderPeerId,
-                purpose: RealtimeConsentPurpose.values.firstWhere(
-                  (value) => value.wireValue == consent.purpose.wireValue,
-                ),
-                media: RealtimeConsentMedia.values.firstWhere(
-                  (value) => value.wireValue == consent.media.wireValue,
-                ),
-                requiresAcceptance: consent.requiresAcceptance,
-                actionRevision: consent.actionRevision,
-              ),
-            ),
-          );
-        } on Object {
-          // Native decoding is fail-closed; keep this adapter defensive if a
-          // future decoder returns an unknown enum value.
-          return;
-        }
-      case NativeCommandResultEvent event:
-        _completeCommand(event);
-      case NativePeerStateChangedEvent():
-      case NativeRealtimeSignalEvent():
-      case NativeSshStreamDataReceivedEvent():
-      case NativeSshStreamClosedEvent():
-      // Command acceptance and SDP/ICE signaling are native concerns. The
-      // session state and snapshot events are the only lifecycle sources.
-      // SSH stream data/closed events are consumed by the SSH connector.
-      default:
-        // Transfer, Relay, channel, presence, and future native events are
-        // consumed by their owning adapter; this realtime adapter ignores
-        // them without claiming ownership.
-        return;
-    }
-  }
-
-  void _completeCommand(NativeCommandResultEvent event) {
-    final pending = _pendingCommands.remove(event.commandId);
-    if (pending == null || _disposed) return;
-    pending.timer?.cancel();
-    if (event.accepted) {
-      pending.completer.complete(const SdkSuccess<void>(null));
-      return;
-    }
-    pending.completer.complete(
-      _failure(
-        code: event.error == null
-            ? NetworkErrorCode.ioError
-            : NetworkErrorCode.fromWire(event.error!.code),
-        message:
-            event.error?.message ?? 'Native Realtime command was rejected.',
-        operation: pending.operation,
-        peerId: event.error?.peerId ?? pending.peerId,
-        retryDisposition: event.error == null
-            ? RetryDisposition.unspecified
-            : RetryDisposition.fromWire(
-                event.error!.retryDisposition.wireValue,
-              ),
-        retryAfterSeconds: event.error?.retryAfterSeconds ?? 0,
-      ),
-    );
-  }
-
   Future<void> _disposeResources() async {
     await _nativeSubscription?.cancel();
     _nativeSubscription = null;
@@ -358,58 +310,6 @@ final class AppRealtimeSessionBackend
     }
   }
 
-  static SdkResult<void> _mapQueueStatus(
-    NativeOperationStatus status, {
-    required NetworkOperation operation,
-    String? peerId,
-  }) => switch (status) {
-    NativeOperationStatus.success => const SdkSuccess<void>(null),
-    NativeOperationStatus.invalidArgument => _failure(
-      code: NetworkErrorCode.invalidArgument,
-      message: 'Realtime command arguments were rejected.',
-      operation: operation,
-      peerId: peerId,
-    ),
-    NativeOperationStatus.stopped => _failure(
-      code: NetworkErrorCode.cancelled,
-      message: 'Native network runtime is stopped.',
-      operation: operation,
-      peerId: peerId,
-    ),
-    NativeOperationStatus.failure => _failure(
-      code: NetworkErrorCode.ioError,
-      message: 'Native Realtime command was not queued.',
-      operation: operation,
-      peerId: peerId,
-    ),
-    // These statuses belong to the dedicated realtime-media ABI. They are
-    // not expected from the generic command queue, so fail closed if a
-    // native implementation ever leaks one through this path.
-    NativeOperationStatus.unknownSession ||
-    NativeOperationStatus.staleGeneration ||
-    NativeOperationStatus.staleEndpoint ||
-    NativeOperationStatus.directionMismatch ||
-    NativeOperationStatus.duplicateEndpoint ||
-    NativeOperationStatus.driverUnavailable ||
-    NativeOperationStatus.peerMismatch ||
-    NativeOperationStatus.frameRejected => _failure(
-      code: NetworkErrorCode.ioError,
-      message: 'Native Realtime command returned an unexpected media status.',
-      operation: operation,
-      peerId: peerId,
-    ),
-  };
-
-  static SdkFailure<void> _pendingCapacityFailure({
-    required NetworkOperation operation,
-    String? peerId,
-  }) => _failure(
-    code: NetworkErrorCode.ioError,
-    message: 'Too many Realtime commands are awaiting native results.',
-    operation: operation,
-    peerId: peerId,
-  );
-
   static SdkFailure<void> _failure({
     required NetworkErrorCode code,
     required String message,
@@ -426,27 +326,6 @@ final class AppRealtimeSessionBackend
       retryDisposition: retryDisposition,
       retryAfterSeconds: retryAfterSeconds,
     ),
-  );
-
-  static RealtimeSessionState _mapState(
-    NativeRealtimeSessionState state,
-  ) => switch (state) {
-    NativeRealtimeSessionState.unspecified => RealtimeSessionState.idle,
-    NativeRealtimeSessionState.negotiating => RealtimeSessionState.negotiating,
-    NativeRealtimeSessionState.connected => RealtimeSessionState.connected,
-    NativeRealtimeSessionState.restarting => RealtimeSessionState.restarting,
-    NativeRealtimeSessionState.closed => RealtimeSessionState.stopped,
-    NativeRealtimeSessionState.failed => RealtimeSessionState.failed,
-  };
-
-  static NetworkError _mapError(NativeNetworkError error) => NetworkError(
-    code: NetworkErrorCode.fromWire(error.code),
-    message: error.message,
-    peerId: error.peerId,
-    retryDisposition: RetryDisposition.fromWire(
-      error.retryDisposition.wireValue,
-    ),
-    retryAfterSeconds: error.retryAfterSeconds,
   );
 }
 

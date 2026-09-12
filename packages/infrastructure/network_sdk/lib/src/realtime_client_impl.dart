@@ -9,9 +9,15 @@ final class RealtimeClientImpl implements RealtimeClient {
 
   final RealtimeSessionBackend _backend;
   final Map<String, _RealtimeSession> _sessions = <String, _RealtimeSession>{};
+  final StreamController<RealtimeIncomingSessionOffer> _incomingOffers =
+      StreamController<RealtimeIncomingSessionOffer>.broadcast();
   late final StreamSubscription<RealtimeBackendEvent> _backendSubscription;
   Future<void>? _disposeFuture;
   bool _disposed = false;
+
+  @override
+  Stream<RealtimeIncomingSessionOffer> get incomingOffers =>
+      _incomingOffers.stream;
 
   @override
   RealtimeSession createSession({
@@ -46,12 +52,95 @@ final class RealtimeClientImpl implements RealtimeClient {
     return future;
   }
 
+  @override
+  Future<void> releaseSession(RealtimeSession session) async {
+    _ensureUsable();
+    if (session is! _RealtimeSession || !identical(session._client, this)) {
+      return;
+    }
+    await session._dispose();
+  }
+
+  @override
+  Future<SdkResult<RealtimeSession>> claimIncomingSession(
+    RealtimeIncomingSessionOffer offer,
+  ) async {
+    _ensureUsable();
+    final backend = _backend;
+    if (backend is! RealtimeIncomingSessionBackend) {
+      return SdkFailure(
+        NetworkError(
+          code: NetworkErrorCode.invalidArgument,
+          message: 'Incoming Realtime offers are unavailable on this backend.',
+          operation: NetworkOperation.connect,
+          peerId: offer.authenticatedPeerId,
+        ),
+      );
+    }
+    final incomingBackend = backend as RealtimeIncomingSessionBackend;
+    if (_sessions.containsKey(offer.realtimeId)) {
+      return SdkFailure(
+        NetworkError(
+          code: NetworkErrorCode.staleOperation,
+          message: 'Realtime session already exists for this offer.',
+          operation: NetworkOperation.connect,
+          peerId: offer.authenticatedPeerId,
+        ),
+      );
+    }
+    final session = createSession(
+      realtimeId: offer.realtimeId,
+      peerId: offer.authenticatedPeerId,
+    );
+    final result = await incomingBackend.claimIncomingOffer(
+      offer: offer,
+      session: session,
+    );
+    if (result is SdkFailure<void>) {
+      await releaseSession(session);
+      return SdkFailure(result.error);
+    }
+    return SdkSuccess<RealtimeSession>(session);
+  }
+
+  @override
+  Future<SdkResult<void>> rejectIncomingOffer(
+    RealtimeIncomingSessionOffer offer,
+  ) async {
+    _ensureUsable();
+    final backend = _backend;
+    if (backend is! RealtimeIncomingSessionBackend) {
+      return SdkFailure(
+        NetworkError(
+          code: NetworkErrorCode.invalidArgument,
+          message: 'Incoming Realtime offers are unavailable on this backend.',
+          operation: NetworkOperation.send,
+          peerId: offer.authenticatedPeerId,
+        ),
+      );
+    }
+    final incomingBackend = backend as RealtimeIncomingSessionBackend;
+    return incomingBackend.rejectIncomingOffer(offer);
+  }
+
+  @override
+  Future<void> discardIncomingOffer(RealtimeIncomingSessionOffer offer) async {
+    _ensureUsable();
+    final backend = _backend;
+    if (backend is RealtimeIncomingSessionBackend) {
+      await (backend as RealtimeIncomingSessionBackend).discardIncomingOffer(
+        offer,
+      );
+    }
+  }
+
   Future<void> _disposeResources() async {
     for (final session in _sessions.values.toList()) {
       await session._dispose();
     }
     _sessions.clear();
     await _backendSubscription.cancel();
+    await _incomingOffers.close();
     await _backend.dispose();
   }
 
@@ -79,7 +168,25 @@ final class RealtimeClientImpl implements RealtimeClient {
         final session = _sessions[consent.realtimeId];
         if (session == null || session.peerId != consent.senderPeerId) return;
         session._applyConsent(consent);
+      case RealtimeIncomingSessionOfferBackendEvent(:final offer):
+        if (!_isValidIncomingOffer(offer)) return;
+        _incomingOffers.add(offer);
     }
+  }
+
+  bool _isValidIncomingOffer(RealtimeIncomingSessionOffer offer) {
+    if (offer.offerId.isEmpty ||
+        offer.claimToken.isEmpty ||
+        offer.authenticatedPeerId.isEmpty ||
+        offer.request.decision != RealtimeConsentDecision.request ||
+        offer.request.realtimeId != offer.realtimeId ||
+        offer.request.senderPeerId != offer.authenticatedPeerId ||
+        offer.request.sharedSessionInstanceId !=
+            offer.sharedSessionInstanceId ||
+        !offer.request.isFresh(DateTime.now())) {
+      return false;
+    }
+    return offer.bindingExpiresAt.isAfter(DateTime.now());
   }
 
   Future<SdkResult<void>> _start(_RealtimeSession session) async {
@@ -145,246 +252,6 @@ final class RealtimeClientImpl implements RealtimeClient {
     if (identical(_sessions[session.realtimeId], session)) {
       _sessions.remove(session.realtimeId);
     }
-  }
-
-  void _ensureUsable() {
-    if (_disposed) throw const SdkClientDisposedException();
-  }
-}
-
-final class _RealtimeSession implements RealtimeSession {
-  _RealtimeSession({
-    required this._client,
-    required this.realtimeId,
-    required this.peerId,
-  });
-
-  final RealtimeClientImpl _client;
-  RealtimeSessionState _state = RealtimeSessionState.idle;
-  RealtimeAudioState _audioState = RealtimeAudioState.unavailable;
-  int _revision = 0;
-  int? _generation;
-  String? _sharedSessionInstanceId;
-  bool _awaitingGenerationAdvance = false;
-  Future<SdkResult<void>>? _startFuture;
-  Future<SdkResult<void>>? _stopFuture;
-  bool _stopCommandCompleted = false;
-  bool _disposed = false;
-  final StreamController<RealtimeConsent> _consents =
-      StreamController<RealtimeConsent>.broadcast();
-
-  @override
-  final String realtimeId;
-
-  @override
-  final String peerId;
-
-  @override
-  RealtimeSessionState get state => _state;
-
-  @override
-  int get revision => _revision;
-
-  @override
-  int? get generation => _generation;
-
-  @override
-  String? get sharedSessionInstanceId => _sharedSessionInstanceId;
-
-  @override
-  RealtimeSessionToken? get mediaToken {
-    final generation = _generation;
-    if (generation == null || generation <= 0) return null;
-    return RealtimeSessionToken(
-      realtimeId: realtimeId,
-      peerId: peerId,
-      generation: generation,
-    );
-  }
-
-  @override
-  RealtimeAudioState get audioState => _audioState;
-
-  @override
-  Stream<RealtimeConsent> get consentEvents => _consents.stream;
-
-  @override
-  Future<SdkResult<void>> sendConsent(RealtimeConsent consent) {
-    _ensureUsable();
-    return _client._sendConsent(this, consent);
-  }
-
-  @override
-  Future<SdkResult<void>> start() {
-    _ensureUsable();
-    final existing = _startFuture;
-    if (existing != null) return existing;
-    if (_state == RealtimeSessionState.starting ||
-        _state == RealtimeSessionState.negotiating ||
-        _state == RealtimeSessionState.restarting ||
-        _state == RealtimeSessionState.connected) {
-      return Future<SdkResult<void>>.value(const SdkSuccess<void>(null));
-    }
-    // A fresh start() begins a new native connection generation whose
-    // signaling revision restarts from a low value (native creates a new
-    // WebRTC peer). Reset the recorded revision so the new generation's low
-    // revisions are not mistaken for stale events from the previous session.
-    _revision = 0;
-    // The next native start creates a new cross-device session instance. Do
-    // not let delayed consent from the previous instance remain admissible
-    // while the new native state event is still in flight.
-    _sharedSessionInstanceId = null;
-    _awaitingGenerationAdvance = _generation != null;
-    _stopCommandCompleted = false;
-    _state = RealtimeSessionState.starting;
-    final future = _startInternal();
-    _startFuture = future;
-    future.then<void>(
-      (_) {
-        if (identical(_startFuture, future)) _startFuture = null;
-      },
-      onError: (Object _, StackTrace _) {
-        if (identical(_startFuture, future)) _startFuture = null;
-      },
-    );
-    return future;
-  }
-
-  Future<SdkResult<void>> _startInternal() async {
-    final result = await _client._start(this);
-    if (_disposed) return result;
-    if (result is SdkFailure<void>) {
-      _state = RealtimeSessionState.failed;
-    }
-    return result;
-  }
-
-  @override
-  Future<SdkResult<void>> stop() {
-    _ensureUsable();
-    final existing = _stopFuture;
-    if (existing != null) return existing;
-    if (_state == RealtimeSessionState.idle ||
-        _state == RealtimeSessionState.stopped) {
-      return Future<SdkResult<void>>.value(const SdkSuccess<void>(null));
-    }
-    if (_stopCommandCompleted) {
-      return Future<SdkResult<void>>.value(const SdkSuccess<void>(null));
-    }
-    final future = _stopInternal();
-    _stopFuture = future;
-    future.then<void>(
-      (_) {
-        if (identical(_stopFuture, future)) _stopFuture = null;
-      },
-      onError: (Object _, StackTrace _) {
-        if (identical(_stopFuture, future)) _stopFuture = null;
-      },
-    );
-    return future;
-  }
-
-  Future<SdkResult<void>> _stopInternal() async {
-    final result = await _client._stop(this);
-    if (_disposed) return result;
-    if (result is SdkFailure<void>) {
-      _state = RealtimeSessionState.failed;
-    } else {
-      // The command result only confirms native command completion. The
-      // authoritative stopped state arrives through the closed state event.
-      _stopCommandCompleted = true;
-    }
-    return result;
-  }
-
-  void _applyState(
-    RealtimeSessionState state,
-    NetworkError? error, {
-    int revision = 0,
-    int? generation,
-    String? sharedSessionInstanceId,
-  }) {
-    if (_disposed) return;
-    if (generation != null) {
-      if (generation <= 0) return;
-      final currentGeneration = _generation;
-      if (_awaitingGenerationAdvance &&
-          currentGeneration != null &&
-          generation <= currentGeneration) {
-        return;
-      }
-      if (currentGeneration != null && generation < currentGeneration) {
-        return;
-      }
-      if (currentGeneration == null || generation > currentGeneration) {
-        _generation = generation;
-        _revision = 0;
-        _awaitingGenerationAdvance = false;
-      }
-    }
-    // Revision reconciliation (ADR-029): a strictly lower revision is a stale
-    // snapshot/event and must not roll back a newer state — including a stale
-    // `failed`/error event. Equal revisions are idempotent reapplications and
-    // never advance the revision. revision == 0 is the legacy/unspecified
-    // marker: it always applies its state but never advances `_revision`.
-    if (revision > 0 && _revision > 0 && revision < _revision) return;
-    if (sharedSessionInstanceId != null &&
-        !RegExp(r'^[0-9a-f]{32}$').hasMatch(sharedSessionInstanceId)) {
-      return;
-    }
-    _state = error == null ? state : RealtimeSessionState.failed;
-    if (revision > _revision) _revision = revision;
-    if (sharedSessionInstanceId != null) {
-      _sharedSessionInstanceId = sharedSessionInstanceId;
-    }
-    if (_state == RealtimeSessionState.stopped ||
-        _state == RealtimeSessionState.failed) {
-      _stopCommandCompleted = false;
-      _sharedSessionInstanceId = null;
-    }
-  }
-
-  void _applySnapshot(RealtimeSnapshot snapshot) {
-    if (_disposed) return;
-    _applyState(
-      snapshot.state,
-      snapshot.error,
-      revision: snapshot.revision,
-      generation: snapshot.generation,
-      sharedSessionInstanceId: snapshot.sharedSessionInstanceId,
-    );
-  }
-
-  void _applyAudioState(RealtimeAudioState state) {
-    if (_disposed) return;
-    _audioState = state;
-  }
-
-  void _applyConsent(RealtimeConsent consent) {
-    if (_disposed || !consent.isFresh(DateTime.now())) return;
-    if (consent.realtimeId != realtimeId) return;
-    if (consent.sharedSessionInstanceId != _sharedSessionInstanceId) return;
-    _consents.add(consent);
-  }
-
-  Future<void> _dispose() async {
-    if (_disposed) return;
-    final shouldStop =
-        _state != RealtimeSessionState.idle &&
-        _state != RealtimeSessionState.stopped;
-    _disposed = true;
-    _client._remove(this);
-    if (shouldStop) {
-      // Disposal must not wait for a command-result timeout. The backend is
-      // disposed immediately after all sessions have requested their stop;
-      // that cancellation completes any in-flight command futures.
-      final stopFuture = _client._stop(this, allowDisposed: true);
-      unawaited(
-        stopFuture.then<void>((_) {}, onError: (Object _, StackTrace _) {}),
-      );
-    }
-    _state = RealtimeSessionState.stopped;
-    await _consents.close();
   }
 
   void _ensureUsable() {

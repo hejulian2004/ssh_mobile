@@ -169,6 +169,42 @@ final class NativeNetworkProtocol {
     payload: payload,
   );
 
+  static Uint8List claimIncomingRealtimeOfferCommand({
+    required String commandId,
+    required String realtimeId,
+    required String peerId,
+    required String claimToken,
+  }) => _NativeProtocolCommandEncoder.claimIncomingRealtimeOfferCommand(
+    commandId: commandId,
+    realtimeId: realtimeId,
+    peerId: peerId,
+    claimToken: claimToken,
+  );
+
+  static Uint8List rejectIncomingRealtimeOfferCommand({
+    required String commandId,
+    required String realtimeId,
+    required String peerId,
+    required String claimToken,
+  }) => _NativeProtocolCommandEncoder.rejectIncomingRealtimeOfferCommand(
+    commandId: commandId,
+    realtimeId: realtimeId,
+    peerId: peerId,
+    claimToken: claimToken,
+  );
+
+  static Uint8List discardIncomingRealtimeOfferCommand({
+    required String commandId,
+    required String realtimeId,
+    required String peerId,
+    required String claimToken,
+  }) => _NativeProtocolCommandEncoder.discardIncomingRealtimeOfferCommand(
+    commandId: commandId,
+    realtimeId: realtimeId,
+    peerId: peerId,
+    claimToken: claimToken,
+  );
+
   /// Encodes the versioned screen-share consent payload carried by the
   /// dedicated realtime signal kind. This helper emits metadata only; it has
   /// no API for frames, native pointers or credentials.

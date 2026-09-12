@@ -1,4 +1,4 @@
-> Last updated: 2026-08-30
+> Last updated: 2026-09-12
 
 # SDK Overview
 
@@ -18,3 +18,10 @@ Canonical design references: [Network SDK design](../../docs/网络传输SDK架�
 [implementation plan](../../docs/NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md),
 [fault matrix](../../docs/NETWORK_FAULT_MATRIX.md), and
 [Transport and Routing](features/transport-routing.md).
+
+PR74 also changes the SDK Realtime lifecycle boundary: incoming offers are
+metadata-only and use a provisional backend for claim/reject/discard; the SDK
+registers the responder session before native claim and removes only the exact
+registered object on rollback. `RealtimeSession.currentSnapshot` and
+`snapshots` are normalized state/full-snapshot projections, not a raw native
+full-snapshot stream.

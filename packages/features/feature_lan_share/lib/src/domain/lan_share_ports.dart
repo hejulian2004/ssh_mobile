@@ -227,3 +227,16 @@ abstract interface class LanShareNetworkAccessPort {
   /// 借用 App 级单例 [NetworkFacade]。
   Future<NetworkFacade?> borrowFacade();
 }
+
+/// Narrow App-owned capability for peer-scoped screen-share actions.
+///
+/// The LAN Feature does not construct Realtime sessions or import the
+/// screen-share Feature. The App Shell decides availability and owns the
+/// navigation/session lifecycle behind this contract.
+abstract interface class LanShareScreenSharePort {
+  bool canShareWith(String peerId);
+
+  bool canReceiveScreenShareFrom(String peerId);
+
+  Future<void> startScreenShare(String peerId);
+}

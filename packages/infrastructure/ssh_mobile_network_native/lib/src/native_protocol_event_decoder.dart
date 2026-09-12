@@ -147,6 +147,12 @@ final class _NativeProtocolEventDecoder {
         protocolVersion,
         eventPayload,
       ),
+      34 => _NativeRealtimeEventDecoder._decodeIncomingSessionOffer(
+        eventId,
+        timestampMs,
+        protocolVersion,
+        eventPayload,
+      ),
       26 => _NativeRealtimeEventDecoder._decodeSshStreamData(
         eventId,
         timestampMs,

@@ -317,6 +317,24 @@ message SendRealtimeSignalCommand {
   bytes payload = 5;
 }
 
+message ClaimIncomingRealtimeOfferCommand {
+  string realtime_id = 1;
+  string peer_id = 2;
+  string claim_token = 3;
+}
+
+message RejectIncomingRealtimeOfferCommand {
+  string realtime_id = 1;
+  string peer_id = 2;
+  string claim_token = 3;
+}
+
+message DiscardIncomingRealtimeOfferCommand {
+  string realtime_id = 1;
+  string peer_id = 2;
+  string claim_token = 3;
+}
+
 message StreamHandle {
   string opener_device_id = 1;
   uint32 stream_id = 2;
@@ -357,6 +375,9 @@ message NetworkCommand {
     StartRealtimeSessionCommand start_realtime_session = 21;
     StopRealtimeSessionCommand stop_realtime_session = 22;
     SendRealtimeSignalCommand send_realtime_signal = 23;
+    ClaimIncomingRealtimeOfferCommand claim_incoming_realtime_offer = 34;
+    RejectIncomingRealtimeOfferCommand reject_incoming_realtime_offer = 35;
+    DiscardIncomingRealtimeOfferCommand discard_incoming_realtime_offer = 36;
     SshStreamOpenCommand ssh_stream_open = 25;
     SshStreamDataCommand ssh_stream_data = 26;
     SshStreamCloseCommand ssh_stream_close = 27;
@@ -570,6 +591,19 @@ message RealtimeSnapshotEvent {
   string shared_session_instance_id = 7;
 }
 
+// Metadata-only event emitted after native has paired an authenticated Offer
+// with the original typed screen-share REQUEST. SDP, ICE and the native claim
+// handle remain native-owned.
+message RealtimeIncomingSessionOfferEvent {
+  string offer_id = 1;
+  string claim_token = 2;
+  string realtime_id = 3;
+  string authenticated_peer_id = 4;
+  string shared_session_instance_id = 5;
+  uint64 binding_expires_at_ms = 6;
+  bytes request = 7;
+}
+
 message ChannelMessageEvent {
   string peer_id = 1;
   string session_id = 2;
@@ -616,6 +650,7 @@ message NetworkEvent {
     RealtimeStateChangedEvent realtime_state = 21;
     RealtimeSignalEvent realtime_signal = 22;
     RealtimeSnapshotEvent realtime_snapshot = 23;
+    RealtimeIncomingSessionOfferEvent realtime_incoming_session_offer = 34;
     PeerPresenceChangedEvent peer_presence_changed = 24;
     PeerPresenceSnapshotEvent peer_presence_snapshot = 25;
     SshStreamDataReceivedEvent ssh_stream_data_received = 26;

@@ -1,4 +1,4 @@
-> Last updated: 2026-08-26
+> Last updated: 2026-09-12
 
 # Relay Protocol V2 — Frozen Wire Contract
 
@@ -119,7 +119,7 @@ Authoritative files:
 | 22 | `RelayReserveRequest` | `attempt_id`, target, desired lifetime (server clamps [15, 120]) |
 | 23 | `RelayReserveResponse` | reservation_id (16-byte hex / 32 chars), self-contained endpoint, expires_at_ms, 32-byte local_token |
 | 24 | `IncomingRelayReservation` | pushed to B; receiver-specific token |
-| 25 | `RealtimeSignal` | `realtime_id`, target, kind, revision, payload ≤ 256 KiB; no sender field on the wire |
+| 25 | `RealtimeSignal` | `realtime_id`, target, kind, revision, payload ≤ 256 KiB, additive tag 7 `source_device_id` written only by Relay |
 | 26 | `ProtocolError` | echoes failing `request_id` (0 = server-initiated), `attempt_id`, `code`, `message` |
 
 ### Relay data (`RelayDataFrame` oneof tags 10–13; reserved 14, 30–63)
@@ -149,10 +149,18 @@ enum-name prefix so value identifiers stay unique within the package)
   RelayReserveResponse, ProtocolError). Async attempts correlate by `attempt_id`;
   stale/mismatched answers are dropped. No global Notify.
 - `RealtimeSignal.target_device_id` is the device that should receive the frame.
-  The frozen wire message has no `sender_device_id`: the receiving runtime
-  obtains the remote identity from its established `realtime_id` → peer binding
-  and rejects an unknown binding. It must never use `target_device_id` as the
-  sender identity.
+  `source_device_id` is directional: clients MUST omit it when sending to the
+  Relay; a non-empty client value is a protocol violation. The Relay writes the
+  authenticated `sender.deviceID` before forwarding. Receivers trust only this
+  Relay-authenticated value. An absent source remains compatible for existing
+  bound sessions; an unknown session without an authenticated source fails
+  closed, while a present source that does not match the bound peer also fails
+  closed.
+- Compatibility matrix for tag 7 is deliberately directional: client omission
+  is accepted by old and new Relay; a non-empty client `source_device_id` is a
+  protocol violation and is rejected; Relay-forwarded source is authoritative;
+  old clients ignore the additive field; existing bound sessions continue to
+  use their established `realtime_id → peer_id` binding when source is absent.
 - `ConnectivityOffer` has no target field. It is accepted only after a
   successful `ResolvePeerRequest`/READY response on the same control
   connection; the server forwards it through that Resolve → Offer gate. The
@@ -196,7 +204,7 @@ be mirrored in the Rust and Go codecs with a test asserting they match.
 
 Location: `protocol/relay_v2_testdata/`
 
-- 22 full-wire-frame `.bin` files (each = 4-byte BE length + protobuf) named
+- 23 full-wire-frame `.bin` files (each = 4-byte BE length + protobuf) named
   `<message>.control.bin` / `<message>.data.bin`.
 - `manifest.json` — shared semantic expectations (schema_version 2): constants,
   seed values, enum maps, and per-fixture `expects` (epoch hex, revision,

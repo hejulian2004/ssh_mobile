@@ -889,6 +889,33 @@ final class _FakeRealtimeClient implements RealtimeClient {
   }
 
   @override
+  Future<void> releaseSession(RealtimeSession session) async {}
+
+  @override
+  Stream<RealtimeIncomingSessionOffer> get incomingOffers =>
+      const Stream<RealtimeIncomingSessionOffer>.empty();
+
+  @override
+  Future<SdkResult<RealtimeSession>> claimIncomingSession(
+    RealtimeIncomingSessionOffer offer,
+  ) async => SdkFailure(
+    NetworkError(
+      code: NetworkErrorCode.invalidArgument,
+      message: 'Unsupported in fake.',
+      operation: NetworkOperation.connect,
+      peerId: offer.authenticatedPeerId,
+    ),
+  );
+
+  @override
+  Future<SdkResult<void>> rejectIncomingOffer(
+    RealtimeIncomingSessionOffer offer,
+  ) async => const SdkSuccess<void>(null);
+
+  @override
+  Future<void> discardIncomingOffer(RealtimeIncomingSessionOffer offer) async {}
+
+  @override
   Future<void> dispose() async {}
 }
 
@@ -921,6 +948,13 @@ final class _FakeRealtimeSession implements RealtimeSession {
 
   @override
   RealtimeAudioState get audioState => RealtimeAudioState.unavailable;
+
+  @override
+  RealtimeSnapshot? get currentSnapshot => null;
+
+  @override
+  Stream<RealtimeSnapshot> get snapshots =>
+      const Stream<RealtimeSnapshot>.empty();
 
   @override
   Stream<RealtimeConsent> get consentEvents =>

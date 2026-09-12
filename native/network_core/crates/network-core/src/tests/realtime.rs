@@ -12,6 +12,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use tokio::sync::Notify;
 
 use crate::discovery::DiscoveryControlPlane;
 use crate::runtime::ConnectDecision;
@@ -1104,6 +1105,9 @@ struct RecordingControl {
     signals: Mutex<Vec<SignalCall>>,
     fail_signals: AtomicBool,
     usable: AtomicBool,
+    block_next_answer: AtomicBool,
+    answer_started: Arc<Notify>,
+    answer_release: Arc<Notify>,
 }
 
 impl RecordingControl {
@@ -1112,6 +1116,9 @@ impl RecordingControl {
             signals: Mutex::new(Vec::new()),
             fail_signals: AtomicBool::new(false),
             usable: AtomicBool::new(true),
+            block_next_answer: AtomicBool::new(false),
+            answer_started: Arc::new(Notify::new()),
+            answer_release: Arc::new(Notify::new()),
         })
     }
 
@@ -1121,6 +1128,14 @@ impl RecordingControl {
 
     fn set_usable(&self, usable: bool) {
         self.usable.store(usable, Ordering::Release);
+    }
+
+    fn block_one_answer(&self) -> (Arc<Notify>, Arc<Notify>) {
+        self.block_next_answer.store(true, Ordering::Release);
+        (
+            Arc::clone(&self.answer_started),
+            Arc::clone(&self.answer_release),
+        )
     }
 }
 
@@ -1161,7 +1176,15 @@ impl DiscoveryControlPlane for RecordingControl {
             revision,
             payload: payload.to_vec(),
         };
+        let block_answer = kind == V2RealtimeSignalKind::Answer
+            && self.block_next_answer.swap(false, Ordering::AcqRel);
+        let answer_started = Arc::clone(&self.answer_started);
+        let answer_release = Arc::clone(&self.answer_release);
         Box::pin(async move {
+            if block_answer {
+                answer_started.notify_one();
+                answer_release.notified().await;
+            }
             if fail {
                 Err(RelayError::NotConnected)
             } else {
@@ -1195,6 +1218,7 @@ fn test_signal_payload(payload: &[u8]) -> Vec<u8> {
 async fn inbound_v2_signal_uses_established_realtime_peer_binding_not_target() {
     let (state, _event_rx) = realtime_test_state().await;
     register_realtime_peer(&state, "peer-a").await;
+    register_realtime_peer(&state, "peer-b").await;
 
     let realtime_id = "00112233445566778899aabbccddeeff";
     let mut caller = WebRtcPeer::new(WebRtcConfig::default()).expect("caller peer");
@@ -1233,15 +1257,67 @@ async fn inbound_v2_signal_uses_established_realtime_peer_binding_not_target() {
             kind: V2RealtimeSignalKind::Answer as i32,
             revision: offer_revision + 1,
             payload: test_signal_payload(&answer.sdp.into_bytes()),
+            source_device_id: "peer-a".into(),
         },
     )
     .await;
     assert!(outcome.is_ok(), "inbound answer: {outcome:?}");
 
+    let mismatched_source = handle_v2_realtime_signal(
+        &state,
+        &V2RealtimeSignal {
+            request_id: 2,
+            realtime_id: realtime_id.into(),
+            target_device_id: "local-device-b".into(),
+            kind: V2RealtimeSignalKind::Close as i32,
+            revision: offer_revision + 2,
+            payload: test_signal_payload(b""),
+            source_device_id: "peer-b".into(),
+        },
+    )
+    .await
+    .expect_err("a bound session must reject a mismatched authenticated source");
+    assert!(mismatched_source
+        .to_string()
+        .contains("source does not match session binding"));
+
+    let now_ms = crate::events::unix_timestamp_ms().max(0) as u64;
+    let old_relay_consent = ScreenShareConsentV2 {
+        schema_version: 2,
+        operation_id: "operation-old-relay".into(),
+        realtime_id: realtime_id.into(),
+        issued_at_ms: now_ms,
+        expires_at_ms: now_ms + 120_000,
+        decision: ScreenShareConsentDecision::Request as i32,
+        sender_peer_id: "peer-a".into(),
+        purpose: ScreenShareConsentPurpose::ScreenShare as i32,
+        media: ScreenShareMediaKind::ScreenVideo as i32,
+        requires_acceptance: true,
+        action_revision: 1,
+        shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
+    };
+    let old_relay_consent_result = handle_v2_realtime_signal(
+        &state,
+        &V2RealtimeSignal {
+            request_id: 3,
+            realtime_id: realtime_id.into(),
+            target_device_id: "local-device-b".into(),
+            kind: 6,
+            revision: offer_revision + 2,
+            payload: test_signal_payload(&old_relay_consent.encode_to_vec()),
+            source_device_id: String::new(),
+        },
+    )
+    .await;
+    assert!(
+        old_relay_consent_result.is_ok(),
+        "old Relay source omission: {old_relay_consent_result:?}"
+    );
+
     assert_eq!(
         state.realtime.lock().await.sessions[realtime_id].peer_id,
         "peer-a",
-        "the authenticated sender is the remote WebRTC peer"
+        "the source-omitted signal must still use the established peer binding",
     );
 }
 
@@ -1376,6 +1452,435 @@ fn screen_share_consent_freshness_rejects_future_or_expired_payloads() {
         now_ms,
     )
     .is_err());
+}
+
+#[tokio::test]
+async fn provisional_offer_and_ice_remain_native_only_until_matching_request() {
+    let (state, mut event_rx) = realtime_test_state().await;
+    register_realtime_peer(&state, "peer-a").await;
+    let realtime_id = "00112233445566778899aabbccddeeff";
+    let shared_session_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let mut caller = WebRtcPeer::new(WebRtcConfig::default()).expect("caller peer");
+    caller
+        .create_data_channel("ssh-mobile-realtime", Default::default())
+        .expect("data channel");
+    let offer = caller.create_offer().expect("offer");
+    let offer_revision = caller.signaling_revision();
+
+    handle_v2_realtime_signal(
+        &state,
+        &V2RealtimeSignal {
+            realtime_id: realtime_id.into(),
+            target_device_id: "local-device".into(),
+            source_device_id: "peer-a".into(),
+            kind: V2RealtimeSignalKind::Offer as i32,
+            revision: offer_revision,
+            payload: encode_realtime_signal_payload(shared_session_id, offer.sdp.as_bytes())
+                .expect("offer envelope"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("offer is retained provisionally");
+
+    handle_v2_realtime_signal(
+        &state,
+        &V2RealtimeSignal {
+            realtime_id: realtime_id.into(),
+            target_device_id: "local-device".into(),
+            source_device_id: "peer-a".into(),
+            kind: V2RealtimeSignalKind::IceCandidate as i32,
+            revision: offer_revision,
+            payload: encode_realtime_signal_payload(shared_session_id, b"candidate:host")
+                .expect("ICE envelope"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("matching ICE is queued provisionally");
+
+    {
+        let manager = state.realtime.lock().await;
+        let binding = manager
+            .provisional
+            .get(realtime_id)
+            .expect("provisional binding");
+        assert_eq!(binding.ice_candidates.len(), 1);
+        assert!(manager.sessions.get(realtime_id).is_none());
+    }
+
+    let now_ms = crate::events::unix_timestamp_ms().max(0) as u64;
+    let request = ScreenShareConsentV2 {
+        schema_version: 2,
+        operation_id: "operation-a".into(),
+        realtime_id: realtime_id.into(),
+        issued_at_ms: now_ms,
+        expires_at_ms: now_ms + 120_000,
+        decision: ScreenShareConsentDecision::Request as i32,
+        sender_peer_id: "peer-a".into(),
+        purpose: ScreenShareConsentPurpose::ScreenShare as i32,
+        media: ScreenShareMediaKind::ScreenVideo as i32,
+        requires_acceptance: true,
+        action_revision: 1,
+        shared_session_instance_id: shared_session_id.into(),
+    };
+    handle_v2_realtime_signal(
+        &state,
+        &V2RealtimeSignal {
+            realtime_id: realtime_id.into(),
+            target_device_id: "local-device".into(),
+            source_device_id: "peer-a".into(),
+            kind: 6,
+            revision: 1,
+            payload: encode_realtime_signal_payload(shared_session_id, &request.encode_to_vec())
+                .expect("consent envelope"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("matching request is paired");
+
+    let event = event_rx.recv().await.expect("incoming offer event");
+    assert!(matches!(
+        event.payload,
+        Some(network_event::Payload::RealtimeIncomingSessionOffer(_))
+    ));
+    let manager = state.realtime.lock().await;
+    assert!(manager.sessions.get(realtime_id).is_none());
+    assert!(manager.provisional.contains_key(realtime_id));
+
+    let cancel = ScreenShareConsentV2 {
+        schema_version: 2,
+        operation_id: "operation-a".into(),
+        realtime_id: realtime_id.into(),
+        issued_at_ms: now_ms,
+        expires_at_ms: now_ms + 120_000,
+        decision: ScreenShareConsentDecision::Cancel as i32,
+        sender_peer_id: "peer-a".into(),
+        purpose: ScreenShareConsentPurpose::ScreenShare as i32,
+        media: ScreenShareMediaKind::ScreenVideo as i32,
+        requires_acceptance: true,
+        action_revision: 2,
+        shared_session_instance_id: shared_session_id.into(),
+    };
+    drop(manager);
+    handle_v2_realtime_signal(
+        &state,
+        &V2RealtimeSignal {
+            realtime_id: realtime_id.into(),
+            target_device_id: "local-device".into(),
+            source_device_id: "peer-a".into(),
+            kind: 6,
+            revision: 2,
+            payload: encode_realtime_signal_payload(shared_session_id, &cancel.encode_to_vec())
+                .expect("cancel envelope"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("matching CANCEL removes provisional state");
+    let manager = state.realtime.lock().await;
+    assert!(!manager.provisional.contains_key(realtime_id));
+}
+
+#[tokio::test]
+async fn unknown_v2_offer_without_relay_authenticated_source_fails_closed() {
+    let (state, _event_rx) = realtime_test_state().await;
+    register_realtime_peer(&state, "peer-a").await;
+    let realtime_id = "00112233445566778899aabbccddeeff";
+    let shared_session_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let mut caller = WebRtcPeer::new(WebRtcConfig::default()).expect("caller peer");
+    caller
+        .create_data_channel("ssh-mobile-realtime", Default::default())
+        .expect("data channel");
+    let offer = caller.create_offer().expect("offer");
+
+    let error = handle_v2_realtime_signal(
+        &state,
+        &V2RealtimeSignal {
+            realtime_id: realtime_id.into(),
+            target_device_id: "local-device".into(),
+            kind: V2RealtimeSignalKind::Offer as i32,
+            revision: caller.signaling_revision(),
+            payload: encode_realtime_signal_payload(shared_session_id, offer.sdp.as_bytes())
+                .expect("offer envelope"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect_err("unknown session without authenticated source must fail closed");
+    assert!(error.to_string().contains("no authenticated source"));
+    assert!(state.realtime.lock().await.provisional.is_empty());
+}
+
+#[tokio::test]
+async fn incoming_claim_answer_send_failure_rolls_back_exact_responder() {
+    let (state, _event_rx) = realtime_test_state().await;
+    let control = RecordingControl::new();
+    control.fail_signals.store(true, Ordering::Release);
+    *state.relay.control.write().await = Some(control);
+    register_realtime_peer(&state, "peer-a").await;
+
+    let realtime_id = "00112233445566778899aabbccddeeff";
+    let shared_session_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let mut caller = WebRtcPeer::new(WebRtcConfig::default()).expect("caller peer");
+    caller
+        .create_data_channel("ssh-mobile-realtime", Default::default())
+        .expect("data channel");
+    let offer = caller.create_offer().expect("offer");
+    let offer_revision = caller.signaling_revision();
+    handle_v2_realtime_signal(
+        &state,
+        &V2RealtimeSignal {
+            realtime_id: realtime_id.into(),
+            target_device_id: "local-device".into(),
+            source_device_id: "peer-a".into(),
+            kind: V2RealtimeSignalKind::Offer as i32,
+            revision: offer_revision,
+            payload: encode_realtime_signal_payload(shared_session_id, offer.sdp.as_bytes())
+                .expect("offer envelope"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("offer is retained provisionally");
+
+    let now_ms = crate::events::unix_timestamp_ms().max(0) as u64;
+    let request = ScreenShareConsentV2 {
+        schema_version: 2,
+        operation_id: "operation-claim-failure".into(),
+        realtime_id: realtime_id.into(),
+        issued_at_ms: now_ms,
+        expires_at_ms: now_ms + 120_000,
+        decision: ScreenShareConsentDecision::Request as i32,
+        sender_peer_id: "peer-a".into(),
+        purpose: ScreenShareConsentPurpose::ScreenShare as i32,
+        media: ScreenShareMediaKind::ScreenVideo as i32,
+        requires_acceptance: true,
+        action_revision: 1,
+        shared_session_instance_id: shared_session_id.into(),
+    };
+    handle_v2_realtime_signal(
+        &state,
+        &V2RealtimeSignal {
+            realtime_id: realtime_id.into(),
+            target_device_id: "local-device".into(),
+            source_device_id: "peer-a".into(),
+            kind: 6,
+            revision: 1,
+            payload: encode_realtime_signal_payload(shared_session_id, &request.encode_to_vec())
+                .expect("request envelope"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("request is paired with the offer");
+
+    let claim_token = state
+        .realtime
+        .lock()
+        .await
+        .provisional
+        .get(realtime_id)
+        .expect("paired provisional binding")
+        .claim_token
+        .clone();
+    let result = claim_incoming_offer(
+        Arc::clone(&state),
+        ClaimIncomingRealtimeOfferCommand {
+            realtime_id: realtime_id.into(),
+            peer_id: "peer-a".into(),
+            claim_token,
+        },
+    )
+    .await;
+
+    assert!(result.is_err(), "Answer send failure must fail the claim");
+    let manager = state.realtime.lock().await;
+    assert!(manager.sessions.get(realtime_id).is_none());
+    assert!(manager.provisional.get(realtime_id).is_none());
+}
+
+#[tokio::test]
+async fn late_ice_during_incoming_claim_is_applied_once_to_claim_generation() {
+    let (state, _event_rx) = realtime_test_state().await;
+    let control = RecordingControl::new();
+    *state.relay.control.write().await = Some(control.clone());
+    register_realtime_peer(&state, "peer-a").await;
+
+    let realtime_id = "00112233445566778899aabbccddeeff";
+    let shared_session_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let mut caller = WebRtcPeer::new(WebRtcConfig::default()).expect("caller peer");
+    caller
+        .create_data_channel("ssh-mobile-realtime", Default::default())
+        .expect("data channel");
+    let offer = caller.create_offer().expect("offer");
+    let offer_revision = caller.signaling_revision();
+    handle_v2_realtime_signal(
+        &state,
+        &V2RealtimeSignal {
+            realtime_id: realtime_id.into(),
+            target_device_id: "local-device".into(),
+            source_device_id: "peer-a".into(),
+            kind: V2RealtimeSignalKind::Offer as i32,
+            revision: offer_revision,
+            payload: encode_realtime_signal_payload(shared_session_id, offer.sdp.as_bytes())
+                .expect("offer envelope"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("offer is retained provisionally");
+
+    let now_ms = crate::events::unix_timestamp_ms().max(0) as u64;
+    let request = ScreenShareConsentV2 {
+        schema_version: 2,
+        operation_id: "operation-late-ice".into(),
+        realtime_id: realtime_id.into(),
+        issued_at_ms: now_ms,
+        expires_at_ms: now_ms + 120_000,
+        decision: ScreenShareConsentDecision::Request as i32,
+        sender_peer_id: "peer-a".into(),
+        purpose: ScreenShareConsentPurpose::ScreenShare as i32,
+        media: ScreenShareMediaKind::ScreenVideo as i32,
+        requires_acceptance: true,
+        action_revision: 1,
+        shared_session_instance_id: shared_session_id.into(),
+    };
+    handle_v2_realtime_signal(
+        &state,
+        &V2RealtimeSignal {
+            realtime_id: realtime_id.into(),
+            target_device_id: "local-device".into(),
+            source_device_id: "peer-a".into(),
+            kind: 6,
+            revision: 1,
+            payload: encode_realtime_signal_payload(shared_session_id, &request.encode_to_vec())
+                .expect("request envelope"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("request is paired with the offer");
+
+    let claim_token = state
+        .realtime
+        .lock()
+        .await
+        .provisional
+        .get(realtime_id)
+        .expect("paired provisional binding")
+        .claim_token
+        .clone();
+    let (answer_started, answer_release) = control.block_one_answer();
+    let claim_state = Arc::clone(&state);
+    let claim = tokio::spawn(async move {
+        claim_incoming_offer(
+            claim_state,
+            ClaimIncomingRealtimeOfferCommand {
+                realtime_id: realtime_id.into(),
+                peer_id: "peer-a".into(),
+                claim_token,
+            },
+        )
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), answer_started.notified())
+        .await
+        .expect("claim reached the blocked Answer send");
+
+    let candidate = b"candidate:1 1 UDP 1 127.0.0.1 9 typ host";
+    handle_v2_realtime_signal(
+        &state,
+        &V2RealtimeSignal {
+            realtime_id: realtime_id.into(),
+            target_device_id: "local-device".into(),
+            source_device_id: "peer-a".into(),
+            kind: V2RealtimeSignalKind::IceCandidate as i32,
+            revision: offer_revision,
+            payload: encode_realtime_signal_payload(shared_session_id, candidate)
+                .expect("late ICE envelope"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("late ICE is routed to the exact claiming responder generation");
+
+    answer_release.notify_one();
+    claim
+        .await
+        .expect("claim task joined")
+        .expect("claim succeeds after late ICE");
+
+    let manager = state.realtime.lock().await;
+    let session = manager
+        .sessions
+        .get(realtime_id)
+        .expect("claimed responder remains registered");
+    assert_eq!(session.seen_candidates.len(), 1);
+    assert_eq!(
+        session.seen_candidates.iter().next().map(Vec::as_slice),
+        Some(candidate.as_slice())
+    );
+    drop(manager);
+
+    let duplicate = handle_v2_realtime_signal(
+        &state,
+        &V2RealtimeSignal {
+            realtime_id: realtime_id.into(),
+            target_device_id: "local-device".into(),
+            source_device_id: "peer-a".into(),
+            kind: V2RealtimeSignalKind::IceCandidate as i32,
+            revision: offer_revision,
+            payload: encode_realtime_signal_payload(shared_session_id, candidate)
+                .expect("duplicate ICE envelope"),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(duplicate.is_err(), "late ICE must be admitted exactly once");
+}
+
+#[test]
+fn provisional_ice_reuses_formal_candidate_bounds() {
+    assert_eq!(MAX_PROVISIONAL_ICE_CANDIDATES, 128);
+    assert_eq!(MAX_PROVISIONAL_ICE_CANDIDATE_BYTES, MAX_ICE_CANDIDATE_BYTES);
+    assert_eq!(MAX_PROVISIONAL_ICE_TOTAL_BYTES, 256 * 1024);
+
+    let binding = || ProvisionalScreenShareBinding {
+        offer_id: "offer".into(),
+        claim_token: "claim".into(),
+        authenticated_peer_id: "peer-a".into(),
+        realtime_id: "00112233445566778899aabbccddeeff".into(),
+        shared_session_instance_id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+        offer_revision: 1,
+        offer_payload: b"offer".to_vec(),
+        ice_candidates: VecDeque::new(),
+        ice_total_bytes: 0,
+        request: None,
+        binding_expires_at_ms: 120_000,
+        effective_expires_at_ms: 120_000,
+        published_to_app: false,
+        state: ProvisionalBindingState::Pending,
+    };
+    let mut candidate_limit = binding();
+    for index in 0..MAX_PROVISIONAL_ICE_CANDIDATES {
+        candidate_limit
+            .push_ice(1, vec![index as u8])
+            .expect("candidate within count bound");
+    }
+    assert!(candidate_limit.push_ice(1, vec![2]).is_err());
+    assert!(binding()
+        .push_ice(1, vec![1; MAX_PROVISIONAL_ICE_CANDIDATE_BYTES + 1])
+        .is_err());
+
+    let mut total_limit = binding();
+    for index in 0..(MAX_PROVISIONAL_ICE_TOTAL_BYTES / MAX_PROVISIONAL_ICE_CANDIDATE_BYTES) {
+        total_limit
+            .push_ice(1, vec![index as u8; MAX_PROVISIONAL_ICE_CANDIDATE_BYTES])
+            .expect("candidate within total byte bound");
+    }
+    assert!(total_limit.push_ice(1, vec![2]).is_err());
 }
 
 async fn register_realtime_peer(state: &RuntimeState, peer_id: &str) {

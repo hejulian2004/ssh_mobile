@@ -1,4 +1,4 @@
-> Last updated: 2026-08-30
+> Last updated: 2026-09-12
 
 # SDK Architecture
 
@@ -67,3 +67,15 @@ Ownership and boundaries:
 
 Full rationale: [Network design](../../docs/网络传输SDK架构设计_最终版.md) and
 the precise [ADRs](../../docs/adr/).
+
+## PR74 Realtime binding
+
+The SDK/App adapter boundary is intentionally asymmetric. Native owns raw SDP,
+ICE, pending-offer handles, PeerConnection, and provisional binding; Dart sees
+only `RealtimeIncomingSessionOffer` metadata and an opaque token. The adapter
+implements `RealtimeIncomingSessionBackend`; `claimIncomingSession` creates and
+registers the exact `_RealtimeSession` before sending the native claim command.
+Every accepted state event and full snapshot is folded into the session's
+normalized `currentSnapshot`/`snapshots` projection, allowing App code to wait
+for Negotiating + generation + shared-session identity without the old
+start/Connected consent deadlock.
