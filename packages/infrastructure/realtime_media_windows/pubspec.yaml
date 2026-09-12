@@ -1,0 +1,26 @@
+name: realtime_media_windows
+description: Windows-native lifecycle adapter boundary for realtime screen media.
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: '>=3.12.0 <4.0.0'
+  flutter: '>=3.44.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  realtime_media:
+    path: ../realtime_media
+
+flutter:
+  plugin:
+    platforms:
+      windows:
+        pluginClass: RealtimeMediaWindowsPlugin
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  test: 1.31.1
+  flutter_test:
+    sdk: flutter

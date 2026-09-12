@@ -31,6 +31,7 @@ fn media_endpoint_driver_requires_a_current_matching_realtime_session() {
     manager.insert_existing_session(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
             peer: None,
@@ -69,6 +70,7 @@ async fn delayed_old_generation_cannot_create_an_endpoint_on_a_replacement_sessi
         manager.insert_new_session(
             realtime_id.into(),
             RealtimeSession {
+                shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: peer_id.into(),
                 connection_session_id: None,
                 peer: None,
@@ -97,6 +99,7 @@ async fn delayed_old_generation_cannot_create_an_endpoint_on_a_replacement_sessi
         manager.insert_new_session(
             realtime_id.into(),
             RealtimeSession {
+                shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: peer_id.into(),
                 connection_session_id: None,
                 peer: None,
@@ -151,6 +154,7 @@ async fn media_endpoints_bridge_native_h264_without_exposing_a_peer_handle() {
     state.realtime.lock().await.insert_new_session(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: peer_id.into(),
             connection_session_id: None,
             peer: None,
@@ -271,6 +275,7 @@ fn runtime_stop_revokes_live_media_endpoints_before_runtime_state_is_released() 
         state.realtime.lock().await.insert_new_session(
             realtime_id.into(),
             RealtimeSession {
+                shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: peer_id.into(),
                 connection_session_id: None,
                 peer: None,
@@ -346,6 +351,7 @@ async fn connection_session_loss_invalidates_bound_media_endpoints() {
     state.realtime.lock().await.insert_new_session(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: peer_id.into(),
             connection_session_id: Some(connection_session_id),
             peer: None,
@@ -403,6 +409,7 @@ async fn realtime_snapshot_carries_authoritative_state_and_revision_after_connec
         manager.sessions.insert(
             realtime_id.into(),
             RealtimeSession {
+                shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: "peer-a".into(),
                 connection_session_id: None,
                 peer: None,
@@ -454,6 +461,7 @@ async fn realtime_io_event_matrix_maps_lifecycle_and_failure_boundaries() {
         manager.sessions.insert(
             realtime_id.into(),
             RealtimeSession {
+                shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: "peer-a".into(),
                 connection_session_id: None,
                 peer: None,
@@ -573,6 +581,7 @@ async fn realtime_session_io_removes_owner_after_driver_failure() {
     state.realtime.lock().await.insert_new_session(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
             peer: None,
@@ -742,6 +751,7 @@ fn offer_answer_and_stale_revision_are_session_bound() {
     caller_manager.sessions.insert(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-b".into(),
             connection_session_id: None,
             peer: Some(caller),
@@ -944,6 +954,7 @@ async fn transport_loss_closes_realtime_session_and_reestablish_uses_a_fresh_pee
         realtime_id,
         "peer-a",
         InboundSignal {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             kind: RealtimeSignalKind::WebRtcOffer,
             revision: offer_revision,
             payload: offer.sdp.into_bytes(),
@@ -991,6 +1002,7 @@ async fn transport_loss_closes_realtime_session_and_reestablish_uses_a_fresh_pee
         realtime_id,
         "peer-a",
         InboundSignal {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             kind: RealtimeSignalKind::WebRtcOffer,
             revision: offer2_revision,
             payload: offer2.sdp.into_bytes(),
@@ -1031,6 +1043,7 @@ fn close_for_connection_session_only_affects_bound_realtime_sessions() {
         manager.sessions.insert(
             id.to_string(),
             RealtimeSession {
+                shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: peer_id.to_string(),
                 connection_session_id,
                 peer: Some(
@@ -1173,6 +1186,11 @@ async fn realtime_test_state() -> (
     )
 }
 
+fn test_signal_payload(payload: &[u8]) -> Vec<u8> {
+    encode_realtime_signal_payload("00112233445566778899aabbccddeeff", payload)
+        .expect("valid test realtime signal envelope")
+}
+
 #[tokio::test]
 async fn inbound_v2_signal_uses_established_realtime_peer_binding_not_target() {
     let (state, _event_rx) = realtime_test_state().await;
@@ -1194,6 +1212,7 @@ async fn inbound_v2_signal_uses_established_realtime_peer_binding_not_target() {
     state.realtime.lock().await.sessions.insert(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
             peer: Some(caller),
@@ -1213,7 +1232,7 @@ async fn inbound_v2_signal_uses_established_realtime_peer_binding_not_target() {
             target_device_id: "local-device-b".into(),
             kind: V2RealtimeSignalKind::Answer as i32,
             revision: offer_revision + 1,
-            payload: answer.sdp.into_bytes(),
+            payload: test_signal_payload(&answer.sdp.into_bytes()),
         },
     )
     .await;
@@ -1224,6 +1243,139 @@ async fn inbound_v2_signal_uses_established_realtime_peer_binding_not_target() {
         "peer-a",
         "the authenticated sender is the remote WebRTC peer"
     );
+}
+
+#[tokio::test]
+async fn delayed_consent_from_previous_generation_is_rejected_after_reconnect() {
+    let (state, _event_rx) = realtime_test_state().await;
+    register_realtime_peer(&state, "peer-a").await;
+    let realtime_id = "00112233445566778899aabbccddeeff";
+    let old_shared_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let current_shared_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    {
+        let mut manager = state.realtime.lock().await;
+        manager.insert_new_session(
+            realtime_id.into(),
+            RealtimeSession {
+                shared_session_instance_id: old_shared_id.into(),
+                peer_id: "peer-a".into(),
+                connection_session_id: None,
+                peer: None,
+                driver: None,
+                revision: 1,
+                remote_revision: 0,
+                ice_revision: 1,
+                seen_candidates: HashSet::new(),
+            },
+        );
+        let old_generation = manager
+            .session_generation(realtime_id)
+            .expect("old generation");
+        manager.remove_session(realtime_id);
+        manager.insert_new_session(
+            realtime_id.into(),
+            RealtimeSession {
+                shared_session_instance_id: current_shared_id.into(),
+                peer_id: "peer-a".into(),
+                connection_session_id: None,
+                peer: None,
+                driver: None,
+                revision: 1,
+                remote_revision: 0,
+                ice_revision: 1,
+                seen_candidates: HashSet::new(),
+            },
+        );
+        let current_generation = manager
+            .session_generation(realtime_id)
+            .expect("current generation");
+        assert_ne!(old_generation, current_generation);
+    }
+
+    let delayed_request = ScreenShareConsentV2 {
+        schema_version: 2,
+        operation_id: "operation-old".into(),
+        realtime_id: realtime_id.into(),
+        issued_at_ms: 1_000,
+        expires_at_ms: 61_000,
+        decision: ScreenShareConsentDecision::Request as i32,
+        sender_peer_id: "peer-a".into(),
+        purpose: ScreenShareConsentPurpose::ScreenShare as i32,
+        media: ScreenShareMediaKind::ScreenVideo as i32,
+        requires_acceptance: true,
+        action_revision: 1,
+        shared_session_instance_id: old_shared_id.into(),
+    }
+    .encode_to_vec();
+    let error = handle_realtime_signal(
+        &state,
+        RealtimeSignalKind::ScreenShareConsent,
+        realtime_id,
+        "peer-a",
+        1,
+        old_shared_id.into(),
+        delayed_request,
+    )
+    .await
+    .expect_err("a delayed consent from the prior session must be rejected");
+    assert!(error
+        .to_string()
+        .contains("session instance does not match"));
+    assert_eq!(
+        state.realtime.lock().await.sessions[realtime_id].shared_session_instance_id,
+        current_shared_id
+    );
+}
+
+#[test]
+fn screen_share_consent_freshness_rejects_future_or_expired_payloads() {
+    let now_ms = 1_735_732_800_000_u64;
+    let realtime_id = "00112233445566778899aabbccddeeff";
+    let shared_session_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    let payload = |issued_at_ms: u64, expires_at_ms: u64| {
+        ScreenShareConsentV2 {
+            schema_version: 2,
+            operation_id: "operation-a".into(),
+            realtime_id: realtime_id.into(),
+            issued_at_ms,
+            expires_at_ms,
+            decision: ScreenShareConsentDecision::Request as i32,
+            sender_peer_id: "peer-a".into(),
+            purpose: ScreenShareConsentPurpose::ScreenShare as i32,
+            media: ScreenShareMediaKind::ScreenVideo as i32,
+            requires_acceptance: true,
+            action_revision: 1,
+            shared_session_instance_id: shared_session_id.into(),
+        }
+        .encode_to_vec()
+    };
+
+    assert!(validate_screen_share_consent_at(
+        &payload(now_ms, now_ms + 120_000),
+        realtime_id,
+        Some("peer-a"),
+        Some(shared_session_id),
+        now_ms,
+    )
+    .is_ok());
+    assert!(validate_screen_share_consent_at(
+        &payload(now_ms + 30_001, now_ms + 150_001),
+        realtime_id,
+        Some("peer-a"),
+        Some(shared_session_id),
+        now_ms,
+    )
+    .is_err());
+    assert!(validate_screen_share_consent_at(
+        &payload(now_ms - 120_000, now_ms),
+        realtime_id,
+        Some("peer-a"),
+        Some(shared_session_id),
+        now_ms,
+    )
+    .is_err());
 }
 
 async fn register_realtime_peer(state: &RuntimeState, peer_id: &str) {
@@ -1270,6 +1422,8 @@ async fn signaling_flows_over_v2_control_plane_and_transport_loss_then_reestabli
     assert_eq!(first_calls[0].target_device_id, "peer-a");
     // 全新 PeerConnection 的计数从该会话自己的起点重启（create_offer → revision 1）。
     assert_eq!(first_calls[0].revision, FRESH_OFFER_REVISION);
+    let (first_shared_id, _) = decode_realtime_signal_payload(&first_calls[0].payload)
+        .expect("first offer uses the shared session envelope");
     let driver1 = state.realtime.lock().await.sessions[realtime_id]
         .driver
         .clone()
@@ -1342,6 +1496,12 @@ async fn signaling_flows_over_v2_control_plane_and_transport_loss_then_reestabli
     assert_eq!(
         all_calls[1].revision, FRESH_OFFER_REVISION,
         "new session restarts its counters"
+    );
+    let (second_shared_id, _) = decode_realtime_signal_payload(&all_calls[1].payload)
+        .expect("reconnected offer uses the shared session envelope");
+    assert_ne!(
+        first_shared_id, second_shared_id,
+        "reconnect must use a fresh cross-device session instance"
     );
     assert_ne!(
         all_calls[0].payload, all_calls[1].payload,
@@ -1513,6 +1673,7 @@ async fn healthy_realtime_survives_environment_reprobe() {
     state.realtime.lock().await.sessions.insert(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
             peer: Some(peer),
@@ -1593,10 +1754,16 @@ fn realtime_signal_kind_mapping_and_owner_errors_are_explicit() {
         ),
         (RealtimeSignalKind::WebRtcClose, V2RealtimeSignalKind::Close),
     ] {
-        assert_eq!(to_v2_signal_kind(native), v2);
+        assert_eq!(to_v2_signal_kind(native), v2 as i32);
     }
+    assert_eq!(
+        to_v2_signal_kind(RealtimeSignalKind::ScreenShareConsent),
+        6,
+        "Network V2 consent uses a forward-compatible Relay wire kind"
+    );
 
     let mut empty = RealtimeSession {
+        shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
         peer_id: "peer-a".into(),
         connection_session_id: None,
         peer: None,
@@ -1630,6 +1797,7 @@ async fn realtime_peer_and_session_helpers_fail_closed_and_remove_exact_owner() 
     state.realtime.lock().await.sessions.insert(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
             peer: Some(WebRtcPeer::new(WebRtcConfig::default()).unwrap()),
@@ -1684,6 +1852,7 @@ async fn stale_realtime_cleanup_does_not_remove_a_replacement_driver() {
     state.realtime.lock().await.sessions.insert(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
             peer: None,
@@ -1721,6 +1890,7 @@ async fn realtime_manager_close_all_and_connection_close_are_owner_scoped() {
         manager.sessions.insert(
             id.into(),
             RealtimeSession {
+                shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: peer.into(),
                 connection_session_id: session,
                 peer: Some(WebRtcPeer::new(WebRtcConfig::default()).unwrap()),
@@ -1740,6 +1910,7 @@ async fn realtime_manager_close_all_and_connection_close_are_owner_scoped() {
             "peer-a".into(),
             2,
             0,
+            "00112233445566778899aabbccddeeff".into(),
         )]
     );
     assert_eq!(manager.sessions.len(), 2);
@@ -1751,6 +1922,7 @@ async fn realtime_manager_close_all_and_connection_close_are_owner_scoped() {
 async fn realtime_signal_route_reports_missing_control_plane() {
     let (state, _event_rx) = realtime_test_state().await;
     let signal = OutboundSignal {
+        shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
         realtime_id: "00112233445566778899aabbccddeeff".into(),
         peer_id: "peer-a".into(),
         kind: RealtimeSignalKind::WebRtcOffer,
@@ -1791,7 +1963,7 @@ async fn realtime_command_boundaries_reject_invalid_identity_peer_and_revision()
             peer_id: "missing-peer".into(),
             kind: RealtimeSignalKind::WebRtcOffer as i32,
             revision: 1,
-            payload: b"offer".to_vec(),
+            payload: test_signal_payload(b"offer"),
         },
     )
     .await
@@ -1834,6 +2006,7 @@ async fn realtime_command_boundaries_reject_invalid_identity_peer_and_revision()
     state.realtime.lock().await.sessions.insert(
         valid_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
             peer: None,
@@ -1901,7 +2074,7 @@ async fn realtime_command_boundaries_reject_invalid_identity_peer_and_revision()
             realtime_id: valid_id.into(),
             kind: 99,
             revision: 4,
-            payload: b"offer".to_vec(),
+            payload: test_signal_payload(b"offer"),
             ..Default::default()
         },
     )
@@ -1943,6 +2116,7 @@ async fn stop_realtime_ignores_close_signal_loss_after_removing_owner() {
     state.realtime.lock().await.sessions.insert(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
             peer: None,
@@ -1971,6 +2145,7 @@ async fn v2_signal_rejects_an_empty_established_peer_binding() {
     state.realtime.lock().await.sessions.insert(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: String::new(),
             connection_session_id: None,
             peer: None,
@@ -2058,6 +2233,7 @@ fn apply_signal_rejects_unknown_peer_and_restores_failed_offer_state() {
         realtime_id,
         "peer-a",
         InboundSignal {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             kind: RealtimeSignalKind::WebRtcAnswer,
             revision: 1,
             payload: b"answer".to_vec(),
@@ -2075,6 +2251,7 @@ fn apply_signal_rejects_unknown_peer_and_restores_failed_offer_state() {
         realtime_id,
         "peer-a",
         InboundSignal {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             kind: RealtimeSignalKind::WebRtcOffer,
             revision: 1,
             payload: b"not-an-sdp".to_vec(),
@@ -2091,6 +2268,7 @@ fn apply_signal_rejects_unknown_peer_and_restores_failed_offer_state() {
     manager.sessions.insert(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
             peer: Some(WebRtcPeer::new(WebRtcConfig::default()).expect("peer")),
@@ -2106,6 +2284,7 @@ fn apply_signal_rejects_unknown_peer_and_restores_failed_offer_state() {
         realtime_id,
         "peer-b",
         InboundSignal {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             kind: RealtimeSignalKind::WebRtcAnswer,
             revision: 2,
             payload: b"not-an-answer".to_vec(),
@@ -2130,6 +2309,7 @@ async fn send_realtime_signal_routes_valid_revision_and_emits_event() {
     state.realtime.lock().await.sessions.insert(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
             peer: None,
@@ -2160,7 +2340,10 @@ async fn send_realtime_signal_routes_valid_revision_and_emits_event() {
     assert_eq!(calls[0].target_device_id, "peer-a");
     assert_eq!(calls[0].kind, V2RealtimeSignalKind::Offer);
     assert_eq!(calls[0].revision, 4);
-    assert_eq!(calls[0].payload, b"offer");
+    let (shared_id, payload) = decode_realtime_signal_payload(&calls[0].payload)
+        .expect("outbound signal uses the shared session envelope");
+    assert_eq!(shared_id, "00112233445566778899aabbccddeeff");
+    assert_eq!(payload, b"offer");
 
     let event = event_rx.try_recv().expect("signal event");
     let Some(network_event::Payload::RealtimeSignal(event)) = event.payload else {
@@ -2189,6 +2372,7 @@ async fn stop_realtime_session_closes_session_routes_close_and_emits_event() {
     state.realtime.lock().await.insert_new_session(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
             peer: None,
@@ -2246,7 +2430,10 @@ async fn stop_realtime_session_closes_session_routes_close_and_emits_event() {
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].kind, V2RealtimeSignalKind::Close);
     assert_eq!(calls[0].revision, 8);
-    assert_eq!(calls[0].payload, b"close");
+    let (shared_id, payload) = decode_realtime_signal_payload(&calls[0].payload)
+        .expect("close signal uses the shared session envelope");
+    assert_eq!(shared_id, "00112233445566778899aabbccddeeff");
+    assert_eq!(payload, b"close");
 
     let event = event_rx.try_recv().expect("closed state event");
     let Some(network_event::Payload::RealtimeState(event)) = event.payload else {
@@ -2267,6 +2454,7 @@ async fn realtime_signal_route_rejects_disconnected_control_and_forwards_local_c
     state.realtime.lock().await.sessions.insert(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
             peer: None,
@@ -2282,6 +2470,7 @@ async fn realtime_signal_route_rejects_disconnected_control_and_forwards_local_c
     let error = send_signal(
         &state,
         &OutboundSignal {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
             kind: RealtimeSignalKind::WebRtcOffer,
@@ -2355,13 +2544,14 @@ fn realtime_validation_and_wire_kind_mapping_cover_all_signal_boundaries() {
         ),
         (RealtimeSignalKind::WebRtcClose, V2RealtimeSignalKind::Close),
     ] {
-        assert_eq!(to_v2_signal_kind(kind), expected);
+        assert_eq!(to_v2_signal_kind(kind), expected as i32);
     }
 }
 
 #[test]
 fn realtime_session_without_peer_owner_fails_closed() {
     let mut session = RealtimeSession {
+        shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
         peer_id: "peer-a".into(),
         connection_session_id: None,
         peer: None,
@@ -2385,6 +2575,7 @@ fn realtime_close_and_unsupported_signal_boundaries_fail_closed() {
         realtime_id,
         "peer-a",
         InboundSignal {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             kind: RealtimeSignalKind::WebRtcClose,
             revision: 1,
             payload: Vec::new(),
@@ -2400,6 +2591,7 @@ fn realtime_close_and_unsupported_signal_boundaries_fail_closed() {
     manager.sessions.insert(
         realtime_id.into(),
         RealtimeSession {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
             peer: Some(WebRtcPeer::new(WebRtcConfig::default()).expect("peer")),
@@ -2415,6 +2607,7 @@ fn realtime_close_and_unsupported_signal_boundaries_fail_closed() {
         realtime_id,
         "peer-b",
         InboundSignal {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             kind: RealtimeSignalKind::WebRtcClose,
             revision: 4,
             payload: Vec::new(),
@@ -2431,6 +2624,7 @@ fn realtime_close_and_unsupported_signal_boundaries_fail_closed() {
         realtime_id,
         "peer-a",
         InboundSignal {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             kind: RealtimeSignalKind::WebRtcClose,
             revision: 2,
             payload: Vec::new(),
@@ -2448,6 +2642,7 @@ fn realtime_close_and_unsupported_signal_boundaries_fail_closed() {
         realtime_id,
         "peer-a",
         InboundSignal {
+            shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             kind: RealtimeSignalKind::Unspecified,
             revision: 4,
             payload: Vec::new(),

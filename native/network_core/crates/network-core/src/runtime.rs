@@ -1695,6 +1695,27 @@ impl NetworkRuntime {
         crate::realtime_media::release_endpoint(&state, endpoint_id)
     }
 
+    /// Validates a platform-owner capability against the existing endpoint
+    /// lease without changing queue or lifecycle state.
+    pub fn validate_realtime_media_endpoint(
+        &self,
+        endpoint_id: crate::realtime_media::RealtimeMediaEndpointId,
+        realtime_id: &str,
+        peer_id: &str,
+        generation: u64,
+        direction: crate::realtime_media::RealtimeMediaDirection,
+    ) -> Result<(), crate::realtime_media::RealtimeMediaError> {
+        let state = self.media_state()?;
+        crate::realtime_media::validate_endpoint(
+            &state,
+            endpoint_id,
+            realtime_id,
+            peer_id,
+            generation,
+            direction,
+        )
+    }
+
     /// Submits a native-resident encoded H.264 access unit to a send endpoint.
     pub fn push_realtime_media_h264(
         &self,
@@ -1714,6 +1735,50 @@ impl NetworkRuntime {
     {
         let state = self.media_state()?;
         crate::realtime_media::pop_endpoint(&state, endpoint_id)
+    }
+
+    /// Requests a keyframe through a generation-bound native media owner.
+    ///
+    /// The request is coalesced by the native screen-video queue; no media
+    /// payload or WebRTC object crosses the endpoint boundary.
+    pub fn request_realtime_media_keyframe(
+        &self,
+        endpoint_id: crate::realtime_media::RealtimeMediaEndpointId,
+    ) -> Result<(), crate::realtime_media::RealtimeMediaError> {
+        let state = self.media_state()?;
+        crate::realtime_media::request_keyframe(&state, endpoint_id)
+    }
+
+    /// Resets a generation-bound receive decoder and drops stale access units.
+    pub fn reset_realtime_media_decoder(
+        &self,
+        endpoint_id: crate::realtime_media::RealtimeMediaEndpointId,
+    ) -> Result<(), crate::realtime_media::RealtimeMediaError> {
+        let state = self.media_state()?;
+        crate::realtime_media::reset_decoder(&state, endpoint_id)
+    }
+
+    /// Applies one bounded sender target through the native H.264 peer owner.
+    /// Platform adapters apply the same target to their hardware encoder while
+    /// the peer retains it for this generation.
+    pub fn apply_realtime_media_adaptation(
+        &self,
+        endpoint_id: crate::realtime_media::RealtimeMediaEndpointId,
+        target: network_webrtc::H264AdaptationTarget,
+    ) -> Result<(), crate::realtime_media::RealtimeMediaError> {
+        let state = self.media_state()?;
+        crate::realtime_media::apply_adaptation(&state, endpoint_id, target)
+    }
+
+    /// Reads bounded native queue/recovery counters for one generation-bound
+    /// screen-media endpoint. The snapshot contains no media payload.
+    pub fn read_realtime_media_stats(
+        &self,
+        endpoint_id: crate::realtime_media::RealtimeMediaEndpointId,
+    ) -> Result<network_webrtc::H264ScreenVideoStats, crate::realtime_media::RealtimeMediaError>
+    {
+        let state = self.media_state()?;
+        crate::realtime_media::stats(&state, endpoint_id)
     }
 
     /// 返回原生轮询边界使用的 Tokio handle。

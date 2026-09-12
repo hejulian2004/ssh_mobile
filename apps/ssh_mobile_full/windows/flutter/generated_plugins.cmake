@@ -10,6 +10,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   gal
   nsd_windows
   permission_handler_windows
+  realtime_media_windows
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

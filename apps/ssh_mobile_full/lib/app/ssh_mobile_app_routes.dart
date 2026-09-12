@@ -96,14 +96,17 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
                   },
                   initialRoute: AppShellRouteNames.root,
                   onGenerateRoute: (settings) {
-                    assert(
-                      settings.name == null ||
-                          settings.name == AppShellRouteNames.root ||
-                          settings.name == AppShellRouteNames.performance ||
-                          AppRouteContributionCatalog.contains(settings.name),
-                      'Feature route is missing a public contribution: '
-                      '${settings.name}',
-                    );
+                    final routeName = settings.name;
+                    if (routeName != null &&
+                        routeName != AppShellRouteNames.root &&
+                        routeName != AppShellRouteNames.performance &&
+                        routeName != AppShellRouteNames.screenShare &&
+                        !AppRouteContributionCatalog.contains(routeName)) {
+                      throw StateError(
+                        'Feature route is missing a public contribution: '
+                        '$routeName',
+                      );
+                    }
                     switch (settings.name) {
                       case AppShellRouteNames.root:
                         return MaterialPageRoute(
@@ -165,6 +168,19 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
                         return MaterialPageRoute(
                           builder: (_) => _createHomeRouteScopeForState(
                             const HomeScreen(initialIndex: 3),
+                          ),
+                        );
+                      case AppShellRouteNames.screenShare:
+                        final arguments = settings.arguments;
+                        if (arguments is! AppScreenShareRouteArguments) {
+                          throw ArgumentError(
+                            'Screen-share route requires typed arguments.',
+                          );
+                        }
+                        return MaterialPageRoute(
+                          builder: (_) => AppScreenShareRouteScope(
+                            arguments: arguments,
+                            resources: _runtime.realtimeMediaResources,
                           ),
                         );
                       case feature_ai.AiRouteNames.skills:

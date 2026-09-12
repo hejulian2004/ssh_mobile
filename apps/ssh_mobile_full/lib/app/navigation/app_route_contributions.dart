@@ -15,6 +15,9 @@ abstract final class AppShellRouteNames {
 
   /// 兼容旧入口的性能监控 Home 子页面路由。
   static const performance = '/performance';
+
+  /// Explicit screen-share consent/media route.
+  static const screenShare = '/screen-share';
 }
 
 /// App Shell 聚合 Feature 公共 API 暴露的路由元数据。

@@ -167,6 +167,7 @@ extension RealtimeMediaSessionRelease on RealtimeMediaSessionController {
       endpoint.surface?.release();
       endpoint.state = RealtimeMediaEndpointState.released;
       _endpoints.remove(endpoint.id);
+      discardAdaptationController(endpoint.id);
     } else {
       // The native lease is still owned by this controller. Retain its ID and
       // mark the endpoint failed so a later release call can retry cleanup.

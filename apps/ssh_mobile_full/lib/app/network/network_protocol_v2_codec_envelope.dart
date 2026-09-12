@@ -10,6 +10,7 @@ NetworkProtocolFrame _decodeEvent(Uint8List bytes) {
   var commandAccepted = false;
   NetworkError? commandError;
   NetworkEvent? event;
+  RealtimeConsent? screenShareConsent;
   SshStreamDataReceivedEvent? sshStreamData;
   SshStreamClosedEvent? sshStreamClosed;
 
@@ -111,6 +112,9 @@ NetworkProtocolFrame _decodeEvent(Uint8List bytes) {
               timestampMs,
               reader.bytes(field.wireType),
             );
+      case 22:
+        final signal = _decodeRealtimeSignal(reader.bytes(field.wireType));
+        screenShareConsent = signal.consent;
       default:
         reader.skip(field.wireType);
     }
@@ -122,6 +126,7 @@ NetworkProtocolFrame _decodeEvent(Uint8List bytes) {
     commandAccepted: commandAccepted,
     commandError: commandError,
     event: event,
+    screenShareConsent: screenShareConsent,
     sshStreamData: sshStreamData,
     sshStreamClosed: sshStreamClosed,
   );

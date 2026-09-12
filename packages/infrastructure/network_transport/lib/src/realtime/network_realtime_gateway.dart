@@ -44,6 +44,31 @@ abstract interface class NetworkRealtimeGateway {
   NativeOperationStatus releaseMediaEndpoint(
     NativeRealtimeMediaEndpointId endpointId,
   );
+
+  /// Opens the native-only platform owner for an existing endpoint lease.
+  NativeRealtimeMediaOwnerOpenResult openMediaOwner({
+    required NativeRealtimeMediaEndpointId endpointId,
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  });
+
+  /// Closes the platform owner without finalizing the endpoint lease.
+  NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token);
+}
+
+/// Optional extension for authenticated, typed screen-share consent. Keeping
+/// it separate means older/synthetic gateways remain valid while production
+/// gateways can add the new signal kind without exposing protocol bytes to a
+/// Feature.
+abstract interface class NetworkRealtimeConsentGateway {
+  NativeCommandTicket sendScreenShareConsent({
+    required String realtimeId,
+    required String peerId,
+    required int revision,
+    required Uint8List payload,
+  });
 }
 
 /// Identity and queue-level status for one native Realtime command.
@@ -64,7 +89,8 @@ final class NativeCommandTicket {
 }
 
 /// Runtime-owned implementation backed by a borrowed command gateway.
-final class RuntimeNetworkRealtimeGateway implements NetworkRealtimeGateway {
+final class RuntimeNetworkRealtimeGateway
+    implements NetworkRealtimeGateway, NetworkRealtimeConsentGateway {
   RuntimeNetworkRealtimeGateway(this._gateway, [this._media]);
 
   final NetworkCommandGateway _gateway;
@@ -147,6 +173,57 @@ final class RuntimeNetworkRealtimeGateway implements NetworkRealtimeGateway {
   ) =>
       _media?.releaseMediaEndpoint(endpointId) ??
       NativeOperationStatus.driverUnavailable;
+
+  @override
+  NativeRealtimeMediaOwnerOpenResult openMediaOwner({
+    required NativeRealtimeMediaEndpointId endpointId,
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  }) =>
+      _media?.openMediaOwner(
+        endpointId: endpointId,
+        realtimeId: realtimeId,
+        peerId: peerId,
+        generation: generation,
+        direction: direction,
+      ) ??
+      const NativeRealtimeMediaOwnerOpenResult(
+        status: NativeOperationStatus.driverUnavailable,
+      );
+
+  @override
+  NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token) =>
+      _media?.closeMediaOwner(token) ?? NativeOperationStatus.driverUnavailable;
+
+  @override
+  NativeCommandTicket sendScreenShareConsent({
+    required String realtimeId,
+    required String peerId,
+    required int revision,
+    required Uint8List payload,
+  }) {
+    final commandId = _nextCommandId('realtime-consent');
+    try {
+      return _send(
+        commandId: commandId,
+        command: NativeNetworkProtocol.sendRealtimeSignalCommand(
+          commandId: commandId,
+          realtimeId: realtimeId,
+          peerId: peerId,
+          kind: NativeRealtimeSignalKind.screenShareConsent,
+          revision: revision,
+          payload: payload,
+        ),
+      );
+    } on ArgumentError {
+      return NativeCommandTicket(
+        commandId: commandId,
+        queueStatus: NativeOperationStatus.invalidArgument,
+      );
+    }
+  }
 
   NativeCommandTicket _send({
     required String commandId,

@@ -18,6 +18,7 @@ workspace:
   - packages/features/feature_sftp
   - packages/features/feature_terminal
   - packages/features/feature_lan_share
+  - packages/features/feature_screen_share
   - packages/features/feature_mcp
   - packages/features/feature_ai
   - packages/features/feature_webview
@@ -25,6 +26,8 @@ workspace:
   - packages/infrastructure/network_transport
   - packages/infrastructure/network_sdk
   - packages/infrastructure/realtime_media
+  - packages/infrastructure/realtime_media_android
+  - packages/infrastructure/realtime_media_windows
   - packages/infrastructure/ssh_core
   - packages/infrastructure/ssh_mobile_network_native
 

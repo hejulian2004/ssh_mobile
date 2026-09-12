@@ -533,6 +533,7 @@ jobs:
           --scope=feature_connection
           --scope=feature_developer
           --scope=feature_lan_share
+          --scope=feature_screen_share
           --scope=feature_mcp
           --scope=feature_monitoring
           --scope=feature_playbook
@@ -548,6 +549,7 @@ jobs:
           --scope=feature_connection
           --scope=feature_developer
           --scope=feature_lan_share
+          --scope=feature_screen_share
           --scope=feature_mcp
           --scope=feature_monitoring
           --scope=feature_playbook
@@ -563,6 +565,7 @@ jobs:
           --scope=feature_connection
           --scope=feature_developer
           --scope=feature_lan_share
+          --scope=feature_screen_share
           --scope=feature_mcp
           --scope=feature_monitoring
           --scope=feature_playbook
@@ -1001,6 +1004,22 @@ jobs:
         run: flutter pub get
       - name: Install Full App dependencies
         run: flutter pub get
+      - name: Test realtime_media_android JVM unit tests
+        working-directory: apps/ssh_mobile_full/android
+        run: |
+          # The Flutter tool injects ignored Gradle wrapper files lazily when
+          # it runs a Gradle command. Prepare the same wrapper explicitly so
+          # this independent host-test step works on a fresh checkout.
+          flutter_root="${FLUTTER_ROOT:?Flutter SDK root is required}"
+          wrapper_source="$flutter_root/bin/cache/artifacts/gradle_wrapper"
+          if [[ ! -x ./gradlew || ! -f ./gradle/wrapper/gradle-wrapper.jar ]]; then
+            flutter precache --android
+            cp "$wrapper_source/gradlew" ./gradlew
+            cp "$wrapper_source/gradle/wrapper/gradle-wrapper.jar" \
+              ./gradle/wrapper/gradle-wrapper.jar
+            chmod +x ./gradlew
+          fi
+          ./gradlew :realtime_media_android:testDebugUnitTest --no-daemon --console=plain
       - name: Build Android debug APK
         run: flutter build apk --debug --no-pub
 

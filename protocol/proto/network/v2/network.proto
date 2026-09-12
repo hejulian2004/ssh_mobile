@@ -134,6 +134,28 @@ enum RealtimeSignalKind {
   REALTIME_SIGNAL_KIND_ICE_CANDIDATE = 3;
   REALTIME_SIGNAL_KIND_ICE_RESTART = 4;
   REALTIME_SIGNAL_KIND_WEBRTC_CLOSE = 5;
+  // Typed screen-share consent travels on the authenticated Realtime control
+  // route.  It is never a media/data-plane payload.
+  REALTIME_SIGNAL_KIND_SCREEN_SHARE_CONSENT = 6;
+}
+
+/// Versioned business decision carried by ScreenShareConsentV2.
+enum ScreenShareConsentDecision {
+  SCREEN_SHARE_CONSENT_DECISION_UNSPECIFIED = 0;
+  SCREEN_SHARE_CONSENT_DECISION_REQUEST = 1;
+  SCREEN_SHARE_CONSENT_DECISION_ACCEPT = 2;
+  SCREEN_SHARE_CONSENT_DECISION_REJECT = 3;
+  SCREEN_SHARE_CONSENT_DECISION_CANCEL = 4;
+}
+
+enum ScreenShareConsentPurpose {
+  SCREEN_SHARE_CONSENT_PURPOSE_UNSPECIFIED = 0;
+  SCREEN_SHARE_CONSENT_PURPOSE_SCREEN_SHARE = 1;
+}
+
+enum ScreenShareMediaKind {
+  SCREEN_SHARE_MEDIA_KIND_UNSPECIFIED = 0;
+  SCREEN_SHARE_MEDIA_KIND_SCREEN_VIDEO = 1;
 }
 
 enum DeliveryPolicyCode {
@@ -494,6 +516,9 @@ message RealtimeStateChangedEvent {
   // Native-owned media/session generation. This is independent from the
   // signaling revision and binds endpoint operations to one PeerConnection.
   uint64 generation = 6;
+  // Cross-device session instance identity used for consent replay isolation.
+  // This is independent from the process-local native generation.
+  string shared_session_instance_id = 7;
 }
 
 message RealtimeSignalEvent {
@@ -502,6 +527,34 @@ message RealtimeSignalEvent {
   RealtimeSignalKind kind = 3;
   uint64 revision = 4;
   bytes payload = 5;
+}
+
+// Typed/versioned screen-share consent payload carried by the dedicated
+// REALTIME_SIGNAL_KIND_SCREEN_SHARE_CONSENT signal.  The payload is bounded
+// metadata only; it never contains SDP, media bytes, credentials or handles.
+message ScreenShareConsentV2 {
+  uint32 schema_version = 1;
+  string operation_id = 2;
+  string realtime_id = 3;
+  uint64 issued_at_ms = 4;
+  uint64 expires_at_ms = 5;
+  ScreenShareConsentDecision decision = 6;
+  string sender_peer_id = 7;
+  ScreenShareConsentPurpose purpose = 8;
+  ScreenShareMediaKind media = 9;
+  bool requires_acceptance = 10;
+  uint64 action_revision = 11;
+  // Cross-device session instance identity; never use native generation here.
+  string shared_session_instance_id = 12;
+}
+
+// Native-only envelope for WebRTC signaling payloads. The relay forwards this
+// as opaque bytes; the native realtime owner unwraps it before handing SDP,
+// ICE or close bytes to WebRTC. This binds every signal to one shared session
+// instance without exposing process-local native generation on the wire.
+message RealtimeSignalEnvelope {
+  string shared_session_instance_id = 1;
+  bytes payload = 2;
 }
 
 // Realtime Session 稳定后发布的完整状态快照。
@@ -513,6 +566,8 @@ message RealtimeSnapshotEvent {
   NetworkError error = 5;
   // Native-owned media/session generation; never derive this from revision.
   uint64 generation = 6;
+  // Cross-device session instance identity used for consent replay isolation.
+  string shared_session_instance_id = 7;
 }
 
 message ChannelMessageEvent {

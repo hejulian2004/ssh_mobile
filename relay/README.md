@@ -1,4 +1,4 @@
-> Last updated: 2026-08-31
+> Last updated: 2026-09-08
 
 # SSH Mobile Control, Relay, and Admin Backend Services
 
@@ -31,6 +31,7 @@ The React + Vite + TypeScript administration console is in `../front/` and is se
 - `GET /healthz` — Service liveness probe (returns 204 No Content).
 - `POST /v2/devices/enroll` — Device enrollment with `protocol_version=2`.
 - `POST /v2/devices/refresh` — Device credential refresh with Ed25519 signature proof over V2 transcript.
+- `POST /v2/turn/credentials` — Device-authenticated, short-lived coturn REST credential; the shared secret remains server-only.
 - `GET /v2/control` — Long-lived WebSocket control plane (`RelayFrame` protobuf).
 - `GET /v2/relay/{reservation_id}` — Reservation-scoped WebSocket data plane (`RelayDataFrame` protobuf).
 

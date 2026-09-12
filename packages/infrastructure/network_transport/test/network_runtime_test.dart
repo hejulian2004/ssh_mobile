@@ -268,6 +268,7 @@ void main() {
       expect(state.realtimeId, '00112233445566778899aabbccddeeff');
       expect(state.peerId, 'peer-a');
       expect(state.state, NativeRealtimeSessionState.connected);
+      expect(state.sharedSessionInstanceId, '00112233445566778899aabbccddeeff');
       await runtime.dispose();
     },
   );
@@ -390,6 +391,21 @@ final class _FakeNativeNetworkHandle implements NativeNetworkHandle {
       : NativeOperationStatus.staleEndpoint;
 
   @override
+  NativeRealtimeMediaOwnerOpenResult openMediaOwner({
+    required NativeRealtimeMediaEndpointId endpointId,
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  }) => const NativeRealtimeMediaOwnerOpenResult(
+    status: NativeOperationStatus.driverUnavailable,
+  );
+
+  @override
+  NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token) =>
+      NativeOperationStatus.success;
+
+  @override
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
@@ -432,6 +448,9 @@ Uint8List _connectedRealtimeStateFrame() {
     0x03,
     0x30,
     0x01,
+    0x3a,
+    0x20,
+    ...'00112233445566778899aabbccddeeff'.codeUnits,
   ];
   return Uint8List.fromList(<int>[
     0x0a,

@@ -68,6 +68,7 @@ fn realtime_snapshot_event_round_trips_state_and_revision() {
         state: RealtimeSessionState::Connected as i32,
         revision: 7,
         generation: 11,
+        shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
         error: Some(NetworkError {
             code: NetworkErrorCode::IdentityConflict as i32,
             message: "identity conflict".into(),
@@ -84,6 +85,10 @@ fn realtime_snapshot_event_round_trips_state_and_revision() {
     assert_eq!(decoded.state, RealtimeSessionState::Connected as i32);
     assert_eq!(decoded.revision, 7);
     assert_eq!(decoded.generation, 11);
+    assert_eq!(
+        decoded.shared_session_instance_id,
+        "00112233445566778899aabbccddeeff"
+    );
     let error = decoded.error.expect("snapshot error");
     assert_eq!(error.code, NetworkErrorCode::IdentityConflict as i32);
     assert_eq!(error.retry_disposition, RetryDisposition::NoRetry as i32);
@@ -395,4 +400,42 @@ fn v2_public_error_codes_are_stable_and_distinct() {
     assert_eq!(NetworkErrorCode::ResourceLimit as i32, 18);
     assert_eq!(NetworkErrorCode::ResumeRejected as i32, 24);
     assert_eq!(NetworkErrorCode::StreamClosed as i32, 25);
+}
+
+#[test]
+fn screen_share_consent_wire_values_and_payload_round_trip() {
+    assert_eq!(RealtimeSignalKind::ScreenShareConsent as i32, 6);
+    assert_eq!(ScreenShareConsentDecision::Request as i32, 1);
+    assert_eq!(ScreenShareConsentDecision::Accept as i32, 2);
+    assert_eq!(ScreenShareConsentDecision::Reject as i32, 3);
+    assert_eq!(ScreenShareConsentDecision::Cancel as i32, 4);
+    assert_eq!(ScreenShareConsentPurpose::ScreenShare as i32, 1);
+    assert_eq!(ScreenShareMediaKind::ScreenVideo as i32, 1);
+
+    let consent = ScreenShareConsentV2 {
+        schema_version: 2,
+        operation_id: "operation-a".into(),
+        realtime_id: "00112233445566778899aabbccddeeff".into(),
+        issued_at_ms: 1_000,
+        expires_at_ms: 61_000,
+        decision: ScreenShareConsentDecision::Request as i32,
+        sender_peer_id: "peer-a".into(),
+        purpose: ScreenShareConsentPurpose::ScreenShare as i32,
+        media: ScreenShareMediaKind::ScreenVideo as i32,
+        requires_acceptance: true,
+        action_revision: 1,
+        shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
+    };
+    let decoded = ScreenShareConsentV2::decode(consent.encode_to_vec().as_slice())
+        .expect("decode consent payload");
+    assert_eq!(decoded.schema_version, 2);
+    assert_eq!(decoded.operation_id, "operation-a");
+    assert_eq!(decoded.realtime_id, "00112233445566778899aabbccddeeff");
+    assert_eq!(decoded.decision, ScreenShareConsentDecision::Request as i32);
+    assert!(decoded.requires_acceptance);
+    assert_eq!(decoded.action_revision, 1);
+    assert_eq!(
+        decoded.shared_session_instance_id,
+        "00112233445566778899aabbccddeeff"
+    );
 }

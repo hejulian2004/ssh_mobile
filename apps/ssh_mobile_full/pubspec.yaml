@@ -35,6 +35,8 @@ dependencies:
     path: ../../packages/features/feature_terminal
   feature_lan_share:
     path: ../../packages/features/feature_lan_share
+  feature_screen_share:
+    path: ../../packages/features/feature_screen_share
   feature_mcp:
     path: ../../packages/features/feature_mcp
   feature_ai:
@@ -52,6 +54,10 @@ dependencies:
     path: ../../packages/infrastructure/network_transport
   realtime_media:
     path: ../../packages/infrastructure/realtime_media
+  realtime_media_android:
+    path: ../../packages/infrastructure/realtime_media_android
+  realtime_media_windows:
+    path: ../../packages/infrastructure/realtime_media_windows
   ssh_core:
     path: ../../packages/infrastructure/ssh_core
   flutter_background_service: ^5.1.0

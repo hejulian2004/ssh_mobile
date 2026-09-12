@@ -130,6 +130,30 @@ pub(crate) trait DiscoveryControlPlane: Send + Sync {
         Box::pin(async move { Err(RelayError::NotConnected) })
     }
 
+    /// Send a WebRTC signaling frame using its raw Relay V2 wire kind.
+    ///
+    /// The default keeps legacy/test control-plane implementations compatible
+    /// for the frozen enum values.  Forward-compatible Network V2 values must
+    /// be implemented by the concrete Relay adapter because the frozen Relay
+    /// enum cannot represent them as a typed Rust variant.
+    fn signal_webrtc_wire_kind(
+        &self,
+        realtime_id: &str,
+        target_device_id: &str,
+        kind: i32,
+        revision: u64,
+        payload: &[u8],
+    ) -> Pin<Box<dyn Future<Output = Result<(), RelayError>> + Send + '_>> {
+        match network_relay::v2::RealtimeSignalKind::try_from(kind) {
+            Ok(kind) => self.signal_webrtc(realtime_id, target_device_id, kind, revision, payload),
+            Err(_) => Box::pin(async {
+                Err(RelayError::Protocol(
+                    "control plane does not support this forward-compatible signal kind".into(),
+                ))
+            }),
+        }
+    }
+
     /// 该 sink 是否把发布者分配的 request_id 原样带回 ACK。
     ///
     /// `RelayControlClient` 内部自行分配 wire request_id（`next_request_id`），故返回
@@ -247,6 +271,30 @@ impl DiscoveryControlPlane for RelayControlClient {
         let payload = payload.to_vec();
         Box::pin(async move {
             RelayControlClient::signal_webrtc(
+                self,
+                &realtime_id,
+                &target_device_id,
+                kind,
+                revision,
+                &payload,
+            )
+            .await
+        })
+    }
+
+    fn signal_webrtc_wire_kind(
+        &self,
+        realtime_id: &str,
+        target_device_id: &str,
+        kind: i32,
+        revision: u64,
+        payload: &[u8],
+    ) -> Pin<Box<dyn Future<Output = Result<(), RelayError>> + Send + '_>> {
+        let realtime_id = realtime_id.to_string();
+        let target_device_id = target_device_id.to_string();
+        let payload = payload.to_vec();
+        Box::pin(async move {
+            RelayControlClient::signal_webrtc_wire_kind(
                 self,
                 &realtime_id,
                 &target_device_id,

@@ -914,10 +914,21 @@ final class _FakeRealtimeSession implements RealtimeSession {
   int? get generation => null;
 
   @override
+  String? get sharedSessionInstanceId => null;
+
+  @override
   RealtimeSessionToken? get mediaToken => null;
 
   @override
   RealtimeAudioState get audioState => RealtimeAudioState.unavailable;
+
+  @override
+  Stream<RealtimeConsent> get consentEvents =>
+      const Stream<RealtimeConsent>.empty();
+
+  @override
+  Future<SdkResult<void>> sendConsent(RealtimeConsent consent) async =>
+      const SdkSuccess<void>(null);
 
   @override
   Future<SdkResult<void>> start() async => const SdkSuccess<void>(null);

@@ -293,7 +293,7 @@ void main() {
     r'^\s+- ((?:apps|packages)/[^\s]+)$',
     multiLine: true,
   ).allMatches(pubspec).map((match) => match.group(1)!).toList();
-  _expect(workspaceMembers.length == 22, 'Workspace Member 数量发生漂移');
+  _expect(workspaceMembers.length == 25, 'Workspace Member 数量发生漂移');
   for (final member in workspaceMembers) {
     _expect(
       Directory('${root.path}/$member').existsSync(),
@@ -457,6 +457,7 @@ const _featurePackageNames = <String>[
   'feature_connection',
   'feature_developer',
   'feature_lan_share',
+  'feature_screen_share',
   'feature_mcp',
   'feature_monitoring',
   'feature_playbook',

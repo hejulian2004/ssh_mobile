@@ -20,6 +20,7 @@ import (
 const (
 	defaultAddress                            = ":8080"
 	defaultCredentialTTL                      = 24 * time.Hour
+	defaultTurnCredentialTTL                  = 5 * time.Minute
 	defaultMaxConnections                     = 2048
 	defaultMaxTransferSessions                = 4096
 	defaultMaxEnrolledDevices                 = 4096
@@ -67,12 +68,17 @@ type Config struct {
 	// ServerHeartbeatInterval 是服务端心跳监视器的检查周期：连续
 	// ServerHeartbeatMisses 个周期未收到该连接的心跳帧即关闭连接并释放 presence 租约。
 	// 客户端驱动的续期（心跳路径的 RenewPresence）不受影响。
-	ServerHeartbeatInterval     time.Duration
-	ServerHeartbeatMisses       int
-	EnrollmentToken             string
-	InternalToken               string
-	CredentialKey               []byte
-	CredentialTTL               time.Duration
+	ServerHeartbeatInterval time.Duration
+	ServerHeartbeatMisses   int
+	EnrollmentToken         string
+	InternalToken           string
+	CredentialKey           []byte
+	CredentialTTL           time.Duration
+	// TurnURL and TurnSharedSecret are server-only relay credentials. They are
+	// never serialized into a client config or retained by Feature code.
+	TurnURL                     string
+	TurnSharedSecret            []byte
+	TurnCredentialTTL           time.Duration
 	ProtocolVersion             uint32
 	MaxConnections              int
 	MaxTransferSessions         int
@@ -109,6 +115,14 @@ func ConfigFromEnvironment() (Config, error) {
 		decoded, err = base64.RawURLEncoding.DecodeString(key)
 		if err != nil || len(decoded) < 32 {
 			return Config{}, errors.New("RELAY_CREDENTIAL_KEY must be base64url encoded and at least 32 bytes")
+		}
+	}
+	var turnSharedSecret []byte
+	if rawTurnSecret := strings.TrimSpace(os.Getenv("RELAY_TURN_SHARED_SECRET")); rawTurnSecret != "" {
+		var err error
+		turnSharedSecret, err = base64.RawURLEncoding.DecodeString(rawTurnSecret)
+		if err != nil || len(turnSharedSecret) < 32 {
+			return Config{}, errors.New("RELAY_TURN_SHARED_SECRET must be base64url encoded and at least 32 bytes")
 		}
 	}
 
@@ -192,6 +206,9 @@ func ConfigFromEnvironment() (Config, error) {
 		InternalToken:               internalToken,
 		CredentialKey:               decoded,
 		CredentialTTL:               readDuration("RELAY_CREDENTIAL_TTL", defaultCredentialTTL),
+		TurnURL:                     strings.TrimSpace(os.Getenv("RELAY_TURN_URL")),
+		TurnSharedSecret:            turnSharedSecret,
+		TurnCredentialTTL:           readDuration("RELAY_TURN_CREDENTIAL_TTL", defaultTurnCredentialTTL),
 		MaxConnections:              readInt("RELAY_MAX_CONNECTIONS", defaultMaxConnections),
 		MaxTransferSessions:         readInt("RELAY_MAX_TRANSFER_SESSIONS", defaultMaxTransferSessions),
 		MaxEnrolledDevices:          readInt("RELAY_MAX_ENROLLED_DEVICES", defaultMaxEnrolledDevices),
@@ -254,6 +271,9 @@ func withConfigDefaults(config Config) Config {
 	}
 	if config.CredentialTTL <= 0 {
 		config.CredentialTTL = defaultCredentialTTL
+	}
+	if config.TurnCredentialTTL <= 0 {
+		config.TurnCredentialTTL = defaultTurnCredentialTTL
 	}
 	if config.MaxConnections <= 0 {
 		config.MaxConnections = defaultMaxConnections

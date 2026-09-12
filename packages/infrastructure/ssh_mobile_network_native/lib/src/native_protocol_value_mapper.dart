@@ -72,6 +72,26 @@ final class _NativeProtocolValueMapper {
     }
   }
 
+  void validateSharedSessionInstanceId(String value) {
+    if (value.length != _sharedSessionInstanceIdBytes ||
+        value != value.toLowerCase() ||
+        !isLowerHex(value)) {
+      throw ArgumentError.value(
+        value,
+        'sharedSessionInstanceId',
+        'Must be 32 lowercase hexadecimal characters.',
+      );
+    }
+  }
+
+  void validateDecodedSharedSessionInstanceId(String value) {
+    try {
+      validateSharedSessionInstanceId(value);
+    } on ArgumentError catch (error) {
+      throw FormatException(error.message);
+    }
+  }
+
   void validateDecodedRealtimeId(String value) {
     try {
       validateRealtimeId(value);
@@ -115,6 +135,14 @@ final class _NativeProtocolValueMapper {
         payload.length,
         'payload',
         'ICE candidate payload is too large.',
+      );
+    }
+    if (kind == NativeRealtimeSignalKind.screenShareConsent &&
+        payload.length > _maxScreenShareConsentPayloadBytes) {
+      throw ArgumentError.value(
+        payload.length,
+        'payload',
+        'Screen-share consent payload is too large.',
       );
     }
     if (kind != NativeRealtimeSignalKind.webRtcClose &&

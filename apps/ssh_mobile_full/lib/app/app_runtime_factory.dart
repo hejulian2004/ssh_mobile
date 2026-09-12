@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:app_core/app_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:connection_core/connection_core.dart' as connection_core;
 import 'package:feature_developer/feature_developer.dart' as developer;
@@ -15,6 +16,8 @@ import 'package:feature_webview/feature_webview.dart' as feature_webview;
 import 'package:network_sdk/network_sdk.dart';
 import 'package:network_transport/network_transport.dart';
 import 'package:realtime_media/realtime_media.dart';
+import 'package:realtime_media_android/realtime_media_android.dart';
+import 'package:realtime_media_windows/realtime_media_windows.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../core/services/data_protection_service.dart';

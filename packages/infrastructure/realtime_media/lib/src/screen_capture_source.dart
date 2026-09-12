@@ -10,10 +10,42 @@ enum ScreenCaptureSourceKind { display, window }
 
 /// A selection descriptor, not a capture implementation or image buffer.
 final class ScreenCaptureSource {
-  const ScreenCaptureSource({required this.id, required this.kind});
+  ScreenCaptureSource({
+    required this.id,
+    required this.kind,
+    this.label,
+    this.width,
+    this.height,
+  }) {
+    final sourceWidth = width;
+    if (sourceWidth != null && (sourceWidth <= 0 || sourceWidth > 16_384)) {
+      throw ArgumentError.value(sourceWidth, 'width');
+    }
+    final sourceHeight = height;
+    if (sourceHeight != null && (sourceHeight <= 0 || sourceHeight > 16_384)) {
+      throw ArgumentError.value(sourceHeight, 'height');
+    }
+    final sourceLabel = label;
+    if (sourceLabel != null && sourceLabel.length > 128) {
+      throw ArgumentError.value(sourceLabel, 'label');
+    }
+  }
 
   final ScreenCaptureSourceId id;
   final ScreenCaptureSourceKind kind;
+
+  /// Bounded display/window label supplied by the platform, when available.
+  ///
+  /// This is UI metadata only. It must never contain a native window handle.
+  final String? label;
+
+  /// Native source dimensions, when the platform can determine them without
+  /// starting capture.
+  final int? width;
+
+  /// Native source dimensions, when the platform can determine them without
+  /// starting capture.
+  final int? height;
 }
 
 String _validate(String value, String name) {

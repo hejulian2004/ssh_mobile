@@ -9,9 +9,12 @@ import 'package:ssh_mobile_network_native/ssh_mobile_network_native.dart';
 /// The native runtime remains the resource owner. This adapter only borrows a
 /// Realtime gateway and translates the typed ABI status into lifecycle errors;
 /// encoded frames, capture buffers, and renderer handles never enter Dart.
-final class AppRealtimeMediaBackend implements RealtimeMediaBackend {
+final class AppRealtimeMediaBackend
+    implements RealtimeMediaBackend, RealtimeMediaNativeOwnerBackend {
+  // The public named parameter is part of the adapter API; using an
+  // initializing formal here would expose the private field name.
   AppRealtimeMediaBackend({required NetworkRuntime networkRuntime})
-    : _networkRuntime = networkRuntime;
+    : _networkRuntime = networkRuntime; // ignore: prefer_initializing_formals
 
   final NetworkRuntime _networkRuntime;
   NetworkRealtimeGateway? _gateway;
@@ -79,6 +82,46 @@ final class AppRealtimeMediaBackend implements RealtimeMediaBackend {
   }) async {
     final nativeId = _parseEndpointId(endpointId);
     final status = (await _ensureGateway()).releaseMediaEndpoint(nativeId);
+    if (!status.isSuccess) throw _statusFailure(status);
+  }
+
+  @override
+  Future<RealtimeMediaNativeOwnerToken> openNativeOwner({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) async {
+    final nativeEndpoint = _parseEndpointId(endpointId);
+    final result = (await _ensureGateway()).openMediaOwner(
+      endpointId: nativeEndpoint,
+      realtimeId: identity.realtimeId,
+      peerId: identity.peerId,
+      generation: identity.generation,
+      direction: switch (identity.direction) {
+        RealtimeMediaDirection.send => NativeRealtimeMediaDirection.send,
+        RealtimeMediaDirection.receive => NativeRealtimeMediaDirection.receive,
+      },
+    );
+    if (!result.isSuccess || result.token == null) {
+      throw _statusFailure(result.status);
+    }
+    return RealtimeMediaNativeOwnerToken(result.token!.value.toString());
+  }
+
+  @override
+  Future<void> closeNativeOwner({
+    required RealtimeMediaNativeOwnerToken token,
+    required RealtimeMediaEndpointIdentity identity,
+  }) async {
+    final value = int.tryParse(token.value);
+    if (value == null || value <= 0) {
+      throw const RealtimeMediaException(
+        RealtimeMediaErrorCode.invalidArgument,
+        'Native media owner token is invalid.',
+      );
+    }
+    final status = (await _ensureGateway()).closeMediaOwner(
+      NativeRealtimeMediaOwnerToken(value),
+    );
     if (!status.isSuccess) throw _statusFailure(status);
   }
 

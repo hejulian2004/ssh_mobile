@@ -332,6 +332,22 @@ void main() {
     );
     expect(
       resolveCoverageBaseRef(
+        explicitBaseRef: 'missing-force-push-base',
+        workingDirectory: directory.path,
+        environment: const {'GITHUB_EVENT_BEFORE': 'also-missing'},
+      ),
+      isNot('missing-force-push-base'),
+    );
+    expect(
+      resolveCoverageBaseRef(
+        explicitBaseRef: 'missing-force-push-base',
+        workingDirectory: directory.path,
+        environment: const {'CI_BASE_SHA': 'HEAD'},
+      ),
+      isNot('missing-force-push-base'),
+    );
+    expect(
+      resolveCoverageBaseRef(
         explicitBaseRef: '0000000000000000',
         workingDirectory: directory.path,
         environment: const {},

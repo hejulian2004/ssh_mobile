@@ -2,11 +2,12 @@ use std::time::{Duration, Instant};
 
 use crate::media::RtpPacketizer;
 use crate::{
-    EncodedVideoFrame, KeyframeRequestReason, MediaDirection, VideoCodec, VideoEnqueueResult,
-    WebRtcConfig, WebRtcError, WebRtcPeer,
+    EncodedVideoFrame, H264AdaptationReason, H264AdaptationTarget, KeyframeRequestReason,
+    MediaDirection, VideoCodec, VideoEnqueueResult, WebRtcConfig, WebRtcError, WebRtcPeer,
 };
+use bytes::Bytes;
 use rtc::peer_connection::event::{RTCPeerConnectionEvent, RTCTrackEvent, RTCTrackEventInit};
-use rtc::rtp::Packet;
+use rtc::rtp::{Header, Packet};
 
 const SCREEN_SSRC: u32 = 0x1357_2468;
 
@@ -32,6 +33,27 @@ fn packetize(frame: &EncodedVideoFrame, initial_sequence: u16) -> Vec<Packet> {
     RtpPacketizer::new(96, 102, SCREEN_SSRC, initial_sequence)
         .packetize(frame)
         .expect("valid screen access unit packetizes")
+}
+
+fn single_packet(sequence: u16, timestamp: u32) -> Packet {
+    Packet {
+        header: Header {
+            version: 2,
+            marker: true,
+            payload_type: 102,
+            sequence_number: sequence,
+            timestamp,
+            ssrc: SCREEN_SSRC,
+            ..Default::default()
+        },
+        payload: Bytes::from_static(&[0x65, 0x01]),
+    }
+}
+
+fn jitter_access_unit(sequence: u64, timestamp: u64) -> EncodedVideoFrame {
+    let mut frame = access_unit(sequence, timestamp);
+    frame.payload.extend(std::iter::repeat_n(0x41, 2_000));
+    frame
 }
 
 #[test]
@@ -132,6 +154,94 @@ fn screen_video_recovery_requests_a_keyframe_for_ice_restart_and_decoder_reset()
 }
 
 #[test]
+fn explicit_keyframe_request_targets_the_configured_media_direction() {
+    let mut sender = WebRtcPeer::new(WebRtcConfig::default()).expect("sender");
+    sender
+        .configure_h264_screen_video(MediaDirection::Sendonly, Some(SCREEN_SSRC))
+        .expect("sender config");
+    sender
+        .request_h264_screen_video_keyframe(MediaDirection::Sendonly)
+        .expect("sender keyframe request");
+    assert_eq!(
+        sender.take_h264_screen_video_keyframe_request(),
+        Some(KeyframeRequestReason::PacketLoss)
+    );
+
+    let mut receiver = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    receiver
+        .configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    receiver
+        .request_h264_screen_video_keyframe(MediaDirection::Recvonly)
+        .expect("receiver keyframe request");
+    assert_eq!(
+        receiver.take_h264_screen_video_keyframe_request(),
+        Some(KeyframeRequestReason::PacketLoss)
+    );
+}
+
+#[test]
+fn receive_keyframe_request_is_retained_until_the_native_receiver_is_ready() {
+    let mut receiver = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    receiver
+        .configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    receiver
+        .request_h264_screen_video_keyframe(MediaDirection::Recvonly)
+        .expect("receiver keyframe request");
+
+    // Early negotiation has no RTP receiver yet. Flushing must not drop the
+    // request; the next native I/O tick can retry it after OnTrack activation.
+    receiver.flush_h264_screen_video_keyframe_requests();
+    assert_eq!(
+        receiver.take_h264_screen_video_keyframe_request(),
+        Some(KeyframeRequestReason::PacketLoss)
+    );
+}
+
+#[test]
+fn bounded_adaptation_is_native_sender_state_and_keeps_queue_capacity_fixed() {
+    let mut sender = WebRtcPeer::new(WebRtcConfig::default()).expect("sender");
+    sender
+        .configure_h264_screen_video(MediaDirection::Sendonly, Some(SCREEN_SSRC))
+        .expect("sender config");
+    let target = H264AdaptationTarget {
+        bitrate_kbps: 1_536,
+        framerate: 7,
+        width: 1_280,
+        height: 720,
+        reason: H264AdaptationReason::Congestion,
+    };
+    sender
+        .apply_h264_screen_video_adaptation(target)
+        .expect("bounded target");
+    assert_eq!(sender.h264_screen_video_adaptation(), Some(target));
+    assert_eq!(sender.pending_h264_screen_video_frames(), 0);
+
+    let invalid = H264AdaptationTarget {
+        bitrate_kbps: 1,
+        ..target
+    };
+    assert!(matches!(
+        sender.apply_h264_screen_video_adaptation(invalid),
+        Err(WebRtcError::InvalidConfiguration(_))
+    ));
+}
+
+#[test]
+fn sendrecv_stats_keep_the_legacy_queue_capacity_at_three() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("peer");
+    peer.configure_h264_screen_video(MediaDirection::Sendrecv, Some(SCREEN_SSRC))
+        .expect("sendrecv config");
+
+    let stats = peer
+        .h264_screen_video_stats(MediaDirection::Sendrecv)
+        .expect("native stats");
+    assert!(stats.queue_depth <= stats.queue_capacity);
+    assert_eq!(stats.queue_capacity, 3);
+}
+
+#[test]
 fn packet_loss_reorder_and_duplicate_are_media_local_recovery_events() {
     let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
     peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
@@ -170,6 +280,350 @@ fn packet_loss_reorder_and_duplicate_are_media_local_recovery_events() {
     }
     peer.receive_h264_screen_video_rtp(&duplicate[0], now)
         .expect("duplicate fragment must be discarded locally");
+}
+
+#[test]
+fn screen_video_stats_report_rtp_loss_recovery_and_jitter_without_payloads() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+    let mut packetizer = RtpPacketizer::new(96, 102, SCREEN_SSRC, 100);
+
+    let first = packetizer
+        .packetize(&access_unit(10, 90_000))
+        .expect("first frame packetizes");
+    assert!(first.len() > 2, "test needs a multi-packet access unit");
+    for packet in first.iter().take(1).chain(first.iter().skip(2)) {
+        peer.receive_h264_screen_video_rtp(packet, now)
+            .expect("loss remains media-local");
+    }
+
+    let recovered = packetizer
+        .packetize(&access_unit(11, 96_000))
+        .expect("recovery frame packetizes");
+    for packet in &recovered {
+        peer.receive_h264_screen_video_rtp(packet, now)
+            .expect("recovery keyframe is accepted");
+    }
+    assert!(peer.pop_remote_h264_screen_video(now).is_some());
+
+    let stats = peer
+        .h264_screen_video_stats(MediaDirection::Recvonly)
+        .expect("native stats");
+    assert_eq!(
+        stats.packets_received as usize,
+        first.len() - 1 + recovered.len()
+    );
+    // The missing packet is still inside the bounded reorder window, so the
+    // finalized loss total does not advance yet.
+    assert_eq!(stats.packets_lost, 0);
+    assert_eq!(stats.frames_recovered, 1);
+    assert_eq!(stats.keyframe_requests, 1);
+    assert!(stats.jitter_ms > 0, "timestamp/arrival skew is observable");
+    assert!(stats.queue_depth <= stats.queue_capacity);
+    assert_eq!(stats.queue_capacity, 3);
+}
+
+#[test]
+fn late_rtp_reordering_never_creates_finalized_loss() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+
+    for (sequence, timestamp) in [(100, 90_000), (102, 96_000)] {
+        peer.receive_h264_screen_video_rtp(&single_packet(sequence, timestamp), now)
+            .expect("forward packets are accepted");
+    }
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("intermediate stats")
+            .packets_lost,
+        0,
+    );
+
+    peer.receive_h264_screen_video_rtp(&single_packet(101, 93_000), now)
+        .expect("late packet is accepted");
+    let stats = peer
+        .h264_screen_video_stats(MediaDirection::Recvonly)
+        .expect("reordered stats");
+    assert_eq!(stats.packets_received, 3);
+    assert_eq!(stats.packets_lost, 0);
+}
+
+#[test]
+fn rtp_loss_is_finalized_only_after_leaving_the_reorder_window() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+
+    peer.receive_h264_screen_video_rtp(&single_packet(100, 90_000), now)
+        .expect("first packet is accepted");
+    peer.receive_h264_screen_video_rtp(&single_packet(102, 96_000), now)
+        .expect("forward packet is accepted");
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("windowed stats")
+            .packets_lost,
+        0,
+    );
+
+    // Sequence 101 is missing when sequence 230 advances the lower bound to
+    // 102. The gap is now finalized exactly once.
+    peer.receive_h264_screen_video_rtp(&single_packet(230, 102_000), now)
+        .expect("window advancement is accepted");
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("finalized stats")
+            .packets_lost,
+        1,
+    );
+}
+
+#[test]
+fn rtp_loss_accounting_handles_sequence_wraparound() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+
+    for (sequence, timestamp) in [(u16::MAX, 90_000), (0, 96_000)] {
+        peer.receive_h264_screen_video_rtp(&single_packet(sequence, timestamp), now)
+            .expect("wrapped packets are accepted");
+    }
+    let stats = peer
+        .h264_screen_video_stats(MediaDirection::Recvonly)
+        .expect("wrapped stats");
+    assert_eq!(stats.packets_received, 2);
+    assert_eq!(stats.packets_lost, 0);
+}
+
+#[test]
+fn rtp_loss_reset_preserves_finalized_total_and_starts_a_new_sequence_space() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+
+    for sequence in [100, 102, 230] {
+        peer.receive_h264_screen_video_rtp(&single_packet(sequence, 90_000), now)
+            .expect("initial packet is accepted");
+    }
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("initial finalized stats")
+            .packets_lost,
+        1,
+    );
+
+    peer.on_connection_lost();
+    for sequence in [500, 502, 630] {
+        peer.receive_h264_screen_video_rtp(&single_packet(sequence, 96_000), now)
+            .expect("replacement packet is accepted");
+    }
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("replacement finalized stats")
+            .packets_lost,
+        2,
+    );
+}
+
+#[test]
+fn released_endpoint_starts_packets_lost_from_zero() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+
+    for sequence in [100, 102, 230] {
+        peer.receive_h264_screen_video_rtp(&single_packet(sequence, 90_000), now)
+            .expect("initial packet is accepted");
+    }
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("initial finalized stats")
+            .packets_lost,
+        1,
+    );
+
+    peer.clear_h264_screen_video(MediaDirection::Recvonly)
+        .expect("endpoint release clears media state");
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("fresh endpoint stats")
+            .packets_lost,
+        0,
+    );
+
+    for sequence in [500, 502, 630] {
+        peer.receive_h264_screen_video_rtp(&single_packet(sequence, 96_000), now)
+            .expect("replacement packet is accepted");
+    }
+    assert_eq!(
+        peer.h264_screen_video_stats(MediaDirection::Recvonly)
+            .expect("replacement finalized stats")
+            .packets_lost,
+        1,
+    );
+}
+
+#[test]
+fn rtp_loss_finalization_uses_bounded_state_for_a_large_sequence_jump() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+
+    peer.receive_h264_screen_video_rtp(&single_packet(100, 90_000), now)
+        .expect("first packet is accepted");
+    peer.receive_h264_screen_video_rtp(&single_packet(30_100, 96_000), now)
+        .expect("large forward jump is accepted");
+
+    let stats = peer
+        .h264_screen_video_stats(MediaDirection::Recvonly)
+        .expect("bounded jump stats");
+    // Sequence 29_972 is still inside the 128-packet reorder window; only
+    // the range strictly below that lower bound is finalized.
+    assert_eq!(stats.packets_lost, 29_871);
+}
+
+#[test]
+fn duplicate_and_reordered_rtp_packets_do_not_create_loss() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+    let packets = [
+        single_packet(100, 90_000),
+        single_packet(102, 96_000),
+        single_packet(102, 96_000),
+        single_packet(101, 93_000),
+    ];
+
+    for packet in &packets {
+        peer.receive_h264_screen_video_rtp(packet, now)
+            .expect("duplicate and reordered packets are media-local");
+    }
+    let stats = peer
+        .h264_screen_video_stats(MediaDirection::Recvonly)
+        .expect("duplicate/reorder stats");
+    assert_eq!(stats.packets_received, 4);
+    assert_eq!(stats.packets_lost, 0);
+}
+
+#[test]
+fn inbound_jitter_ewma_can_decrease_after_a_transient_arrival_burst() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let base = Instant::now();
+    let mut packetizer = RtpPacketizer::new(96, 102, SCREEN_SSRC, 10_000);
+
+    for packet in packetizer
+        .packetize(&jitter_access_unit(1, 90_000))
+        .expect("first frame packetizes")
+    {
+        peer.receive_h264_screen_video_rtp(&packet, base)
+            .expect("first frame accepted");
+    }
+    for packet in packetizer
+        .packetize(&jitter_access_unit(2, 96_000))
+        .expect("burst frame packetizes")
+    {
+        peer.receive_h264_screen_video_rtp(&packet, base + Duration::from_secs(1))
+            .expect("burst frame accepted");
+    }
+    let burst = peer
+        .h264_screen_video_stats(MediaDirection::Recvonly)
+        .expect("burst stats")
+        .jitter_ms;
+    assert!(burst > 0);
+
+    for sequence in 3_u64..=100 {
+        let arrival =
+            base + Duration::from_secs(1) + Duration::from_nanos(66_666_667 * (sequence - 2));
+        let timestamp = 90_000 + sequence * 6_000;
+        for packet in packetizer
+            .packetize(&jitter_access_unit(sequence, timestamp))
+            .expect("stable frame packetizes")
+        {
+            peer.receive_h264_screen_video_rtp(&packet, arrival)
+                .expect("stable frame accepted");
+        }
+    }
+
+    let settled = peer
+        .h264_screen_video_stats(MediaDirection::Recvonly)
+        .expect("settled stats")
+        .jitter_ms;
+    assert!(
+        settled < burst,
+        "jitter EWMA must recover: {burst} -> {settled}"
+    );
+}
+
+#[test]
+fn connection_loss_resets_rtp_ordering_without_erasing_bounded_counters() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+    let mut first_packetizer = RtpPacketizer::new(96, 102, SCREEN_SSRC, 10);
+    let first = first_packetizer
+        .packetize(&access_unit(20, 120_000))
+        .expect("first frame packetizes");
+    for packet in &first {
+        peer.receive_h264_screen_video_rtp(packet, now)
+            .expect("first frame accepted");
+    }
+    assert!(peer.pop_remote_h264_screen_video(now).is_some());
+
+    peer.on_connection_lost();
+
+    let mut replacement_packetizer = RtpPacketizer::new(96, 102, SCREEN_SSRC, 30_000);
+    let replacement = replacement_packetizer
+        .packetize(&access_unit(21, 126_000))
+        .expect("replacement frame packetizes");
+    for packet in &replacement {
+        peer.receive_h264_screen_video_rtp(packet, now)
+            .expect("replacement frame accepted");
+    }
+    assert!(peer.pop_remote_h264_screen_video(now).is_some());
+
+    let stats = peer
+        .h264_screen_video_stats(MediaDirection::Recvonly)
+        .expect("native stats");
+    assert_eq!(
+        stats.packets_received as usize,
+        first.len() + replacement.len()
+    );
+    assert_eq!(stats.packets_lost, 0);
+    assert_eq!(stats.frames_recovered, 1);
+}
+
+#[test]
+fn mismatched_screen_ssrc_is_ignored_after_track_binding() {
+    let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("receiver");
+    peer.configure_h264_screen_video(MediaDirection::Recvonly, None)
+        .expect("receiver config");
+    let now = Instant::now();
+
+    for packet in packetize(&access_unit(5, 114_000), 500) {
+        peer.receive_h264_screen_video_rtp(&packet, now)
+            .expect("first screen SSRC is accepted");
+    }
+    assert!(peer.pop_remote_h264_screen_video(now).is_some());
+
+    let mut foreign_ssrc = packetize(&access_unit(6, 120_000), 600);
+    for packet in &mut foreign_ssrc {
+        packet.header.ssrc = SCREEN_SSRC.wrapping_add(1);
+        peer.receive_h264_screen_video_rtp(packet, now)
+            .expect("foreign SSRC is ignored without failing the peer");
+    }
+    assert!(peer.pop_remote_h264_screen_video(now).is_none());
 }
 
 #[test]

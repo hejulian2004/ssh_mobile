@@ -1,0 +1,23 @@
+name: feature_screen_share
+description: Consent and lifecycle state for native WebRTC screen sharing.
+publish_to: none
+
+resolution: workspace
+
+environment:
+  sdk: '>=3.12.0 <4.0.0'
+  flutter: '>=3.44.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  network_sdk:
+    path: ../../infrastructure/network_sdk
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

@@ -234,6 +234,8 @@ pub struct RealtimeStateChangedEvent {
     pub error: Option<NetworkError>,
     #[prost(uint64, tag = "6")]
     pub generation: u64,
+    #[prost(string, tag = "7")]
+    pub shared_session_instance_id: String,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -266,6 +268,8 @@ pub struct RealtimeSnapshotEvent {
     pub error: Option<NetworkError>,
     #[prost(uint64, tag = "6")]
     pub generation: u64,
+    #[prost(string, tag = "7")]
+    pub shared_session_instance_id: String,
 }
 
 #[derive(Clone, PartialEq, Message)]

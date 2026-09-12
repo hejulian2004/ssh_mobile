@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_sdk/network_sdk.dart';
@@ -578,6 +579,74 @@ void main() {
     },
   );
 
+  test('native consent adapter encodes and queues typed metadata', () async {
+    final gateway = _ConsentRealtimeGateway();
+    final backend = AppRealtimeSessionBackend(
+      networkRuntime: _FakeNetworkRuntime(gateway),
+      commandResultTimeout: const Duration(seconds: 1),
+    );
+    final consent = _testConsent();
+
+    final resultFuture = backend.sendConsent(
+      peerId: 'peer-a',
+      consent: consent,
+    );
+    await _pump();
+
+    expect(gateway.consentRealtimeId, consent.realtimeId);
+    expect(gateway.consentPeerId, 'peer-a');
+    expect(gateway.consentRevision, 1);
+    expect(gateway.consentPayload, isNotNull);
+    expect(gateway.consentPayload, isNotEmpty);
+
+    gateway.emitCommandResult(commandId: gateway.lastConsentCommandId!);
+    expect(await resultFuture, isA<SdkSuccess<void>>());
+    await backend.dispose();
+  });
+
+  test('legacy gateway reports consent capability failure', () async {
+    final backend = AppRealtimeSessionBackend(
+      networkRuntime: _FakeNetworkRuntime(_FakeRealtimeGateway()),
+    );
+
+    final result = await backend.sendConsent(
+      peerId: 'peer-a',
+      consent: _testConsent(),
+    );
+
+    expect(result, isA<SdkFailure<void>>());
+    expect(
+      (result as SdkFailure<void>).error.code,
+      NetworkErrorCode.invalidArgument,
+    );
+    await backend.dispose();
+  });
+
+  test('native consent signal maps to the typed SDK backend event', () async {
+    final gateway = _FakeRealtimeGateway();
+    final backend = AppRealtimeSessionBackend(
+      networkRuntime: _FakeNetworkRuntime(gateway),
+    );
+    final startFuture = backend.start(realtimeId: realtimeId, peerId: 'peer-a');
+    await _pump();
+    gateway.emitCommandResult(commandId: gateway.lastStartCommandId!);
+    await startFuture;
+
+    final eventFuture = backend.events
+        .where((event) => event is RealtimeConsentBackendEvent)
+        .cast<RealtimeConsentBackendEvent>()
+        .first;
+    gateway.emitConsent(_nativeTestConsent());
+    final event = await eventFuture;
+
+    expect(event.consent.operationId, 'operation-a');
+    expect(event.consent.decision, RealtimeConsentDecision.request);
+    expect(event.consent.purpose, RealtimeConsentPurpose.screenShare);
+    expect(event.consent.media, RealtimeConsentMedia.screenVideo);
+    expect(event.consent.actionRevision, 1);
+    await backend.dispose();
+  });
+
   for (final status in <NativeOperationStatus>[
     NativeOperationStatus.staleGeneration,
     NativeOperationStatus.staleEndpoint,
@@ -640,6 +709,214 @@ void main() {
       );
       expect(endpoint.state, RealtimeMediaEndpointState.released);
       await controller.stop();
+    },
+  );
+
+  test(
+    'native owner bridge validates tokens and preserves identity metadata',
+    () async {
+      final gateway = _FakeRealtimeGateway(
+        mediaOwnerOpenResult: NativeRealtimeMediaOwnerOpenResult(
+          status: NativeOperationStatus.success,
+          token: NativeRealtimeMediaOwnerToken(88),
+        ),
+      );
+      final adapter = AppRealtimeMediaBackend(
+        networkRuntime: _FakeNetworkRuntime(gateway),
+      );
+      final identity = RealtimeMediaEndpointIdentity(
+        realtimeId: realtimeId,
+        peerId: 'peer-a',
+        generation: 7,
+        direction: RealtimeMediaDirection.send,
+      );
+      final endpoint = await adapter.start(identity);
+      final owner = await adapter.openNativeOwner(
+        endpointId: endpoint,
+        identity: identity,
+      );
+
+      expect(owner.value, '88');
+      await adapter.closeNativeOwner(token: owner, identity: identity);
+      await adapter.release(endpointId: endpoint, identity: identity);
+
+      await expectLater(
+        adapter.closeNativeOwner(
+          token: RealtimeMediaNativeOwnerToken('0'),
+          identity: identity,
+        ),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.invalidArgument,
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'native owner close failure remains typed through the adapter',
+    () async {
+      final gateway = _FakeRealtimeGateway(
+        mediaOwnerOpenResult: NativeRealtimeMediaOwnerOpenResult(
+          status: NativeOperationStatus.success,
+          token: NativeRealtimeMediaOwnerToken(88),
+        ),
+        mediaOwnerCloseStatus: NativeOperationStatus.staleEndpoint,
+      );
+      final adapter = AppRealtimeMediaBackend(
+        networkRuntime: _FakeNetworkRuntime(gateway),
+      );
+      final identity = RealtimeMediaEndpointIdentity(
+        realtimeId: realtimeId,
+        peerId: 'peer-a',
+        generation: 7,
+        direction: RealtimeMediaDirection.send,
+      );
+      final endpoint = await adapter.start(identity);
+      final owner = await adapter.openNativeOwner(
+        endpointId: endpoint,
+        identity: identity,
+      );
+
+      await expectLater(
+        adapter.closeNativeOwner(token: owner, identity: identity),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.staleEndpoint,
+          ),
+        ),
+      );
+      await adapter.release(endpointId: endpoint, identity: identity);
+    },
+  );
+
+  test('unsupported Phase 2 platform operations fail closed', () async {
+    final adapter = AppRealtimeMediaBackend(
+      networkRuntime: _FakeNetworkRuntime(_FakeRealtimeGateway()),
+    );
+    final endpoint = RealtimeMediaEndpointId('77');
+    final identity = RealtimeMediaEndpointIdentity(
+      realtimeId: realtimeId,
+      peerId: 'peer-a',
+      generation: 7,
+      direction: RealtimeMediaDirection.receive,
+    );
+    final source = ScreenCaptureSource(
+      id: ScreenCaptureSourceId('display:1'),
+      kind: ScreenCaptureSourceKind.display,
+    );
+
+    expect(
+      () => adapter.attachCaptureSource(
+        endpointId: endpoint,
+        identity: identity,
+        source: source,
+      ),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.backendFailure,
+        ),
+      ),
+    );
+    expect(
+      () => adapter.attachRemoteVideoSurface(
+        endpointId: endpoint,
+        identity: identity,
+      ),
+      throwsA(isA<RealtimeMediaException>()),
+    );
+    expect(
+      () => adapter.readStats(endpointId: endpoint, identity: identity),
+      throwsA(isA<RealtimeMediaException>()),
+    );
+    await expectLater(
+      adapter.release(
+        endpointId: RealtimeMediaEndpointId('not-a-native-id'),
+        identity: identity,
+      ),
+      throwsA(
+        isA<RealtimeMediaException>().having(
+          (error) => error.code,
+          'code',
+          RealtimeMediaErrorCode.invalidArgument,
+        ),
+      ),
+    );
+  });
+
+  for (final entry in <(NativeOperationStatus, RealtimeMediaErrorCode)>[
+    (
+      NativeOperationStatus.invalidArgument,
+      RealtimeMediaErrorCode.invalidArgument,
+    ),
+    (
+      NativeOperationStatus.unknownSession,
+      RealtimeMediaErrorCode.unknownSession,
+    ),
+    (NativeOperationStatus.peerMismatch, RealtimeMediaErrorCode.peerMismatch),
+    (NativeOperationStatus.frameRejected, RealtimeMediaErrorCode.frameRejected),
+    (NativeOperationStatus.stopped, RealtimeMediaErrorCode.sessionReleased),
+    (NativeOperationStatus.failure, RealtimeMediaErrorCode.backendFailure),
+  ]) {
+    test('native status ${entry.$1} remains typed', () async {
+      final adapter = AppRealtimeMediaBackend(
+        networkRuntime: _FakeNetworkRuntime(
+          _FakeRealtimeGateway(mediaCreateStatus: entry.$1),
+        ),
+      );
+      await expectLater(
+        adapter.start(
+          RealtimeMediaEndpointIdentity(
+            realtimeId: realtimeId,
+            peerId: 'peer-a',
+            generation: 7,
+            direction: RealtimeMediaDirection.send,
+          ),
+        ),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            entry.$2,
+          ),
+        ),
+      );
+    });
+  }
+
+  test(
+    'successful native endpoint creation without an ID fails closed',
+    () async {
+      final adapter = AppRealtimeMediaBackend(
+        networkRuntime: _FakeNetworkRuntime(
+          _FakeRealtimeGateway(mediaCreateReturnsNoEndpoint: true),
+        ),
+      );
+
+      await expectLater(
+        adapter.start(
+          RealtimeMediaEndpointIdentity(
+            realtimeId: realtimeId,
+            peerId: 'peer-a',
+            generation: 7,
+            direction: RealtimeMediaDirection.send,
+          ),
+        ),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.backendFailure,
+          ),
+        ),
+      );
     },
   );
 
@@ -710,6 +987,37 @@ void main() {
 
 Future<void> _pump() => Future<void>.delayed(Duration.zero);
 
+RealtimeConsent _testConsent({
+  RealtimeConsentDecision decision = RealtimeConsentDecision.request,
+}) {
+  final issued = DateTime.utc(2030, 1, 1, 12);
+  return RealtimeConsent(
+    operationId: 'operation-a',
+    realtimeId: '00112233445566778899aabbccddeeff',
+    sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
+    issuedAt: issued,
+    expiresAt: issued.add(const Duration(minutes: 1)),
+    decision: decision,
+    senderPeerId: 'peer-a',
+    actionRevision: 1,
+  );
+}
+
+NativeScreenShareConsent _nativeTestConsent() => NativeScreenShareConsent(
+  schemaVersion: 2,
+  operationId: 'operation-a',
+  realtimeId: '00112233445566778899aabbccddeeff',
+  sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
+  issuedAtMs: DateTime.utc(2030, 1, 1, 12).millisecondsSinceEpoch,
+  expiresAtMs: DateTime.utc(2030, 1, 1, 12, 1).millisecondsSinceEpoch,
+  decision: NativeScreenShareConsentDecision.request,
+  senderPeerId: 'peer-a',
+  purpose: NativeScreenShareConsentPurpose.screenShare,
+  media: NativeScreenShareMediaKind.screenVideo,
+  requiresAcceptance: true,
+  actionRevision: 1,
+);
+
 final class _FakeNetworkRuntime implements NetworkRuntime {
   _FakeNetworkRuntime(this.gateway, {this.openError});
 
@@ -748,11 +1056,16 @@ final class _FakeNetworkRuntime implements NetworkRuntime {
   Future<void> dispose() async {}
 }
 
-final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
+class _FakeRealtimeGateway implements NetworkRealtimeGateway {
   _FakeRealtimeGateway({
     this.startStatus = NativeOperationStatus.success,
     this.mediaCreateStatus = NativeOperationStatus.success,
     this.mediaReleaseStatus = NativeOperationStatus.success,
+    this.mediaOwnerOpenResult = const NativeRealtimeMediaOwnerOpenResult(
+      status: NativeOperationStatus.driverUnavailable,
+    ),
+    this.mediaOwnerCloseStatus = NativeOperationStatus.success,
+    this.mediaCreateReturnsNoEndpoint = false,
   });
 
   final StreamController<NativeNetworkEvent> _events =
@@ -760,6 +1073,9 @@ final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
   final NativeOperationStatus startStatus;
   final NativeOperationStatus mediaCreateStatus;
   final NativeOperationStatus mediaReleaseStatus;
+  final NativeRealtimeMediaOwnerOpenResult mediaOwnerOpenResult;
+  final NativeOperationStatus mediaOwnerCloseStatus;
+  final bool mediaCreateReturnsNoEndpoint;
   int? mediaCurrentGeneration;
   int _sequence = 0;
   String? lastStartCommandId;
@@ -803,7 +1119,9 @@ final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
         : mediaCreateStatus;
     return NativeRealtimeMediaEndpointCreateResult(
       status: status,
-      endpointId: status.isSuccess ? NativeRealtimeMediaEndpointId(77) : null,
+      endpointId: status.isSuccess && !mediaCreateReturnsNoEndpoint
+          ? NativeRealtimeMediaEndpointId(77)
+          : null,
     );
   }
 
@@ -811,6 +1129,19 @@ final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
   NativeOperationStatus releaseMediaEndpoint(
     NativeRealtimeMediaEndpointId endpointId,
   ) => mediaReleaseStatus;
+
+  @override
+  NativeRealtimeMediaOwnerOpenResult openMediaOwner({
+    required NativeRealtimeMediaEndpointId endpointId,
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required NativeRealtimeMediaDirection direction,
+  }) => mediaOwnerOpenResult;
+
+  @override
+  NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token) =>
+      mediaOwnerCloseStatus;
 
   void emitCommandResult({
     required String commandId,
@@ -868,6 +1199,51 @@ final class _FakeRealtimeGateway implements NetworkRealtimeGateway {
         generation: generation,
         error: error,
       ),
+    );
+  }
+
+  void emitConsent(NativeScreenShareConsent consent) {
+    _events.add(
+      NativeRealtimeSignalEvent(
+        eventId: 'consent-${++_sequence}',
+        timestampMs: 1,
+        protocolVersion: 2,
+        realtimeId: consent.realtimeId,
+        peerId: consent.senderPeerId,
+        kind: NativeRealtimeSignalKind.screenShareConsent,
+        revision: 1,
+        payload: Uint8List(0),
+        consent: consent,
+      ),
+    );
+  }
+}
+
+final class _ConsentRealtimeGateway extends _FakeRealtimeGateway
+    implements NetworkRealtimeConsentGateway {
+  int _consentSequence = 0;
+  String? lastConsentCommandId;
+  String? consentRealtimeId;
+  String? consentPeerId;
+  int? consentRevision;
+  Uint8List? consentPayload;
+
+  @override
+  NativeCommandTicket sendScreenShareConsent({
+    required String realtimeId,
+    required String peerId,
+    required int revision,
+    required Uint8List payload,
+  }) {
+    consentRealtimeId = realtimeId;
+    consentPeerId = peerId;
+    consentRevision = revision;
+    consentPayload = Uint8List.fromList(payload);
+    final commandId = 'consent-${++_consentSequence}';
+    lastConsentCommandId = commandId;
+    return NativeCommandTicket(
+      commandId: commandId,
+      queueStatus: NativeOperationStatus.success,
     );
   }
 }
