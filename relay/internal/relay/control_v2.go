@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/ssh-mobile/relay/internal/relay/v2"
 )
@@ -576,6 +577,10 @@ func (h *hub) handleConnectivityAnswerV2(sender *peer, ans *v2.ConnectivityAnswe
 // handleRealtimeSignalV2 转发 WebRTC 风格的信令（不透明 payload，Relay 不解析）到
 // target_device_id 的 v2 控制面连接。发送方身份由接收方的认证连接上下文确定。
 func (h *hub) handleRealtimeSignalV2(sender *peer, sig *v2.RealtimeSignal) {
+	if sig.SourceDeviceId != "" {
+		h.sendV2ProtocolError(sender, sig.RequestId, v2.ErrorCode_ERROR_CODE_PROTOCOL, "client realtime source must be empty")
+		return
+	}
 	if sig.TargetDeviceId == "" || sig.TargetDeviceId == sender.deviceID {
 		h.sendV2ProtocolError(sender, sig.RequestId, v2.ErrorCode_ERROR_CODE_PROTOCOL, "invalid realtime target")
 		return
@@ -590,9 +595,15 @@ func (h *hub) handleRealtimeSignalV2(sender *peer, sig *v2.RealtimeSignal) {
 		h.sendV2ProtocolError(sender, sig.RequestId, v2.ErrorCode_ERROR_CODE_PEER_OFFLINE, "target peer is not connected on the v2 control plane")
 		return
 	}
+	forwarded, ok := proto.Clone(sig).(*v2.RealtimeSignal)
+	if !ok {
+		h.sendV2ProtocolError(sender, sig.RequestId, v2.ErrorCode_ERROR_CODE_PROTOCOL, "invalid realtime signal")
+		return
+	}
+	forwarded.SourceDeviceId = sender.deviceID
 	h.sendV2Frame(target, &v2.RelayFrame{
 		Version: v2.RELAY_V2_VERSION,
-		Kind:    &v2.RelayFrame_RealtimeSignal{RealtimeSignal: sig},
+		Kind:    &v2.RelayFrame_RealtimeSignal{RealtimeSignal: forwarded},
 	})
 }
 

@@ -30,6 +30,7 @@ import 'terminal_feature_adapters.dart';
 import 'sftp_feature_adapters.dart';
 import 'rag_feature_adapters.dart';
 import 'screen_share_route_scope.dart';
+import 'screen_share_entry_coordinator.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'navigation/app_route_contributions.dart';
 
@@ -57,6 +58,7 @@ class _SshMobileAppState extends State<SshMobileApp>
   AppConnectionHostKeyAdapter? _connectionHostKeyAdapter;
   AppConnectionRuntimeAdapter? _connectionRuntimeAdapter;
   AppConnectionVerificationAdapter? _connectionVerificationAdapter;
+  ScreenShareEntryCoordinator? _lanScreenShareAdapter;
 
   @override
   void initState() {
@@ -130,6 +132,10 @@ class _SshMobileAppState extends State<SshMobileApp>
   @override
   Widget build(BuildContext context) {
     final runtime = _runtime;
+    _lanScreenShareAdapter ??= ScreenShareEntryCoordinator(
+      runtime: runtime,
+      navigatorKey: _navigatorKey,
+    );
     final terminalSettings = _terminalSettingsAdapter ??=
         AppTerminalSettingsAdapter(runtime.appSettings);
     final terminalShortcuts = _terminalShortcutAdapter ??=
@@ -234,6 +240,9 @@ class _SshMobileAppState extends State<SshMobileApp>
         Provider<feature_lan_share.LanShareLoggerPort>.value(value: lanLogger),
         Provider<feature_lan_share.LanShareModule>.value(
           value: runtime.lanShareModule,
+        ),
+        Provider<feature_lan_share.LanShareScreenSharePort>.value(
+          value: _lanScreenShareAdapter!,
         ),
         ListenableProvider<feature_playbook.PlaybookSettingsPort>.value(
           value: runtime.playbookSettingsAdapter,

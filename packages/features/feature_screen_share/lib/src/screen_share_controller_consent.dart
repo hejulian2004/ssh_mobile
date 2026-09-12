@@ -30,11 +30,11 @@ void _handleScreenShareConsent(
       controller._armExpiry(consent.expiresAt);
     } else if (controller.state == ScreenShareOperationState.outgoingPending &&
         currentId != null) {
-      if (_compareCollision(
-            localPeerId: controller.localPeerId,
-            remotePeerId: controller.remotePeerId,
-            localOperationId: currentId,
-            remoteOperationId: consent.operationId,
+      if (compareScreenShareIntents(
+            leftInitiatorPeerId: controller.localPeerId,
+            leftOperationId: currentId,
+            rightInitiatorPeerId: controller.remotePeerId,
+            rightOperationId: consent.operationId,
           ) <
           0) {
         // The local tuple wins. The remote request is a losing collision
@@ -103,28 +103,4 @@ void _replaceOutgoingWithIncoming(
     ),
   );
   controller._armExpiry(consent.expiresAt);
-}
-
-int _compareCollision({
-  required String localPeerId,
-  required String remotePeerId,
-  required String localOperationId,
-  required String remoteOperationId,
-}) {
-  final peerComparison = _compareUtf8(localPeerId, remotePeerId);
-  if (peerComparison != 0) return peerComparison;
-  return _compareUtf8(localOperationId, remoteOperationId);
-}
-
-int _compareUtf8(String left, String right) {
-  final leftBytes = utf8.encode(left);
-  final rightBytes = utf8.encode(right);
-  final length = leftBytes.length < rightBytes.length
-      ? leftBytes.length
-      : rightBytes.length;
-  for (var index = 0; index < length; index++) {
-    final comparison = leftBytes[index].compareTo(rightBytes[index]);
-    if (comparison != 0) return comparison;
-  }
-  return leftBytes.length.compareTo(rightBytes.length);
 }

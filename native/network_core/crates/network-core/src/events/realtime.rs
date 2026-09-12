@@ -3,9 +3,11 @@
 use super::unix_timestamp_ms;
 use crate::runtime::EventSender;
 use network_protocol::{
-    network_event, NetworkError as ProtocolError, NetworkEvent, RealtimeSignalEvent,
-    RealtimeSnapshotEvent, RealtimeStateChangedEvent, NETWORK_PROTOCOL_VERSION,
+    network_event, NetworkError as ProtocolError, NetworkEvent, RealtimeIncomingSessionOfferEvent,
+    RealtimeSignalEvent, RealtimeSnapshotEvent, RealtimeStateChangedEvent, ScreenShareConsentV2,
+    NETWORK_PROTOCOL_VERSION,
 };
+use prost::Message;
 
 /// Identity carried by realtime state and snapshot events.
 ///
@@ -105,6 +107,36 @@ pub(crate) fn emit_realtime_snapshot(
                 error,
                 generation: session_identity.generation,
                 shared_session_instance_id: session_identity.shared_session_instance_id.to_owned(),
+            },
+        )),
+    });
+}
+
+/// Publishes only the metadata needed by the App incoming-request host. The
+/// native provisional binding retains SDP, ICE and the claim handle.
+pub(crate) fn emit_realtime_incoming_session_offer(
+    event_tx: &EventSender,
+    offer_id: &str,
+    claim_token: &str,
+    realtime_id: &str,
+    authenticated_peer_id: &str,
+    shared_session_instance_id: &str,
+    binding_expires_at_ms: u64,
+    request: &ScreenShareConsentV2,
+) {
+    let _ = event_tx.send(NetworkEvent {
+        event_id: format!("realtime/{realtime_id}/incoming-offer/{offer_id}"),
+        timestamp_ms: unix_timestamp_ms(),
+        protocol_version: NETWORK_PROTOCOL_VERSION,
+        payload: Some(network_event::Payload::RealtimeIncomingSessionOffer(
+            RealtimeIncomingSessionOfferEvent {
+                offer_id: offer_id.to_owned(),
+                claim_token: claim_token.to_owned(),
+                realtime_id: realtime_id.to_owned(),
+                authenticated_peer_id: authenticated_peer_id.to_owned(),
+                shared_session_instance_id: shared_session_instance_id.to_owned(),
+                binding_expires_at_ms,
+                request: request.encode_to_vec(),
             },
         )),
     });

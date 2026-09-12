@@ -10,11 +10,11 @@ $protoRelative = 'protocol/proto/relay/v2/relay_v2.proto'
 $proto = Join-Path $root $protoRelative
 Invoke-CommandChecked python @((Join-Path $testData 'generate_fixtures.py'), '--check') $root
 $manifest = Get-Content (Join-Path $testData 'manifest.json') -Raw | ConvertFrom-Json
-if ($manifest.schema_version -ne 2 -or $manifest.fixtures.Count -ne 22 -or $manifest.constants.RELAY_V2_VERSION -ne 2) {
+if ($manifest.schema_version -ne 2 -or $manifest.fixtures.Count -ne 23 -or $manifest.constants.RELAY_V2_VERSION -ne 2) {
   throw 'Relay V2 manifest shape is invalid.'
 }
 $text = Get-Content $proto -Raw
-if ($text -match 'target_device_id\s*=\s*7|sender_device_id\s*=\s*7|ready\s*=\s*14|message\s+RelayDataReady') {
+if ($text -notmatch 'source_device_id\s*=\s*7' -or $text -match 'target_device_id\s*=\s*7|sender_device_id\s*=\s*7|ready\s*=\s*14|message\s+RelayDataReady') {
   throw 'Forbidden Relay V2 additions are present.'
 }
 $status = 'NOT RUN (protoc unavailable)'

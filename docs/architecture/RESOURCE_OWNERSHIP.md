@@ -1,4 +1,4 @@
-最新更新时间：2026-09-07
+最新更新时间：2026-09-12
 
 # 资源 Owner 审计
 
@@ -18,6 +18,10 @@
 | NetworkCommandGateway | `NetworkRuntime` / borrowed by App Shell adapter | App/borrowed Session | cancel adapter subscriptions; never stop or destroy the Runtime/native handle |
 | NetworkRealtimeGateway | `NetworkRuntime` / borrowed by App Shell Realtime adapter | App/borrowed Session | cancel event subscription before Runtime dispose; never stop or destroy the Runtime/native handle |
 | RealtimeMediaSession | `RealtimeMediaSessionController` / App Realtime adapter | Realtime session lease | release endpoint leases before the owning Realtime session; controller never stops the App Runtime |
+| AppScreenShareSessionLease | App Shell coordinator, transferred atomically to screen-share route | One sender/responder Realtime operation | stop this `RealtimeSession`, wait normalized terminal state, then exact-object `releaseSession`; never stop App Runtime |
+| AppScreenShareMediaCoordinator | App Shell route scope | One screen-share media operation | stop production/ingress, release endpoint, decoder/encoder, capture preparation, and opaque surface/Texture lease; independent of session lease |
+| Provisional screen-share binding | Native `RealtimeManager` | Pre-claim Offer + bounded ICE + matched REQUEST | `pending → claiming → claimed/terminal`; reject/CANCEL/close/expiry/rollback destroys Offer and ICE; no Dart session or media owner |
+| Screen-share arbitration registry | App Shell | Peer-scoped pending/active intent metadata | release exact `(remotePeerId, initiatorPeerId, operationId)` slot; it owns no session, runtime, endpoint, or media resource |
 | RealtimeMediaEndpoint | native `RealtimeMediaRegistry`; borrowed by `RealtimeMediaSessionController` | Runtime + realtime generation | invalidate before WebRTC peer close; release is idempotent and old `(runtime, realtime, peer, direction)` generations fail closed |
 | Native media ingress queue | `network-webrtc::WebRtcPeer` through `RealtimeIoDriver` | Native PeerConnection generation | stop capture/encoder, drop stale queued H.264, then close the native peer; borrowers never own the queue |
 | Native media egress queue | `network-webrtc::WebRtcPeer` through `RealtimeIoDriver` | Native PeerConnection generation | terminal peer loss invalidates decoder output before decoder/surface teardown; never emit frames through the Dart event queue |
@@ -76,6 +80,11 @@
   停止并等待退出；这是防止 FFI handle 和后台事件泄漏的硬约束。
 - Realtime 媒体端点先于对应 PeerConnection 失效；屏幕视频仅在 native ingress/
   egress queue、RTP 和平台采集/渲染 owner 间流动，Dart 只协调不透明端点和生命周期。
+- PR74 route teardown is role-aware: sender stops production before capture/send
+  endpoint release, then stops/releases the session lease; receiver stops ingress,
+  stops/releases the session lease, then detaches decoder and surface/Texture.
+  Route disposal continues remaining cleanup after an individual failure and does
+  not promise retry after the route owner has been destroyed.
 
 新增数据库、网络连接、SSH Session、Timer、Stream、Controller、Isolate 或
 Native handle 时，先在本表增加 Owner/Scope/Release，再补生命周期测试。自动检查：

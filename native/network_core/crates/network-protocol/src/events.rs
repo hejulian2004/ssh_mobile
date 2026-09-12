@@ -273,6 +273,24 @@ pub struct RealtimeSnapshotEvent {
 }
 
 #[derive(Clone, PartialEq, Message)]
+pub struct RealtimeIncomingSessionOfferEvent {
+    #[prost(string, tag = "1")]
+    pub offer_id: String,
+    #[prost(string, tag = "2")]
+    pub claim_token: String,
+    #[prost(string, tag = "3")]
+    pub realtime_id: String,
+    #[prost(string, tag = "4")]
+    pub authenticated_peer_id: String,
+    #[prost(string, tag = "5")]
+    pub shared_session_instance_id: String,
+    #[prost(uint64, tag = "6")]
+    pub binding_expires_at_ms: u64,
+    #[prost(bytes = "vec", tag = "7")]
+    pub request: Vec<u8>,
+}
+
+#[derive(Clone, PartialEq, Message)]
 pub struct ChannelMessageEvent {
     #[prost(string, tag = "1")]
     pub peer_id: String,
@@ -368,6 +386,8 @@ pub mod network_event {
         RealtimeSignal(RealtimeSignalEvent),
         #[prost(message, tag = "23")]
         RealtimeSnapshot(RealtimeSnapshotEvent),
+        #[prost(message, tag = "34")]
+        RealtimeIncomingSessionOffer(RealtimeIncomingSessionOfferEvent),
         #[prost(message, tag = "24")]
         PeerPresenceChanged(PeerPresenceChangedEvent),
         #[prost(message, tag = "25")]
