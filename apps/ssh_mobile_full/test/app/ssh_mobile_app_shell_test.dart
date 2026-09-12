@@ -22,7 +22,14 @@ void main() {
   late AppRuntime runtime;
 
   setUp(() async {
-    harness = await newRuntimeHarness(disposeLogger: false);
+    harness = await newRuntimeHarness(
+      disposeLogger: false,
+      // These tests exercise the shell and lifecycle observer, not native
+      // transport startup. Keep the widget process isolated from the native
+      // runtime so one test's asynchronous disposal cannot race the next
+      // shell instance.
+      networkRuntime: FakeNetworkRuntime(),
+    );
     runtime = await harness.createFuture;
   });
 

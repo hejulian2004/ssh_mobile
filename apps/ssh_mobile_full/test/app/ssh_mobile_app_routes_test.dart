@@ -35,7 +35,13 @@ void main() {
   late AppRuntime runtime;
 
   setUp(() async {
-    harness = await newRuntimeHarness(disposeLogger: false);
+    harness = await newRuntimeHarness(
+      disposeLogger: false,
+      // Route aggregation is UI coverage; do not start a native transport
+      // per test and leave its asynchronous teardown overlapping the next
+      // route tree in this Flutter tester process.
+      networkRuntime: FakeNetworkRuntime(),
+    );
     runtime = await harness.createFuture;
   });
 
@@ -103,6 +109,7 @@ void main() {
   Future<void> disposeTree(WidgetTester tester) async {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
+    await runtime.dispose();
     // The AppLogService singleton installs a debugPrint bridge; with
     // disposeLogger: false the runtime never restores it. The test binding
     // asserts foundation debug variables are unchanged, so restore the
