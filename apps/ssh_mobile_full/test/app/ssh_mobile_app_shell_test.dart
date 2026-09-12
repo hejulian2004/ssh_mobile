@@ -56,6 +56,7 @@ void main() {
 
   Future<void> disposeTree(WidgetTester tester) async {
     await tester.pumpWidget(const SizedBox.shrink());
+    expect(runtime.isDisposed, isTrue);
     // The shell's State.dispose already starts the AppRuntime teardown. Do
     // not await that Future here: the widget test intentionally exercises the
     // engine-facing shell boundary, while Runtime owns an asynchronous,
