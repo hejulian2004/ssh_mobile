@@ -26,10 +26,9 @@ void main() {
       disposeLogger: false,
       // These tests exercise the shell and lifecycle observer, not native
       // transport startup. Keep the widget process isolated from the native
-      // runtime so one test's asynchronous disposal cannot race the next
-      // shell instance.
+      // runtime; the normal initialization barrier is still started so the
+      // shell's post-frame services do not race Runtime teardown.
       networkRuntime: FakeNetworkRuntime(),
-      startPendingInitialization: false,
     );
     runtime = await harness.createFuture;
   });
