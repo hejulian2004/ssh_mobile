@@ -57,7 +57,11 @@ void main() {
 
   Future<void> disposeTree(WidgetTester tester) async {
     await tester.pumpWidget(const SizedBox.shrink());
-    await runtime.dispose();
+    // The shell's State.dispose already starts the AppRuntime teardown. Do
+    // not await that Future here: the widget test intentionally exercises the
+    // engine-facing shell boundary, while Runtime owns an asynchronous,
+    // process-wide shutdown graph. Waiting for that graph from the same frame
+    // can deadlock the Flutter tester before the isolated process exits.
     // The AppLogService singleton installs a debugPrint bridge; with
     // disposeLogger: false the runtime never restores it. The test binding
     // asserts foundation debug variables are unchanged, so restore the
