@@ -782,6 +782,7 @@ impl RelayControlClient {
                 kind,
                 revision,
                 payload: payload.to_vec(),
+                source_device_id: String::new(),
             })),
         };
         self.send_frame(&frame).await

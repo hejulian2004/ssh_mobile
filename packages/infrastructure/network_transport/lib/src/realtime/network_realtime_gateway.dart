@@ -71,6 +71,29 @@ abstract interface class NetworkRealtimeConsentGateway {
   });
 }
 
+/// Native-only operations for metadata-paired incoming screen-share offers.
+/// Raw SDP/ICE and the claim token remain owned by the native runtime; the
+/// token is passed back only as an opaque command argument.
+abstract interface class NetworkRealtimeIncomingOfferGateway {
+  NativeCommandTicket claimIncomingRealtimeOffer({
+    required String realtimeId,
+    required String peerId,
+    required String claimToken,
+  });
+
+  NativeCommandTicket rejectIncomingRealtimeOffer({
+    required String realtimeId,
+    required String peerId,
+    required String claimToken,
+  });
+
+  NativeCommandTicket discardIncomingRealtimeOffer({
+    required String realtimeId,
+    required String peerId,
+    required String claimToken,
+  });
+}
+
 /// Identity and queue-level status for one native Realtime command.
 ///
 /// The ticket deliberately does not contain an operation result. Callers must
@@ -90,7 +113,10 @@ final class NativeCommandTicket {
 
 /// Runtime-owned implementation backed by a borrowed command gateway.
 final class RuntimeNetworkRealtimeGateway
-    implements NetworkRealtimeGateway, NetworkRealtimeConsentGateway {
+    implements
+        NetworkRealtimeGateway,
+        NetworkRealtimeConsentGateway,
+        NetworkRealtimeIncomingOfferGateway {
   RuntimeNetworkRealtimeGateway(this._gateway, [this._media]);
 
   final NetworkCommandGateway _gateway;
@@ -217,6 +243,69 @@ final class RuntimeNetworkRealtimeGateway
           payload: payload,
         ),
       );
+    } on ArgumentError {
+      return NativeCommandTicket(
+        commandId: commandId,
+        queueStatus: NativeOperationStatus.invalidArgument,
+      );
+    }
+  }
+
+  @override
+  NativeCommandTicket claimIncomingRealtimeOffer({
+    required String realtimeId,
+    required String peerId,
+    required String claimToken,
+  }) => _incomingOfferCommand(
+    operation: 'realtime-claim-incoming',
+    encode: (commandId) =>
+        NativeNetworkProtocol.claimIncomingRealtimeOfferCommand(
+          commandId: commandId,
+          realtimeId: realtimeId,
+          peerId: peerId,
+          claimToken: claimToken,
+        ),
+  );
+
+  @override
+  NativeCommandTicket rejectIncomingRealtimeOffer({
+    required String realtimeId,
+    required String peerId,
+    required String claimToken,
+  }) => _incomingOfferCommand(
+    operation: 'realtime-reject-incoming',
+    encode: (commandId) =>
+        NativeNetworkProtocol.rejectIncomingRealtimeOfferCommand(
+          commandId: commandId,
+          realtimeId: realtimeId,
+          peerId: peerId,
+          claimToken: claimToken,
+        ),
+  );
+
+  @override
+  NativeCommandTicket discardIncomingRealtimeOffer({
+    required String realtimeId,
+    required String peerId,
+    required String claimToken,
+  }) => _incomingOfferCommand(
+    operation: 'realtime-discard-incoming',
+    encode: (commandId) =>
+        NativeNetworkProtocol.discardIncomingRealtimeOfferCommand(
+          commandId: commandId,
+          realtimeId: realtimeId,
+          peerId: peerId,
+          claimToken: claimToken,
+        ),
+  );
+
+  NativeCommandTicket _incomingOfferCommand({
+    required String operation,
+    required Uint8List Function(String commandId) encode,
+  }) {
+    final commandId = _nextCommandId(operation);
+    try {
+      return _send(commandId: commandId, command: encode(commandId));
     } on ArgumentError {
       return NativeCommandTicket(
         commandId: commandId,

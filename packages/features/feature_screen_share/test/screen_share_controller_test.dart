@@ -29,6 +29,36 @@ void main() {
 
   tearDown(() => controller.dispose());
 
+  test('public intent comparator preserves deterministic UTF-8 ordering', () {
+    expect(
+      compareScreenShareIntents(
+        leftInitiatorPeerId: 'peer-a',
+        leftOperationId: 'operation-a',
+        rightInitiatorPeerId: 'peer-b',
+        rightOperationId: 'operation-z',
+      ),
+      lessThan(0),
+    );
+    expect(
+      compareScreenShareIntents(
+        leftInitiatorPeerId: 'peer-a',
+        leftOperationId: 'operation-z',
+        rightInitiatorPeerId: 'peer-a',
+        rightOperationId: 'operation-a',
+      ),
+      greaterThan(0),
+    );
+    expect(
+      compareScreenShareIntents(
+        leftInitiatorPeerId: '设备-a',
+        leftOperationId: 'operation-a',
+        rightInitiatorPeerId: '设备-b',
+        rightOperationId: 'operation-a',
+      ),
+      lessThan(0),
+    );
+  });
+
   test(
     'outgoing capture waits for remote acceptance and media readiness',
     () async {
@@ -90,6 +120,34 @@ void main() {
       expect(controller.state, ScreenShareOperationState.active);
       expect(consent.sent.last.decision, RealtimeConsentDecision.accept);
       expect(media.viewerStarts, ['incoming-a']);
+    },
+  );
+
+  test(
+    'incoming acceptance is sent before transport media readiness',
+    () async {
+      consent.emit(
+        _consent(
+          issued: issued,
+          expires: issued.add(const Duration(minutes: 1)),
+          decision: RealtimeConsentDecision.request,
+          senderPeerId: 'remote-peer',
+          actionRevision: 1,
+          operationId: 'incoming-before-connected',
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final accepting = controller.acceptIncoming();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(consent.sent.last.decision, RealtimeConsentDecision.accept);
+      expect(controller.state, ScreenShareOperationState.accepted);
+      expect(media.viewerStarts, isEmpty);
+
+      await controller.setMediaReady(true);
+      await accepting;
+      expect(media.viewerStarts, ['incoming-before-connected']);
     },
   );
 

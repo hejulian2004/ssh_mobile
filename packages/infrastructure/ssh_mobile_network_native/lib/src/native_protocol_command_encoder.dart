@@ -334,6 +334,67 @@ final class _NativeProtocolCommandEncoder {
     );
   }
 
+  static Uint8List claimIncomingRealtimeOfferCommand({
+    required String commandId,
+    required String realtimeId,
+    required String peerId,
+    required String claimToken,
+  }) => _incomingOfferCommand(
+    commandId: commandId,
+    realtimeId: realtimeId,
+    peerId: peerId,
+    claimToken: claimToken,
+    field: 34,
+  );
+
+  static Uint8List rejectIncomingRealtimeOfferCommand({
+    required String commandId,
+    required String realtimeId,
+    required String peerId,
+    required String claimToken,
+  }) => _incomingOfferCommand(
+    commandId: commandId,
+    realtimeId: realtimeId,
+    peerId: peerId,
+    claimToken: claimToken,
+    field: 35,
+  );
+
+  static Uint8List discardIncomingRealtimeOfferCommand({
+    required String commandId,
+    required String realtimeId,
+    required String peerId,
+    required String claimToken,
+  }) => _incomingOfferCommand(
+    commandId: commandId,
+    realtimeId: realtimeId,
+    peerId: peerId,
+    claimToken: claimToken,
+    field: 36,
+  );
+
+  static Uint8List _incomingOfferCommand({
+    required String commandId,
+    required String realtimeId,
+    required String peerId,
+    required String claimToken,
+    required int field,
+  }) {
+    _values.validateCommandId(commandId);
+    _values.validateRealtimeId(realtimeId);
+    _values.validatePeerId(peerId);
+    _values.validateIdentifier(claimToken, 'claimToken', _maxEventIdBytes);
+    return _command(
+      commandId,
+      field,
+      (_ProtoWriter()
+            ..string(1, realtimeId)
+            ..string(2, peerId)
+            ..string(3, claimToken))
+          .takeBytes(),
+    );
+  }
+
   /// Encodes `SshStreamOpen` into the V2 command envelope (tag 25).
   static Uint8List sshStreamOpenCommand({
     required String commandId,

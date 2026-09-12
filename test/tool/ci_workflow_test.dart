@@ -265,8 +265,8 @@ void main() {
   _expect(
     appCoverage.contains('pattern: flutter-coverage-*') &&
         appCoverage.contains('Expected 4 shard coverage files') &&
-        appCoverage.contains('Expected 2 isolated coverage files'),
-    'app-coverage 必须合并四个测试分片和两个隔离覆盖率产物',
+        appCoverage.contains('Expected 4 isolated coverage files'),
+    'app-coverage 必须合并四个测试分片和四个隔离覆盖率产物',
   );
 
   for (final jobName in _buildOnlyJobNames) {

@@ -1,4 +1,4 @@
-Last updated: 2026-09-11
+Last updated: 2026-09-12
 
 # WebRTC Screen Share TODO
 
@@ -101,9 +101,9 @@ ADR-034 或原始技术架构文档。
   native owner 已接入硬件 bitrate/framerate、IDR 与 receive-side PLI。
   硬件/设备能力证明、全链路隐私和最终门禁仍待完成。
 
-## PR #73 定向收敛
+## PR #73 定向收敛（已合并）
 
-PR #73 保持 Draft，承载 Phase 3–7 的合并后定向修复，不恢复已关闭的
+PR #73 已合并，承载 Phase 3–7 的合并后定向修复，不恢复已关闭的
 `#68`–`#72`。本轮只收敛以下跨层契约：Android CSD/recovery gate、one-shot
 MediaProjection lease 与 `cleanup_deferred` retry、Consent freshness/确定性
 crossed-request 仲裁，以及 finalized monotonic RTP `packets_lost`。不修改
@@ -132,6 +132,54 @@ Relay、TURN、Windows、UI、rotation hot-resize 或统计 ABI。
   App-Dart、Rust 和 protocol jobs；最终通过 SHA/run 以 PR body 绑定证据为准，
   skipped 不计为绿。
 - [ ] 真机 codec/rotation/dual-device/production TURN acceptance 证据仍待完成。
+
+## PR74：正式用户流程（`feat/realtime-screen-share-entry`）
+
+PR74 以 `main@1bed4c2` 为基线，标题为
+`feat(screen-share): add user-facing realtime screen sharing flow`。本 PR
+只把既有实时屏幕视频能力接入 LAN trusted online peer 的正式入口，不扩展
+camera、voice、system audio、remote control、recording、多人分享、SFU、
+macOS/iOS、Relay video forwarding 或 QoS/codec。
+
+### Phase 0 gate（先于其他实现）
+
+- [x] Relay V2 additive `source_device_id = 7` 已同步协议源、Go/Rust
+  codec、fixture、manifest 和 golden/parity 断言：client→Relay 必须为空，
+  Relay→target 使用 authenticated sender；未知 session 缺 source fail closed，
+  existing bound session 兼容 absent/matching source，mismatch fail closed。
+- [x] `sender_peer_id` 固定为当前 consent action 的 authenticated author；
+  REQUEST/ACCEPT/REJECT/CANCEL 分别按 action author 解释，ADR-034 历史不改。
+- [x] Provisional binding 固定为 native-only
+  `pending → claiming → claimed/terminal`，不创建 Dart/RealtimeSession、
+  Answer、endpoint、decoder 或 renderer。
+- [x] provisional ICE 复用正式 8 KiB candidate contract：128 条、单条 8 KiB、
+  总计 256 KiB、binding 120 秒，`effectiveExpiry` 取 binding/request 较早者。
+- [ ] 双真机/relay deployment 仍需验证 trickle ICE、Answer rollback 和旧 Relay
+  行为；CI/golden 通过不能替代硬件证据。
+
+### Vertical slice acceptance
+
+- [x] LAN secondary action、App coordinator、global Incoming Host、public
+  collision comparator、stable operation ID、metadata source boundary、route
+  presenter 和 role-aware session/media ownership 已接线。
+- [x] sender 在 Accept 前只保留 signaling/session identity；receiver 只在
+  Offer+完整 REQUEST 配对后发布 metadata offer。
+- [x] Accept 顺序固定为 pre-register SDK responder → native claim/Answer →
+  original REQUEST exact-once seed → typed ACCEPT → Connected/native readiness
+  gate → viewer/capture；Reject 使用 provisional backend，discard 无 wire side
+  effect；CANCEL/Close/expiry/disconnect 清理 Offer 与 ICE。
+- [x] SDK normalized `currentSnapshot + snapshots` 覆盖 state/full snapshot，
+  claim 先注册 session，exact-object release 不删除 replacement。
+- [x] native late ICE 不再制造 Connected→Negotiating lifecycle regression；
+  provisional worker、native epoch、8 KiB ICE queue bounds、bounded replay/CANCEL
+  revision 和 unified 32-operation budget 已进入修复实现与 focused regression。
+- [x] SDK release 改为 authoritative-terminal：command completion 或 App timeout
+  不移除 registry；stopped/failed event 才 finalize exact session，runtime dispose
+  保留最终 force cleanup。
+- [x] hybrid claiming ICE contract、Host pending/resolving expiry guard、Relay
+  descriptor additive-field helper 已同步实现；远端 PR head 的完整 CI 结果仍待绑定。
+- [ ] Windows/Android 双真机 capture、permission、trickle ICE、Answer、Texture/
+  render、断线和资源释放 evidence 待补；在证据完成前只称为 flow/preview available。
 
 当前状态：Phase 0、Phase 1、Phase 2 的实现、exact-head CI 证据和 PR #67
 接受记录已齐；Phase 3/4 的 native platform owner、Phase 5 consent/Feature、

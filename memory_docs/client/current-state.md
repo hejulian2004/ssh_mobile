@@ -1,4 +1,4 @@
-> Last updated: 2026-08-31
+> Last updated: 2026-09-12
 
 # Client Current State
 
@@ -19,6 +19,19 @@ new event row or record-cache write is issued. `uploadEnabled=false` pauses
 uploads but does not disable local recording.
 Network runtime/public contracts route to the [SDK domain](../sdk/current-state.md)
 even when AppRuntime creates the facade.
+
+## Screen-share flow
+
+The Full App exposes screen sharing as a secondary action on trusted online LAN
+peer cards and as a global incoming request host. Outgoing flow selects an
+App-issued route-scoped source token, creates a valid 32-character lowercase
+hex Realtime ID, waits only for Negotiating identity, then lets the Feature
+send REQUEST. Incoming Dart metadata is published only after native pairs an
+authenticated Offer with the complete typed REQUEST. Accept pre-registers the
+SDK responder before native claim/Answer, seeds the original REQUEST once, sends
+ACCEPT immediately, and gates viewer/capture on Connected plus matching
+generation/shared-session identity. Route cleanup is role-aware and never stops
+App Runtime.
 
 ## Validation
 

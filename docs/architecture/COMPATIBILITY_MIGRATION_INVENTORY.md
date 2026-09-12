@@ -1,4 +1,4 @@
-最新更新时间：2026-09-07
+最新更新时间：2026-09-12
 
 # 兼容层迁移引用清单
 
@@ -24,6 +24,13 @@ schema、`pending_remote` 和 `/api/lan/upload` 的删除由该 ADR 的专项验
 路径兼容层：此前 `network_sdk` 中的合成 `remoteVideo` 帧占位 API 已在 Phase 2
 删除，替换为绑定 `(realtimeId, peerId, generation, direction)` 的不透明 native
 endpoint。没有保留帧流别名、降级路径或旧导出。
+
+PR74 的 screen-share entry、`RealtimeIncomingSessionOffer` provisional API、
+normalized snapshots 和 `source_device_id = 7` 都是当前 V2/SDK contract 的
+新增边界，不是旧兼容 shim。旧 Relay/client 组合遵循 Relay V2 matrix：旧 client
+省略 source；新 Relay 为 server→target 填入 authenticated source；新 client
+遇到旧 Relay 的 unknown-session signal 缺 source 时 fail closed；已绑定 session
+仍兼容 source 缺失，present/matching 接受，present/mismatching fail closed。
 
 | 模块 | 唯一 Package Owner | 旧引用基线 | 状态 | 保留的 App Shell 边界 | 删除条件 |
 | --- | --- | ---: | --- | --- | --- |

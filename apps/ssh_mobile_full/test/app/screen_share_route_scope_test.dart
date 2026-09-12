@@ -860,6 +860,13 @@ final class _FakeRealtimeSession implements RealtimeSession {
   @override
   RealtimeAudioState audioState = RealtimeAudioState.unavailable;
 
+  @override
+  RealtimeSnapshot? get currentSnapshot => null;
+
+  @override
+  Stream<RealtimeSnapshot> get snapshots =>
+      const Stream<RealtimeSnapshot>.empty();
+
   final StreamController<RealtimeConsent> _consents;
 
   @override

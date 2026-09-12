@@ -66,15 +66,21 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
                     final adaptedMediaQuery = adaptMobileMediaQuery(mediaQuery);
                     final visualDensity = mobileVisualDensityFor(mediaQuery);
                     final effectiveChild = child ?? const SizedBox.shrink();
-                    final shadChild =
-                        feature_developer.DeveloperPanelFloatingHost(
-                          child: feature_lan_share.NetworkIncomingTransferHost(
-                            child: feature_lan_share.LanPairingNavigationHost(
-                              navigatorKey: _navigatorKey,
-                              child: ShadAppBuilder(child: effectiveChild),
-                            ),
+                    final screenShareAdapter = _lanScreenShareAdapter!;
+                    final shadChild = AppScreenShareIncomingRequestHost(
+                      runtime: _runtime,
+                      navigatorKey: _navigatorKey,
+                      screenSharePort: screenShareAdapter,
+                      arbitration: screenShareAdapter.arbitration,
+                      child: feature_developer.DeveloperPanelFloatingHost(
+                        child: feature_lan_share.NetworkIncomingTransferHost(
+                          child: feature_lan_share.LanPairingNavigationHost(
+                            navigatorKey: _navigatorKey,
+                            child: ShadAppBuilder(child: effectiveChild),
                           ),
-                        );
+                        ),
+                      ),
+                    );
 
                     final currentTheme = Theme.of(context);
                     if (identical(adaptedMediaQuery, mediaQuery) &&
