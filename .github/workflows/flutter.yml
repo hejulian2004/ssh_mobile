@@ -730,6 +730,8 @@ jobs:
           )
           for test_file in "${all_test_files[@]}"; do
             case "$test_file" in
+              test/app/ssh_mobile_app_routes_test.dart|\
+              test/app/ssh_mobile_app_shell_test.dart|\
               test/features/startup/views/startup_screen_test.dart|\
               test/screens/system_admin/system_admin_snapshot_tabs_test.dart|\
               test/services/network/transfer_transport_test.dart|\
@@ -910,6 +912,40 @@ jobs:
             fi
             if [ "$attempt" -eq 2 ]; then exit "$status"; fi
             echo "Transfer test failed or timed out; retrying once."
+          done
+      - name: Run isolated App shell coverage test
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            rm -f coverage/isolated-app-shell-lcov.info
+            if timeout --signal=TERM --kill-after=30s 8m \
+              flutter test --no-pub \
+              --coverage --coverage-path coverage/isolated-app-shell-lcov.info \
+              --reporter compact --fail-fast --timeout 60s --concurrency 1 \
+              test/app/ssh_mobile_app_shell_test.dart; then
+              break
+            else
+              status=$?
+            fi
+            if [ "$attempt" -eq 2 ]; then exit "$status"; fi
+            echo "App shell coverage test failed or timed out; retrying once."
+          done
+      - name: Run isolated App route coverage test
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            rm -f coverage/isolated-app-routes-lcov.info
+            if timeout --signal=TERM --kill-after=30s 8m \
+              flutter test --no-pub \
+              --coverage --coverage-path coverage/isolated-app-routes-lcov.info \
+              --reporter compact --fail-fast --timeout 60s --concurrency 1 \
+              test/app/ssh_mobile_app_routes_test.dart; then
+              break
+            else
+              status=$?
+            fi
+            if [ "$attempt" -eq 2 ]; then exit "$status"; fi
+            echo "App route coverage test failed or timed out; retrying once."
           done
       - name: Upload isolated coverage
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
