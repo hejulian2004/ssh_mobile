@@ -51,10 +51,7 @@ class _HomeScreenState extends State<HomeScreen> {
   static const int _firstPage = _serverPage;
   static const int _lastPage = _logPage;
 
-  late final PageController _pageController;
   late int _selectedIndex;
-  late int _settledIndex;
-  bool? _usesDesktopShell;
   bool _aiHistoryVisible = false;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
@@ -62,34 +59,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _selectedIndex = widget.initialIndex.clamp(_firstPage, _lastPage);
-    _settledIndex = _selectedIndex;
-    _pageController = PageController(initialPage: _selectedIndex);
-  }
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final usesRailShell =
-        isDesktopTargetPlatform() ||
-        WindowSizeClass.of(context).isExpandedOrLarger;
-    final shellChanged =
-        _usesDesktopShell != null && _usesDesktopShell != usesRailShell;
-    _usesDesktopShell = usesRailShell;
-    if (!shellChanged) return;
-
-    // The navigation rail changes the PageView viewport width. Re-align its
-    // pixel offset after a phone rotates across the desktop breakpoint so the
-    // selected page does not land in the gap between two pages.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_pageController.hasClients) return;
-      _pageController.jumpToPage(_selectedIndex);
-    });
   }
 
   void updateState(VoidCallback fn) {
@@ -134,22 +103,12 @@ class _HomeScreenState extends State<HomeScreen> {
               _switchPage(_aiPage);
               return true;
             },
-            child: PageView.builder(
-              controller: _pageController,
-              itemCount: _lastPage + 1,
-              physics: const NeverScrollableScrollPhysics(),
-              allowImplicitScrolling: false,
-              onPageChanged: (index) {
-                if (_selectedIndex != index) {
-                  setState(() {
-                    _selectedIndex = index;
-                    _settledIndex = index;
-                  });
-                  _onPageActive(index);
-                }
-              },
-              itemBuilder: (context, index) =>
+            child: IndexedStack(
+              index: _selectedIndex,
+              children: [
+                for (var index = _firstPage; index <= _lastPage; index++)
                   _buildPage(context, index, strings),
+              ],
             ),
           ),
     );
@@ -514,9 +473,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_selectedIndex == index) return;
     setState(() {
       _selectedIndex = index;
-      _settledIndex = index;
     });
-    _pageController.jumpToPage(index);
     _onPageActive(index);
   }
 
@@ -558,14 +515,13 @@ class _HomeScreenState extends State<HomeScreen> {
       index,
       _DeferredNavPage(
         active: active,
-        loading: _buildLoadingState(),
         keepAliveAfterFirstBuild: true,
         builder: (context) {
           switch (index) {
             case _aiPage:
               return feature_ai.LlmChatScreen(
                 key: const PageStorageKey<String>('ai-chat-page'),
-                active: _settledIndex == index,
+                active: _selectedIndex == index,
                 viewModelFactory: (context) => feature_ai.AiChatViewModel(
                   storageService: context.read<feature_ai.AiStoragePort>(),
                   sshService: context.read<feature_ai.AiSshPort>(),
@@ -608,7 +564,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _pageShell(int index, Widget child) {
     return TickerMode(
-      enabled: _selectedIndex == index || _settledIndex == index,
+      enabled: _selectedIndex == index,
       child: RepaintBoundary(child: AppPageSurface(child: child)),
     );
   }
@@ -672,13 +628,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
 class _DeferredNavPage extends StatefulWidget {
   final bool active;
-  final Widget loading;
   final WidgetBuilder builder;
   final bool keepAliveAfterFirstBuild;
 
   const _DeferredNavPage({
     required this.active,
-    required this.loading,
     required this.builder,
     this.keepAliveAfterFirstBuild = false,
   });
@@ -689,40 +643,23 @@ class _DeferredNavPage extends StatefulWidget {
 
 class _DeferredNavPageState extends State<_DeferredNavPage> {
   bool _ready = false;
-  bool _activationScheduled = false;
 
   @override
   void initState() {
     super.initState();
-    if (widget.active) _scheduleActivation();
+    _ready = widget.active;
   }
 
   @override
   void didUpdateWidget(covariant _DeferredNavPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!widget.active) {
-      if (widget.keepAliveAfterFirstBuild && _ready) return;
-      if (_ready || _activationScheduled) {
-        _ready = false;
-        _activationScheduled = false;
-      }
+    if (widget.active) {
+      _ready = true;
       return;
     }
-    if (!oldWidget.active || !_ready) {
-      _scheduleActivation();
+    if (!widget.keepAliveAfterFirstBuild) {
+      _ready = false;
     }
-  }
-
-  void _scheduleActivation() {
-    if (_ready || _activationScheduled) return;
-    _activationScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !widget.active) return;
-      setState(() {
-        _activationScheduled = false;
-        _ready = true;
-      });
-    });
   }
 
   @override
@@ -740,12 +677,8 @@ class _DeferredNavPageState extends State<_DeferredNavPage> {
       );
     }
 
-    if (!widget.active) {
-      return const SizedBox.expand();
-    }
     if (!_ready) {
-      _scheduleActivation();
-      return widget.loading;
+      return const SizedBox.expand();
     }
     return _AnimatedPageFadeIn(active: true, child: widget.builder(context));
   }
