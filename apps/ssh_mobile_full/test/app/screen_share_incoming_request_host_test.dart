@@ -149,6 +149,109 @@ void main() {
     await cleanUp();
   });
 
+  testWidgets(
+    'active replacement stale completion preserves replacement expiry',
+    (tester) async {
+      final navigatorKey = GlobalKey<NavigatorState>();
+      final arbitration = AppScreenSharePeerArbitrationRegistry();
+      final disposedOperations = <String>[];
+      const claimRealtimeIds = <String>[
+        '00112233445566778899aabbccddee77',
+        '00112233445566778899aabbccddee88',
+      ];
+      var cleanedUp = false;
+      Future<void> cleanUp() async {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        debugPrint = debugPrintSynchronously;
+        await commandGateway.close();
+      }
+
+      addTearDown(cleanUp);
+      await _mountHost(
+        tester: tester,
+        runtime: runtime,
+        commandGateway: commandGateway,
+        arbitration: arbitration,
+        navigatorKey: navigatorKey,
+        routeBuilder: (arguments) => _ControlledScreenShareRoute(
+          arguments: arguments,
+          onDisposed: (operationId) => disposedOperations.add(operationId!),
+        ),
+      );
+      _installCommandAutomation(
+        commandGateway,
+        claimRealtimeIds: claimRealtimeIds,
+        sharedSessionIds: const <String, String>{
+          '00112233445566778899aabbccddee77':
+              'ffeeddccbbaa99887766554433221177',
+          '00112233445566778899aabbccddee88':
+              '11223344556677889900aabbccddeeff',
+        },
+        stopRealtimeIds: claimRealtimeIds,
+      );
+      final discardBaseline = commandGateway.countCommands(
+        'realtime-discard-incoming',
+      );
+      final claimBaseline = commandGateway.countCommands(
+        'realtime-claim-incoming',
+      );
+      final now = DateTime.now().toUtc();
+
+      await _emitOffer(
+        tester,
+        commandGateway,
+        realtimeId: '00112233445566778899aabbccddee77',
+        sharedSessionInstanceId: 'ffeeddccbbaa99887766554433221177',
+        operationId: 'operation-z',
+        bindingExpiry: now.add(const Duration(seconds: 30)),
+      );
+      await tester.tap(find.text('Accept'));
+      await _settle(tester);
+      expect(
+        commandGateway.countCommands('realtime-claim-incoming') - claimBaseline,
+        1,
+      );
+
+      // B wins while A's route is active. Its binding expiry is deliberately
+      // earlier than the request expiry so the Host timer owns the assertion.
+      await _emitOffer(
+        tester,
+        commandGateway,
+        realtimeId: '00112233445566778899aabbccddee88',
+        sharedSessionInstanceId: '11223344556677889900aabbccddeeff',
+        operationId: 'operation-a',
+        bindingExpiry: now.add(const Duration(seconds: 1)),
+      );
+      await _settle(tester);
+      expect(disposedOperations, contains('operation-z'));
+      expect(find.text('Incoming screen-share request'), findsOneWidget);
+      expect(
+        commandGateway.countCommands('realtime-discard-incoming') -
+            discardBaseline,
+        0,
+      );
+
+      // Let B's replacement timer fire after A's navigation Future has
+      // completed. A's stale completion must not cancel B's timer.
+      await tester.pump(const Duration(milliseconds: 1100));
+      await _settle(tester);
+      expect(find.text('Incoming screen-share request'), findsNothing);
+      expect(
+        commandGateway.countCommands('realtime-discard-incoming') -
+            discardBaseline,
+        1,
+      );
+      expect(
+        commandGateway.countCommands('realtime-claim-incoming') - claimBaseline,
+        1,
+      );
+      await cleanUp();
+    },
+  );
+
   testWidgets('accept resolution is not duplicated by expiry', (tester) async {
     final arbitration = AppScreenSharePeerArbitrationRegistry();
     final claimRelease = Completer<void>();
