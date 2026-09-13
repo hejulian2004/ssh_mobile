@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -51,10 +50,7 @@ class _HomeScreenState extends State<HomeScreen> {
   static const int _firstPage = _serverPage;
   static const int _lastPage = _logPage;
 
-  late final PageController _pageController;
   late int _selectedIndex;
-  late int _settledIndex;
-  bool? _usesDesktopShell;
   bool _aiHistoryVisible = false;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
@@ -62,34 +58,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _selectedIndex = widget.initialIndex.clamp(_firstPage, _lastPage);
-    _settledIndex = _selectedIndex;
-    _pageController = PageController(initialPage: _selectedIndex);
-  }
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final usesRailShell =
-        isDesktopTargetPlatform() ||
-        WindowSizeClass.of(context).isExpandedOrLarger;
-    final shellChanged =
-        _usesDesktopShell != null && _usesDesktopShell != usesRailShell;
-    _usesDesktopShell = usesRailShell;
-    if (!shellChanged) return;
-
-    // The navigation rail changes the PageView viewport width. Re-align its
-    // pixel offset after a phone rotates across the desktop breakpoint so the
-    // selected page does not land in the gap between two pages.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_pageController.hasClients) return;
-      _pageController.jumpToPage(_selectedIndex);
-    });
   }
 
   void updateState(VoidCallback fn) {
@@ -134,22 +102,12 @@ class _HomeScreenState extends State<HomeScreen> {
               _switchPage(_aiPage);
               return true;
             },
-            child: PageView.builder(
-              controller: _pageController,
-              itemCount: _lastPage + 1,
-              physics: const NeverScrollableScrollPhysics(),
-              allowImplicitScrolling: false,
-              onPageChanged: (index) {
-                if (_selectedIndex != index) {
-                  setState(() {
-                    _selectedIndex = index;
-                    _settledIndex = index;
-                  });
-                  _onPageActive(index);
-                }
-              },
-              itemBuilder: (context, index) =>
-                  _buildPage(context, index, strings),
+            child: IndexedStack(
+              index: _selectedIndex,
+              children: [
+                for (var index = _firstPage; index <= _lastPage; index++)
+                  _buildPage(index),
+              ],
             ),
           ),
     );
@@ -272,7 +230,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   : (compactHeight || isNarrowDesktop)
                   ? NavigationRailLabelType.none
                   : NavigationRailLabelType.all,
-              selectedIndex: _navigationIndex,
+              selectedIndex: _selectedIndex,
               onDestinationSelected: _switchNavigationPage,
               leading: (compactHeight || isNarrowDesktop)
                   ? const SizedBox(height: 4)
@@ -502,21 +460,13 @@ class _HomeScreenState extends State<HomeScreen> {
     return const Text('AI');
   }
 
-  int get _navigationIndex {
-    return _selectedIndex;
-  }
-
   void _switchNavigationPage(int index) {
     _switchPage(index);
   }
 
   void _switchPage(int index) {
     if (_selectedIndex == index) return;
-    setState(() {
-      _selectedIndex = index;
-      _settledIndex = index;
-    });
-    _pageController.jumpToPage(index);
+    setState(() => _selectedIndex = index);
     _onPageActive(index);
   }
 
@@ -552,65 +502,59 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildPage(BuildContext context, int index, AppStrings strings) {
+  Widget _buildPage(int index) {
     final active = _selectedIndex == index;
-    return _pageShell(
-      index,
-      _DeferredNavPage(
-        active: active,
-        loading: _buildLoadingState(),
-        keepAliveAfterFirstBuild: true,
-        builder: (context) {
-          switch (index) {
-            case _aiPage:
-              return feature_ai.LlmChatScreen(
-                key: const PageStorageKey<String>('ai-chat-page'),
-                active: _settledIndex == index,
-                viewModelFactory: (context) => feature_ai.AiChatViewModel(
-                  storageService: context.read<feature_ai.AiStoragePort>(),
-                  sshService: context.read<feature_ai.AiSshPort>(),
-                  sftpService: context.read<feature_ai.AiSftpPort>(),
-                  performanceMonitorService: context
-                      .read<feature_ai.AiMonitoringPort>(),
-                  playbookService: context
-                      .read<feature_playbook.PlaybookAutomationPort>(),
-                  ragService: context.read<app_core.RagCapability>(),
-                  appSettings: context.read<feature_ai.AiSettingsPort>(),
-                  runtimeFactory: context
-                      .read<feature_ai.AiChatRuntimeFactory>(),
-                  clientHealthAdvisor: context.read<feature_ai.AiHealthPort>(),
-                ),
-                webViewScreenBuilder: (context, chatId) =>
-                    ClientWebViewScreen(chatId: chatId),
-                onHistoryVisibilityChanged: (visible) {
-                  if (_aiHistoryVisible == visible) return;
-                  setState(() => _aiHistoryVisible = visible);
-                },
-              );
-            case _serverPage:
-              return const ServerListPane();
-            case _sftpPage:
-              return const AppSftpModuleScope(child: feature_sftp.SftpScreen());
-            case _adminPage:
-              return const AppSystemAdminModuleScope(
-                child: feature_system_admin.SystemAdminScreen(),
-              );
-            case _logPage:
-            default:
-              return const feature_lan_share.LanShareFeatureScope(
-                child: feature_lan_share.LanShareScreen(),
-              );
-          }
-        },
-      ),
+    return _RetainedNavPage(
+      key: ValueKey<String>('home-nav-slot-$index'),
+      active: active,
+      builder: (context) => _pageShell(_buildFeaturePage(context, index)),
     );
   }
 
-  Widget _pageShell(int index, Widget child) {
-    return TickerMode(
-      enabled: _selectedIndex == index || _settledIndex == index,
-      child: RepaintBoundary(child: AppPageSurface(child: child)),
-    );
+  Widget _buildFeaturePage(BuildContext context, int index) {
+    switch (index) {
+      case _aiPage:
+        return feature_ai.LlmChatScreen(
+          key: const PageStorageKey<String>('ai-chat-page'),
+          active: _selectedIndex == index,
+          viewModelFactory: (context) => feature_ai.AiChatViewModel(
+            storageService: context.read<feature_ai.AiStoragePort>(),
+            sshService: context.read<feature_ai.AiSshPort>(),
+            sftpService: context.read<feature_ai.AiSftpPort>(),
+            performanceMonitorService: context
+                .read<feature_ai.AiMonitoringPort>(),
+            playbookService: context
+                .read<feature_playbook.PlaybookAutomationPort>(),
+            ragService: context.read<app_core.RagCapability>(),
+            appSettings: context.read<feature_ai.AiSettingsPort>(),
+            runtimeFactory: context.read<feature_ai.AiChatRuntimeFactory>(),
+            clientHealthAdvisor: context.read<feature_ai.AiHealthPort>(),
+          ),
+          webViewScreenBuilder: (context, chatId) =>
+              ClientWebViewScreen(chatId: chatId),
+          onHistoryVisibilityChanged: (visible) {
+            if (_aiHistoryVisible == visible) return;
+            setState(() => _aiHistoryVisible = visible);
+          },
+        );
+      case _serverPage:
+        return const ServerListPane();
+      case _sftpPage:
+        return const AppSftpModuleScope(child: feature_sftp.SftpScreen());
+      case _adminPage:
+        return const AppSystemAdminModuleScope(
+          child: feature_system_admin.SystemAdminScreen(),
+        );
+      case _logPage:
+      default:
+        return const feature_lan_share.LanShareFeatureScope(
+          child: feature_lan_share.LanShareScreen(),
+        );
+    }
+  }
+
+  Widget _pageShell(Widget child) {
+    return RepaintBoundary(child: AppPageSurface(child: child));
   }
 
   Future<void> _exportAppData(BuildContext context, AppStrings strings) async {
@@ -670,99 +614,38 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _DeferredNavPage extends StatefulWidget {
+class _RetainedNavPage extends StatefulWidget {
   final bool active;
-  final Widget loading;
   final WidgetBuilder builder;
-  final bool keepAliveAfterFirstBuild;
 
-  const _DeferredNavPage({
+  const _RetainedNavPage({
+    super.key,
     required this.active,
-    required this.loading,
     required this.builder,
-    this.keepAliveAfterFirstBuild = false,
   });
 
   @override
-  State<_DeferredNavPage> createState() => _DeferredNavPageState();
+  State<_RetainedNavPage> createState() => _RetainedNavPageState();
 }
 
-class _DeferredNavPageState extends State<_DeferredNavPage> {
-  bool _ready = false;
-  bool _activationScheduled = false;
+class _RetainedNavPageState extends State<_RetainedNavPage> {
+  late bool _hasBeenActivated;
 
   @override
   void initState() {
     super.initState();
-    if (widget.active) _scheduleActivation();
+    _hasBeenActivated = widget.active;
   }
 
   @override
-  void didUpdateWidget(covariant _DeferredNavPage oldWidget) {
+  void didUpdateWidget(covariant _RetainedNavPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!widget.active) {
-      if (widget.keepAliveAfterFirstBuild && _ready) return;
-      if (_ready || _activationScheduled) {
-        _ready = false;
-        _activationScheduled = false;
-      }
-      return;
-    }
-    if (!oldWidget.active || !_ready) {
-      _scheduleActivation();
-    }
-  }
-
-  void _scheduleActivation() {
-    if (_ready || _activationScheduled) return;
-    _activationScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !widget.active) return;
-      setState(() {
-        _activationScheduled = false;
-        _ready = true;
-      });
-    });
+    if (widget.active) _hasBeenActivated = true;
   }
 
   @override
   Widget build(BuildContext context) {
-    if (widget.keepAliveAfterFirstBuild && _ready) {
-      return Offstage(
-        offstage: !widget.active,
-        child: TickerMode(
-          enabled: widget.active,
-          child: _AnimatedPageFadeIn(
-            active: widget.active,
-            child: Builder(builder: widget.builder),
-          ),
-        ),
-      );
-    }
-
-    if (!widget.active) {
-      return const SizedBox.expand();
-    }
-    if (!_ready) {
-      _scheduleActivation();
-      return widget.loading;
-    }
-    return _AnimatedPageFadeIn(active: true, child: widget.builder(context));
+    if (!_hasBeenActivated) return const SizedBox.expand();
+    return TickerMode(enabled: widget.active, child: widget.builder(context));
   }
-}
-
-class _AnimatedPageFadeIn extends StatelessWidget {
-  final Widget child;
-  final bool active;
-
-  const _AnimatedPageFadeIn({required this.child, required this.active});
-
-  @override
-  Widget build(BuildContext context) {
-    return child;
-  }
-}
-
-class SwitchToAiTabNotification extends Notification {
-  const SwitchToAiTabNotification();
 }

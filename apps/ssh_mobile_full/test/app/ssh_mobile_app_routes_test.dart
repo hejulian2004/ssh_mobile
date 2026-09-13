@@ -6,6 +6,7 @@
 // either an explicit case or rejected by the contribution assert, so that
 // branch stays intentionally uncovered.
 
+import 'package:connection_core/connection_core.dart';
 import 'package:feature_ai/feature_ai.dart' as feature_ai;
 import 'package:feature_connection/feature_connection.dart'
     as feature_connection;
@@ -116,6 +117,16 @@ void main() {
     debugPrint = debugPrintSynchronously;
   }
 
+  Future<void> tapRailIconOnce(WidgetTester tester, IconData icon) async {
+    final rail = find.byType(NavigationRail);
+    expect(rail, findsOneWidget);
+    final destination = find.descendant(of: rail, matching: find.byIcon(icon));
+    expect(destination, findsOneWidget);
+    final gesture = await tester.startGesture(tester.getCenter(destination));
+    await gesture.up();
+    await tester.pump();
+  }
+
   testWidgets('mounts the shell and rejects unknown or invalid route args', (
     tester,
   ) async {
@@ -219,6 +230,93 @@ void main() {
       );
       expectRoute(tester, feature_ai.AiSkillEditScreen);
       await popRoute(tester);
+
+      await disposeTree(tester);
+    });
+  });
+
+  testWidgets('home AI tab activates in the same rendered frame', (
+    tester,
+  ) async {
+    await withWindowsPlatform(tester, () async {
+      await pumpApp(tester);
+      await pushRoute(tester, AppShellRouteNames.performance);
+
+      await tapRailIconOnce(tester, Icons.psychology_outlined);
+
+      expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 2);
+      expect(tester.takeException(), isNull);
+      final aiFinder = find.byType(
+        feature_ai.LlmChatScreen,
+        skipOffstage: false,
+      );
+      expect(aiFinder, findsOneWidget);
+      expect(tester.widget<feature_ai.LlmChatScreen>(aiFinder).active, isTrue);
+
+      await tapRailIconOnce(tester, Icons.dns_outlined);
+      expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 0);
+      expect(aiFinder, findsOneWidget);
+      expect(tester.widget<feature_ai.LlmChatScreen>(aiFinder).active, isFalse);
+
+      await tapRailIconOnce(tester, Icons.psychology_outlined);
+      expect(tester.widget<feature_ai.LlmChatScreen>(aiFinder).active, isTrue);
+
+      await disposeTree(tester);
+    });
+  });
+
+  testWidgets('home retains server selection across distant tab switches', (
+    tester,
+  ) async {
+    await withWindowsPlatform(tester, () async {
+      await tester.runAsync(() async {
+        await runtime.connectionRepository.addConnection(
+          ConnectionConfig(
+            id: 'navigation-retention-server',
+            name: 'Navigation retention server',
+            host: 'navigation-retention.example.test',
+            username: 'tester',
+          ),
+        );
+      });
+      await pumpApp(tester);
+      await pushRoute(tester, AppShellRouteNames.performance);
+
+      await tapRailIconOnce(tester, Icons.dns_outlined);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 500)),
+      );
+      await tester.pump();
+      final card = find.byKey(
+        const ValueKey<String>('server-card-navigation-retention-server'),
+      );
+      expect(card, findsOneWidget);
+
+      await tester.longPress(card);
+      await tester.pump();
+      final checkbox = find.descendant(
+        of: card,
+        matching: find.byType(Checkbox),
+      );
+      expect(checkbox, findsOneWidget);
+      expect(tester.widget<Checkbox>(checkbox).value, isTrue);
+
+      await tapRailIconOnce(tester, Icons.monitor_heart_outlined);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tapRailIconOnce(tester, Icons.dns_outlined);
+      await tester.pump(const Duration(milliseconds: 400));
+
+      final returnedCard = find.byKey(
+        const ValueKey<String>('server-card-navigation-retention-server'),
+      );
+      expect(returnedCard, findsOneWidget);
+      final returnedCheckbox = find.descendant(
+        of: returnedCard,
+        matching: find.byType(Checkbox),
+      );
+      expect(returnedCheckbox, findsOneWidget);
+      expect(tester.widget<Checkbox>(returnedCheckbox).value, isTrue);
 
       await disposeTree(tester);
     });
