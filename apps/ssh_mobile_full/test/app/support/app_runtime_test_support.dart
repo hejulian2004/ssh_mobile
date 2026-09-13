@@ -81,10 +81,16 @@ final class FakeNetworkRuntime implements NetworkRuntime {
 }
 
 final class FakeCommandGateway implements NetworkCommandGateway {
+  FakeCommandGateway({this.commandCompletion});
+
   final StreamController<Uint8List> _events =
       StreamController<Uint8List>.broadcast();
   final List<Uint8List> commands = <Uint8List>[];
   final NetworkProtocolV2Codec _codec = const NetworkProtocolV2Codec();
+
+  /// Test-only command gate. Returning false keeps the command pending until
+  /// the test emits its own result frame.
+  FutureOr<bool> Function(String commandId)? commandCompletion;
 
   @override
   Stream<Uint8List> get events => _events.stream;
@@ -93,10 +99,28 @@ final class FakeCommandGateway implements NetworkCommandGateway {
   TransportOperationStatus sendCommand(Uint8List command) {
     commands.add(command);
     final commandId = _codec.commandId(command);
-    scheduleMicrotask(() {
-      if (!_events.isClosed) _events.add(_commandResultFrame(commandId));
+    scheduleMicrotask(() async {
+      final complete = await commandCompletion?.call(commandId) ?? true;
+      if (complete && !_events.isClosed) {
+        _events.add(_commandResultFrame(commandId));
+      }
     });
     return TransportOperationStatus.success;
+  }
+
+  int countCommands(String prefix) => commands
+      .map(_codec.commandId)
+      .where((commandId) => commandId.startsWith(prefix))
+      .length;
+
+  String latestCommandId(String prefix) => commands
+      .map(_codec.commandId)
+      .lastWhere((commandId) => commandId.startsWith(prefix));
+
+  void emitCommandResult(String commandId, {bool accepted = true}) {
+    if (!_events.isClosed) {
+      _events.add(_commandResultFrame(commandId, accepted: accepted));
+    }
   }
 
   void emitEvent(Uint8List event) {
@@ -106,12 +130,13 @@ final class FakeCommandGateway implements NetworkCommandGateway {
   Future<void> close() => _events.close();
 }
 
-Uint8List _commandResultFrame(String commandId) => Uint8List.fromList(
-  _eventFrame(13, <int>[
-    ..._bytesField(1, utf8.encode(commandId)),
-    ..._varintField(2, 1),
-  ]),
-);
+Uint8List _commandResultFrame(String commandId, {bool accepted = true}) =>
+    Uint8List.fromList(
+      _eventFrame(13, <int>[
+        ..._bytesField(1, utf8.encode(commandId)),
+        ..._varintField(2, accepted ? 1 : 0),
+      ]),
+    );
 
 List<int> _eventFrame(int eventField, List<int> payload) => <int>[
   ..._bytesField(1, utf8.encode('event-a')),

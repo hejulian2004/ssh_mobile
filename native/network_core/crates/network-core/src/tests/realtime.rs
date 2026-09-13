@@ -1,4 +1,5 @@
 use super::*;
+use futures_util::task::noop_waker_ref;
 use network_protocol::{network_event, NetworkErrorCode};
 use network_relay::v2::{DiscoveryAck, DiscoverySnapshot, ResolvePeerResponse};
 use network_relay::RelayError;
@@ -11,6 +12,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
@@ -1640,6 +1642,7 @@ async fn provisional_offer_and_ice_remain_native_only_until_matching_request() {
 
 #[tokio::test]
 async fn provisional_request_expires_without_followup_traffic() {
+    tokio::time::pause();
     let (state, _event_rx) = realtime_test_state().await;
     register_realtime_peer(&state, "peer-a").await;
     let realtime_id = "11112222333344445555666677778888";
@@ -1681,7 +1684,14 @@ async fn provisional_request_expires_without_followup_traffic() {
         .await
         .provisional_requests
         .contains_key(realtime_id));
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    // Let the supervised worker observe the request and register its timer
+    // before advancing paused time. This keeps the no-follow-up-traffic
+    // assertion independent from wall-clock scheduling.
+    tokio::task::yield_now().await;
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_millis(101)).await;
+    tokio::task::yield_now().await;
+    tokio::task::yield_now().await;
     assert!(!state
         .realtime
         .lock()
@@ -1694,22 +1704,12 @@ async fn provisional_request_expires_without_followup_traffic() {
 
 #[tokio::test]
 async fn provisional_expiry_worker_wakes_for_an_earlier_deadline() {
+    tokio::time::pause();
     let (state, _event_rx) = realtime_test_state().await;
-    register_realtime_peer(&state, "peer-a").await;
     let now_ms = crate::events::unix_timestamp_ms().max(0) as u64;
-    for (realtime_id, operation_id, expires_at_ms) in [
-        (
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "operation-late",
-            now_ms + 120_000,
-        ),
-        (
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "operation-early",
-            now_ms + 100,
-        ),
-    ] {
-        let request = ScreenShareConsentV2 {
+
+    let make_request =
+        |realtime_id: &str, operation_id: &str, expires_at_ms| ScreenShareConsentV2 {
             schema_version: 2,
             operation_id: operation_id.into(),
             realtime_id: realtime_id.into(),
@@ -1723,35 +1723,66 @@ async fn provisional_expiry_worker_wakes_for_an_earlier_deadline() {
             action_revision: 1,
             shared_session_instance_id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
         };
-        handle_v2_realtime_signal(
-            &state,
-            &V2RealtimeSignal {
-                realtime_id: realtime_id.into(),
-                target_device_id: "local-device".into(),
-                source_device_id: "peer-a".into(),
-                kind: 6,
-                revision: 1,
-                payload: encode_realtime_signal_payload(
-                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                    &request.encode_to_vec(),
-                )
-                .expect("request envelope"),
-                ..Default::default()
+    let late_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let early_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let late_deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    let early_deadline = tokio::time::Instant::now() + Duration::from_millis(100);
+    let wake = {
+        let mut manager = state.realtime.lock().await;
+        let late_epoch = manager.next_provisional_epoch();
+        manager.provisional_requests.insert(
+            late_id.into(),
+            ProvisionalPendingRequest {
+                provisional_epoch: late_epoch,
+                authenticated_peer_id: "peer-a".into(),
+                shared_session_instance_id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+                request: make_request(late_id, "operation-late", now_ms + 120_000),
+                expires_at_ms: now_ms + 120_000,
+                expiry_deadline: late_deadline,
             },
-        )
-        .await
-        .expect("request is retained provisionally");
+        );
+        Arc::clone(&manager.provisional_expiry_wake)
+    };
+
+    // This is the existing infinite worker, pinned and manually polled. The
+    // first poll proves it is waiting on the late deadline before an earlier
+    // entry is inserted; it does not claim to cover Notify's internal waiter
+    // registration window.
+    let mut worker = Box::pin(run_provisional_expiry_worker(
+        Arc::clone(&state),
+        Arc::clone(&wake),
+    ));
+    let mut context = Context::from_waker(noop_waker_ref());
+    assert!(matches!(worker.as_mut().poll(&mut context), Poll::Pending));
+
+    {
+        let mut manager = state.realtime.lock().await;
+        let early_epoch = manager.next_provisional_epoch();
+        manager.provisional_requests.insert(
+            early_id.into(),
+            ProvisionalPendingRequest {
+                provisional_epoch: early_epoch,
+                authenticated_peer_id: "peer-a".into(),
+                shared_session_instance_id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+                request: make_request(early_id, "operation-early", now_ms + 100),
+                expires_at_ms: now_ms + 100,
+                expiry_deadline: early_deadline,
+            },
+        );
+        manager.wake_provisional_expiry();
     }
 
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    // The stored notify_one permit must wake the old-deadline wait and make
+    // the worker recompute the global earliest deadline.
+    assert!(matches!(worker.as_mut().poll(&mut context), Poll::Pending));
+    tokio::time::advance(Duration::from_millis(101)).await;
+    assert!(matches!(worker.as_mut().poll(&mut context), Poll::Pending));
+
     let manager = state.realtime.lock().await;
-    assert!(manager
-        .provisional_requests
-        .contains_key("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
-    assert!(!manager
-        .provisional_requests
-        .contains_key("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+    assert!(!manager.provisional_requests.contains_key(early_id));
+    assert!(manager.provisional_requests.contains_key(late_id));
     drop(manager);
+    drop(worker);
     state.task_supervisor.cancel_root();
     state.task_supervisor.shutdown().await;
 }
