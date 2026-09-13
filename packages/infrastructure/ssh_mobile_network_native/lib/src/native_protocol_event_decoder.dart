@@ -45,6 +45,7 @@ final class _NativeProtocolEventDecoder {
         case 31:
         case 32:
         case 33:
+        case 34:
           payloadField = field.number;
           payload = reader.bytes(field.wireType);
         default:

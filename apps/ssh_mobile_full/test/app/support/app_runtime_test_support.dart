@@ -24,7 +24,7 @@ const _pathProviderChannel = MethodChannel('plugins.flutter.io/path_provider');
 final class FakeNetworkRuntime implements NetworkRuntime {
   FakeNetworkRuntime({this.realtimeGateway});
 
-  final NetworkRealtimeGateway? realtimeGateway;
+  NetworkRealtimeGateway? realtimeGateway;
   Object? disposeError;
   int disposeCalls = 0;
   int ensureCapabilityCalls = 0;

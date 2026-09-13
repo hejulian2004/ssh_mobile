@@ -3,11 +3,13 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:feature_lan_share/feature_lan_share.dart' as lan;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'package:network_transport/network_transport.dart';
 import 'package:ssh_mobile_network_native/ssh_mobile_network_native.dart';
+import 'package:ssh_mobile/app/app_runtime.dart';
 import 'package:ssh_mobile/app/screen_share_incoming_request_host.dart';
 import 'package:ssh_mobile/app/screen_share_peer_arbitration.dart';
 
@@ -16,27 +18,42 @@ import 'support/app_runtime_test_support.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  late RuntimeHarness harness;
+  late AppRuntime runtime;
+  late FakeNetworkRuntime network;
+  late FakeCommandGateway commandGateway;
+
+  setUp(() async {
+    commandGateway = FakeCommandGateway();
+    network = FakeNetworkRuntime();
+    harness = await newRuntimeHarness(
+      networkRuntime: network,
+      disposeLogger: false,
+      startPendingInitialization: false,
+    );
+    runtime = await harness.createFuture;
+    network.realtimeGateway = RuntimeNetworkRealtimeGateway(commandGateway);
+  });
+
   testWidgets(
     'a losing incoming intent does not invalidate the current expiry owner',
     (tester) async {
-      final commandGateway = FakeCommandGateway();
-      final network = FakeNetworkRuntime(
-        realtimeGateway: RuntimeNetworkRealtimeGateway(commandGateway),
-      );
-      final harness = await newRuntimeHarness(
-        networkRuntime: network,
-        disposeLogger: false,
-        startPendingInitialization: false,
-      );
-      final runtime = await harness.createFuture;
       final navigatorKey = GlobalKey<NavigatorState>();
       final arbitration = AppScreenSharePeerArbitrationRegistry();
-      addTearDown(() async {
+      var cleanedUp = false;
+      Future<void> cleanUp() async {
+        if (cleanedUp) return;
+        cleanedUp = true;
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();
-        await runtime.dispose();
-        await harness.close();
+        // AppLogService installs a debugPrint bridge. Restore the binding
+        // callback before Flutter checks foundation globals.
+        debugPrint = debugPrintSynchronously;
         await commandGateway.close();
+      }
+
+      addTearDown(() async {
+        await cleanUp();
       });
 
       await tester.pumpWidget(
@@ -76,17 +93,26 @@ void main() {
           actionRevision: 1,
         ),
       );
-      unawaited(runtime.realtimeClient.discardIncomingOffer(warmupOffer));
+      await runtime.realtimeClient.discardIncomingOffer(warmupOffer);
       await tester.pump();
 
-      commandGateway.emitEvent(
-        _incomingOfferEvent(
-          realtimeId: '00112233445566778899aabbccddee11',
-          sharedSessionInstanceId: 'ffeeddccbbaa99887766554433221100',
-          operationId: 'operation-a',
-          bindingExpiry: now.add(const Duration(milliseconds: 250)),
-        ),
+      final firstIncomingEvent = _incomingOfferEvent(
+        realtimeId: '00112233445566778899aabbccddee11',
+        sharedSessionInstanceId: 'ffeeddccbbaa99887766554433221100',
+        operationId: 'operation-a',
+        bindingExpiry: now.add(const Duration(seconds: 1)),
       );
+      expect(
+        NativeNetworkProtocol.decodeEvent(firstIncomingEvent),
+        isA<NativeRealtimeIncomingSessionOfferEvent>(),
+      );
+      commandGateway.emitEvent(firstIncomingEvent);
+      await tester.pump();
+      await tester.idle();
+      await tester.pump();
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      });
       await tester.pump();
       expect(find.text('Incoming screen-share request'), findsOneWidget);
 
@@ -102,10 +128,15 @@ void main() {
         ),
       );
       await tester.pump();
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      });
+      await tester.pump();
       expect(find.text('Incoming screen-share request'), findsOneWidget);
 
-      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump(const Duration(milliseconds: 1100));
       expect(find.text('Incoming screen-share request'), findsNothing);
+      await cleanUp();
     },
   );
 }
