@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:feature_lan_share/feature_lan_share.dart' as lan;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:network_sdk/network_sdk.dart';
 import 'package:network_transport/network_transport.dart';
 import 'package:ssh_mobile_network_native/ssh_mobile_network_native.dart';
 import 'package:ssh_mobile/app/screen_share_incoming_request_host.dart';
@@ -51,18 +52,33 @@ void main() {
         ),
       );
 
-      final warmup = runtime.realtimeClient.createSession(
-        realtimeId: '00112233445566778899aabbccddee00',
-        peerId: 'peer-a',
-      );
       // Opening the lazy realtime gateway is enough to install the backend
-      // event subscription. Keep the command-result round trip out of this
-      // Host-only regression; AppRuntime disposal force-cleans the helper
-      // session if its start remains pending.
-      unawaited(warmup.start());
+      // event subscription. Use a provisional discard rather than creating a
+      // formal session, so this Host-only regression has no session lifecycle
+      // to keep alive during widget teardown.
+      final now = DateTime.now().toUtc();
+      final warmupRealtimeId = '00112233445566778899aabbccddee00';
+      final warmupOffer = RealtimeIncomingSessionOffer(
+        offerId: 'host-test-warmup',
+        claimToken: 'host-test-warmup-token',
+        realtimeId: warmupRealtimeId,
+        authenticatedPeerId: 'peer-a',
+        sharedSessionInstanceId: 'ffeeddccbbaa99887766554433221100',
+        bindingExpiresAt: now.add(const Duration(seconds: 5)),
+        request: RealtimeConsent(
+          operationId: 'host-test-warmup-operation',
+          realtimeId: warmupRealtimeId,
+          sharedSessionInstanceId: 'ffeeddccbbaa99887766554433221100',
+          issuedAt: now,
+          expiresAt: now.add(const Duration(seconds: 2)),
+          decision: RealtimeConsentDecision.request,
+          senderPeerId: 'peer-a',
+          actionRevision: 1,
+        ),
+      );
+      unawaited(runtime.realtimeClient.discardIncomingOffer(warmupOffer));
       await tester.pump();
 
-      final now = DateTime.now().toUtc();
       commandGateway.emitEvent(
         _incomingOfferEvent(
           realtimeId: '00112233445566778899aabbccddee11',
