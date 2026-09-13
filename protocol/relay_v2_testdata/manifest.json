@@ -13,6 +13,7 @@
     "MAX_RELAY_DATA_FRAME_BYTES": 524292,
     "MAX_RELAY_FRAME_BYTES": 524292,
     "PRESENCE_TTL_S": 60,
+    "REALTIME_SIGNAL_SOURCE_DEVICE_ID_FIELD_TAG": 7,
     "RELAY_V2_VERSION": 2,
     "RESERVATION_EXPIRY_GRACE_S": 5,
     "RESERVATION_ID_BYTES": 16,
@@ -351,6 +352,24 @@
       },
       "file": "realtime_signal.control.bin",
       "name": "realtime_signal",
+      "transport": "control"
+    },
+    {
+      "direction": "server->client",
+      "expects": {
+        "kind": 3,
+        "kind_name": "REALTIME_SIGNAL_KIND_ICE_CANDIDATE",
+        "message": "realtime_signal",
+        "payload_hex": "7364702d6d69643d303b63616e6469646174653a3834323136333034392031207564702031363737373239353335203139382e35312e3130302e3720353433323120747970207372666c78",
+        "realtime_id": "rt-9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+        "request_id": 1001,
+        "revision": 7,
+        "source_device_id": "11111111111111111111111111111111",
+        "target_device_id": "22222222222222222222222222222222",
+        "version": 2
+      },
+      "file": "realtime_signal_forwarded.control.bin",
+      "name": "realtime_signal_forwarded",
       "transport": "control"
     },
     {

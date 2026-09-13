@@ -16,6 +16,28 @@ enum ScreenShareOperationState {
 /// Whether this device requested the share or receives it.
 enum ScreenShareRole { sender, receiver }
 
+/// Pure source metadata exposed to Feature UI.
+///
+/// The id is an App-issued, route-scoped selection token. It is deliberately
+/// not a native window handle or a platform source id.
+enum ScreenShareSourceKind { display, window }
+
+final class ScreenShareSourceOption {
+  const ScreenShareSourceOption({
+    required this.opaqueId,
+    required this.kind,
+    required this.label,
+    required this.width,
+    required this.height,
+  });
+
+  final String opaqueId;
+  final ScreenShareSourceKind kind;
+  final String label;
+  final int width;
+  final int height;
+}
+
 /// Platform/media failures observed by the Feature without exposing native
 /// error implementation details.
 enum ScreenShareMediaEventKind {

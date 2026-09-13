@@ -79,6 +79,8 @@ final class AppRuntimeFactory {
   ///
   /// [disposeLogger] 默认 [true]，生产行为不变；回归测试可以关闭它，避免
   /// 销毁跨用例共享的 `AppLogService` 全局单例。
+  /// [startPendingInitialization] 默认 [true]；仅用于不需要后台启动任务的
+  /// App widget/route 测试，生产入口保持原有非阻塞初始化行为。
   static Future<AppRuntime> create({
     AppLogService? appLogService,
     connection_core.ConnectionDatabase? connectionDatabase,
@@ -95,6 +97,7 @@ final class AppRuntimeFactory {
     feature_mcp.McpModuleDatabaseFactory? mcpDatabaseFactory,
     bool? lanShareReceiverEnabled,
     bool disposeLogger = true,
+    bool startPendingInitialization = true,
     void Function(String event)? lifecycleObserver,
   }) {
     return _AppRuntimeFactoryContext(
@@ -113,6 +116,7 @@ final class AppRuntimeFactory {
       mcpDatabaseFactory: mcpDatabaseFactory,
       lanShareReceiverEnabled: lanShareReceiverEnabled,
       disposeLogger: disposeLogger,
+      startPendingInitialization: startPendingInitialization,
       lifecycleObserver: lifecycleObserver,
     ).create();
   }

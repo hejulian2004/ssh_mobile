@@ -1,4 +1,4 @@
-> Last updated: 2026-08-30
+> Last updated: 2026-09-12
 
 # Client Architecture
 
@@ -29,3 +29,15 @@ Full designs: [modular refactor](../../docs/architecture/MODULAR_REFACTOR_PLAN.m
 [module dependency](../../docs/architecture/MODULE_DEPENDENCY.md),
 [resource ownership](../../docs/architecture/RESOURCE_OWNERSHIP.md), and
 [compatibility inventory](../../docs/architecture/COMPATIBILITY_MIGRATION_INVENTORY.md).
+
+## PR74 ownership map
+
+`AppScreenSharePeerArbitrationRegistry` stores only one pending/active intent
+per remote peer and uses the public Feature comparator; it owns no resource.
+`AppScreenShareSessionLease` owns only one SDK Realtime session's stop,
+terminal wait, and exact release. `AppScreenShareMediaCoordinator` owns the
+route-scoped endpoint, capture/encoder, decoder, and opaque surface/Texture
+lease. Navigator success transfers the session lease to the route; route
+teardown stops media before session cleanup for senders, and stops receive
+ingress/session before releasing receiver presentation. The global incoming
+host uses LAN's receive trust capability, never the TrustStore directly.

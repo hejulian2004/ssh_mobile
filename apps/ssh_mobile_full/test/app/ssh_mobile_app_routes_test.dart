@@ -35,7 +35,13 @@ void main() {
   late AppRuntime runtime;
 
   setUp(() async {
-    harness = await newRuntimeHarness(disposeLogger: false);
+    harness = await newRuntimeHarness(
+      disposeLogger: false,
+      // Route aggregation is UI coverage; do not start a native transport
+      // per test and leave its asynchronous teardown overlapping the next
+      // route tree in this Flutter tester process.
+      networkRuntime: FakeNetworkRuntime(),
+    );
     runtime = await harness.createFuture;
   });
 

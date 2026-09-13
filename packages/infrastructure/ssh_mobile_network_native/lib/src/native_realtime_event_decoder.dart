@@ -233,6 +233,77 @@ final class _NativeRealtimeEventDecoder {
     );
   }
 
+  static NativeRealtimeIncomingSessionOfferEvent _decodeIncomingSessionOffer(
+    String eventId,
+    int timestampMs,
+    int protocolVersion,
+    Uint8List bytes,
+  ) {
+    final reader = _ProtoReader(bytes);
+    var offerId = '';
+    var claimToken = '';
+    var realtimeId = '';
+    var authenticatedPeerId = '';
+    var sharedSessionInstanceId = '';
+    var bindingExpiresAtMs = 0;
+    var requestBytes = Uint8List(0);
+    while (!reader.isDone) {
+      final field = reader.field();
+      switch (field.number) {
+        case 1:
+          offerId = reader.string(field.wireType, _maxEventIdBytes);
+        case 2:
+          claimToken = reader.string(field.wireType, _maxEventIdBytes);
+        case 3:
+          realtimeId = reader.string(field.wireType, _realtimeIdBytes);
+        case 4:
+          authenticatedPeerId = reader.string(field.wireType, _maxPeerIdBytes);
+        case 5:
+          sharedSessionInstanceId = reader.string(
+            field.wireType,
+            _sharedSessionInstanceIdBytes,
+          );
+        case 6:
+          bindingExpiresAtMs = reader.varint(field.wireType);
+        case 7:
+          requestBytes = reader.bytes(
+            field.wireType,
+            _maxScreenShareConsentPayloadBytes,
+          );
+        default:
+          reader.skip(field.wireType);
+      }
+    }
+    if (offerId.isEmpty || claimToken.isEmpty || bindingExpiresAtMs <= 0) {
+      throw const FormatException(
+        'Incoming Realtime offer metadata is incomplete.',
+      );
+    }
+    _values.validateDecodedRealtimeId(realtimeId);
+    _values.validateDecodedPeerId(authenticatedPeerId);
+    _values.validateDecodedSharedSessionInstanceId(sharedSessionInstanceId);
+    final request = _decodeScreenShareConsent(requestBytes, realtimeId);
+    if (request.decision != NativeScreenShareConsentDecision.request ||
+        request.senderPeerId != authenticatedPeerId ||
+        request.sharedSessionInstanceId != sharedSessionInstanceId) {
+      throw const FormatException(
+        'Incoming Realtime offer request metadata is mismatched.',
+      );
+    }
+    return NativeRealtimeIncomingSessionOfferEvent(
+      eventId: eventId,
+      timestampMs: timestampMs,
+      protocolVersion: protocolVersion,
+      offerId: offerId,
+      claimToken: claimToken,
+      realtimeId: realtimeId,
+      authenticatedPeerId: authenticatedPeerId,
+      sharedSessionInstanceId: sharedSessionInstanceId,
+      bindingExpiresAtMs: bindingExpiresAtMs,
+      request: request,
+    );
+  }
+
   static NativeRealtimeSnapshotEvent _decodeRealtimeSnapshot(
     String eventId,
     int timestampMs,

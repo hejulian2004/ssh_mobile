@@ -22,7 +22,9 @@ import 'lan_share_settings_screen.dart';
 part 'widgets/lan_share_dialogs.dart';
 
 class LanShareScreen extends StatefulWidget {
-  const LanShareScreen({super.key});
+  const LanShareScreen({this.screenSharePort, super.key});
+
+  final LanShareScreenSharePort? screenSharePort;
 
   @override
   State<LanShareScreen> createState() => _LanShareScreenState();
@@ -37,6 +39,7 @@ class _LanShareScreenState extends State<LanShareScreen>
   late Future<Map<String, String>> _localIpsFuture;
   bool _isRefreshingIps = false;
   bool _scanningInitialized = false;
+  LanShareScreenSharePort? _screenSharePort;
 
   @override
   void initState() {
@@ -49,12 +52,21 @@ class _LanShareScreenState extends State<LanShareScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _screenSharePort ??= widget.screenSharePort ?? _tryReadScreenSharePort();
     if (!_scanningInitialized) {
       _scanningInitialized = true;
       final vm = context.read<LanShareViewModel>();
       if (!vm.isScanning) {
         unawaited(vm.startScanning());
       }
+    }
+  }
+
+  LanShareScreenSharePort? _tryReadScreenSharePort() {
+    try {
+      return context.read<LanShareScreenSharePort>();
+    } on ProviderNotFoundException {
+      return null;
     }
   }
 
@@ -641,6 +653,24 @@ class _LanShareScreenState extends State<LanShareScreen>
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                     ),
+                  ),
+                ],
+                if (_screenSharePort?.canShareWith(state.peerId) == true) ...[
+                  const SizedBox(width: 4),
+                  IconButton(
+                    tooltip: strings.isEnglish ? 'Share screen' : '共享屏幕',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.screen_share_outlined, size: 18),
+                    onPressed: () async {
+                      try {
+                        await _screenSharePort!.startScreenShare(state.peerId);
+                      } catch (error) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(
+                          context,
+                        ).showSnackBar(SnackBar(content: Text('$error')));
+                      }
+                    },
                   ),
                 ],
                 const SizedBox(width: 8),

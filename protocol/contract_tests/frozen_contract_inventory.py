@@ -71,7 +71,7 @@ class FrozenContractInventoryMixin:
         fixtures = manifest.get("fixtures")
         self.assertIsInstance(fixtures, list)
         assert isinstance(fixtures, list)
-        self.assertEqual(len(fixtures), 22)
+        self.assertEqual(len(fixtures), 23)
 
         max_frame_bytes = constants["MAX_RELAY_FRAME_BYTES"]
         self.assertEqual(max_frame_bytes, constants["MAX_RELAY_DATA_FRAME_BYTES"])

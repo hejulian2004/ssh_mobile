@@ -1,4 +1,4 @@
-最新更新时间：2026-09-08
+最新更新时间：2026-09-12
 
 # feature_screen_share 维护约束
 
@@ -16,6 +16,13 @@
 - Feature disposal cancels timers and subscriptions and asks the borrowed media
   port to stop an active operation; it never stops or disposes App-owned
   NetworkRuntime/Realtime resources.
+- `RealtimeIncomingSessionOffer` is metadata-only. Claim, reject, discard,
+  session lease transfer, native generation identity, and source-token mapping
+  remain App/platform responsibilities. Do not add `realtime_media`, native
+  source IDs, SDP, ICE, texture IDs, or pending-offer handles here.
+- `compareScreenShareIntents` is the only public collision comparator. Keep its
+  UTF-8 `(initiatorPeerId, operationId)` semantics pure and do not duplicate
+  arbitration logic in a caller.
 
 ## Validation
 

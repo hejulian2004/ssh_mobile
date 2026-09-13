@@ -322,6 +322,9 @@ func ValidateControl(msg *RelayFrame) error {
 		if err := checkMax("target_device_id", len(s.TargetDeviceId), MAX_DEVICE_ID_BYTES); err != nil {
 			return err
 		}
+		if err := checkMax("source_device_id", len(s.SourceDeviceId), MAX_DEVICE_ID_BYTES); err != nil {
+			return err
+		}
 		return checkMax("payload", len(s.Payload), MAX_REALTIME_SIGNAL_PAYLOAD_BYTES)
 	case *RelayFrame_ProtocolError:
 		return checkMax("attempt_id", len(k.ProtocolError.AttemptId), MAX_ATTEMPT_ID_BYTES)

@@ -1,4 +1,4 @@
-> Last updated: 2026-08-31
+> Last updated: 2026-09-12
 
 # Client Overview
 
@@ -27,3 +27,13 @@ React administration route to Backend/Front. For package work, read the nearest
 `AGENTS.md` and `README.md`; they are local contracts, while this Memory keeps
 only costly cross-package facts. The root README owns setup/configuration and
 user-facing behavior.
+
+## Realtime screen-share entry
+
+PR74 connects the existing native screen-video capability to a user-facing
+vertical slice. LAN supplies only a peer-scoped `LanShareScreenSharePort`;
+App Shell owns the entry coordinator, global incoming host, peer arbitration,
+route/session lease, and platform presenter. The screen-share Feature owns
+consent/business state and opaque media-port coordination only. Camera/general
+video is outside this slice; real Windows/Android capture and render remain
+hardware acceptance evidence, not a CI claim.

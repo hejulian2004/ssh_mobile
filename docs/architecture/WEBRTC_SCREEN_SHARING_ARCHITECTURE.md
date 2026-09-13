@@ -1,4 +1,4 @@
-Last updated: 2026-09-11
+Last updated: 2026-09-12
 
 # WebRTC Screen Sharing Architecture
 
@@ -394,9 +394,12 @@ Existing authenticated signaling carries offer, answer, ICE candidate, ICE
 restart, and close. Phase 5 adds the dedicated
 `REALTIME_SIGNAL_KIND_SCREEN_SHARE_CONSENT` signal and its authenticated
 `ScreenShareConsentV2` control payload through the protocol source of truth. It
-is not a `RelayDataFrame` or a video payload; the existing Relay `RealtimeSignal`
-still carries `realtime_id` + `target_device_id` + `kind` + `revision` + bounded
-`payload`, with no sender field on that wire. The typed consent payload is:
+is not a `RelayDataFrame` or a video payload. Relay V2 extends the existing
+`RealtimeSignal` additively with `source_device_id = 7`: a client-to-Relay
+signal must omit it, while Relay writes the authenticated sender device ID on
+the server-to-target direction. Existing bound sessions still accept an absent
+source from an old Relay; an unknown session without an authenticated source
+fails closed. The typed consent payload is:
 
 ~~~text
 schema_version = 2                  # payload schema version, not Relay v2
@@ -414,26 +417,36 @@ action_revision >= 1                 # monotonic within (operation_id, sender_pe
 
 The whole typed payload is at most 4 KiB, below the existing 256 KiB
 `RealtimeSignal` payload bound. `sender_peer_id` identifies the authenticated
-peer that authored the individual action (the REQUEST origin is therefore the
-sender of the screen content). The operation ID binds later ACCEPT/REJECT/CANCEL
+author of the individual consent action: REQUEST identifies the operation
+initiator, ACCEPT/REJECT identify the receiver that made that decision, and
+CANCEL identifies the actor that cancelled. The operation ID binds later
 actions to that request; no `peer_id` or `sender_device_id` alias is introduced.
+`contentSenderPeerId` is a derived provisional-operation property, not another
+wire field.
 The payload contains no bearer token, private key, or reusable credential.
 
-The receiver keeps at most 32 live provisional operations, with no more than one
-for a given `(sender_peer_id, operation_id)`, and stores only typed metadata plus a
-protected pending-offer handle. A bounded replay cache keeps at most 256 keys
-per authenticated peer for five minutes; its key is
-`(sender_peer_id, target_device_id, realtime_id, operation_id, decision,
-action_revision)`. Expiry deletes provisional state and cannot be renewed.
+The receiver keeps at most 32 live provisional operations, where one
+authenticated provisional `realtime_id` consumes one slot whether it is
+Offer-only, REQUEST-only, or paired. Offer and REQUEST storage therefore share
+one budget, and an identity mismatch on the other half of an existing
+`realtime_id` fails closed. A bounded replay cache keeps at most 256 keys per
+authenticated peer for five minutes; its key is
+`(sender_peer_id, local_authenticated_device_id, realtime_id, operation_id,
+decision, action_revision)`. Expiry deletes provisional state and cannot be
+renewed. A native-only entry epoch makes expiry deletion exact across
+REQUEST-before-Offer pairing and replacement.
 Replay-cache failure, duplicate or out-of-order action, expired intent, unknown
 version/purpose/media, oversized payload, or a non-contiguous action revision
 fails closed.
 
-Authentication and binding checks are mandatory: the outer authenticated source
-and target must match the expected peers; `sender_peer_id` must match the
-authenticated content sender and the pending operation; `realtime_id` must map
-to the current shared session. REQUEST alone creates provisional state;
-ACCEPT/REJECT only acts on a matching, non-terminal, non-expired REQUEST.
+Authentication and binding checks are mandatory: the Relay-authenticated outer
+source and target must match the expected peers; `sender_peer_id` must match the
+authenticated author of this individual action. REQUEST establishes the
+operation initiator; ACCEPT/REJECT must be authored by the authenticated
+receiver and CANCEL by the authenticated actor issuing the cancellation.
+`realtime_id` must map to the current shared session. REQUEST alone creates
+provisional state; ACCEPT/REJECT only acts on a matching, non-terminal,
+non-expired REQUEST.
 `schema_version`, action replay, and the local native-generation guard are
 separate checks. Native generation is process-local media-lease freshness and
 never appears in the consent wire payload. The Relay routes this bounded
@@ -457,14 +470,42 @@ Incoming screen-share request
   -> feature presents accept and reject
   -> user reject: close/reject without an accepted media session
   -> user accept: validate operation, authenticated sender, realtime ID, and generation
-  -> only then permit WebRTC answer and negotiation
-  -> native ready: attach remote decode/render path
+  -> pre-register the exact SDK responder session
+  -> native consumes the pending Offer and queued ICE, creates and sends Answer
+  -> send typed ACCEPT immediately; Connected remains a transport gate
+  -> native ready + matching generation: attach remote decode/render path
 ~~~
 
 An incoming Offer may be retained only as bounded provisional signaling state
 needed to ask the user. It must not automatically create a final accepted media
-session, auto-answer, auto-display a screen, or start local capture. Stale,
-duplicate, oversized, unknown, or mismatched operation actions fail closed.
+session, auto-answer, auto-display a screen, or start local capture. Before
+claim, authenticated matching ICE remains native-only in a bounded queue:
+128 candidates, 8 KiB per candidate, 256 KiB total, and a 120-second binding
+lifetime. Offer and ICE share the formal signaling validation. A claim uses the
+state machine `pending -> claiming -> claimed`; ICE arriving before exact
+responder registration remains in the protected queue, while later matching ICE
+may route directly to that exact claiming generation. Answer success is the
+external claim commit; rollback destroys the exact generation and any remaining
+provisional queue. A sender CANCEL must also remove an unclaimed provisional
+binding. A runtime-supervised native expiry worker is authoritative; App expiry
+only removes stale UI/arbitration state.
+Stale, duplicate, oversized, unknown, or mismatched operation actions fail
+closed.
+
+The App receives a `RealtimeIncomingSessionOffer` only after an authenticated
+Offer and the complete matching typed REQUEST have been paired. The metadata
+contains the immutable REQUEST, operation/revision/freshness, peer/session
+identity, expiry, and an opaque claim token; SDP, ICE, and the pending native
+handle never enter Dart. Reject has a provisional wire side effect and then
+terminates the binding; discard is silent local cleanup. Answer-send failure
+rolls back the exact responder generation and exact SDK registry entry, without
+touching a replacement session.
+
+`releaseSession` is not a command-completion shortcut: it records a pending
+release, requests stop, and waits for the exact session's authoritative
+stopped/failed lifecycle event before removing the SDK registry entry. A
+bounded route teardown may return while that release remains pending; runtime
+dispose is the final force-cleanup owner.
 
 The accepted sending flow is:
 
@@ -482,6 +523,34 @@ The sender must not continuously capture, encode, or queue real screen content
 until all three conditions are true: explicit sender action, remote acceptance,
 and WebRTC readiness. Sharing UI must visibly state that sharing is active; use
 a platform capture indicator or foreground notification where available.
+
+## PR74 product entry and ownership gate
+
+PR74 connects the accepted capability stack to a user-facing vertical slice:
+
+~~~text
+LAN trusted online peer
+  -> source metadata picker and App-issued route token
+  -> sender RealtimeSession / Negotiating identity
+  -> native provisional Offer + bounded ICE
+  -> typed REQUEST and Offer/REQUEST pairing
+  -> global incoming host / explicit Reject or Accept
+  -> claim, Answer, identity, typed ACCEPT
+  -> Connected + consent + current generation
+  -> capture / decode / opaque surface presenter
+  -> Stop, disconnect, and role-aware cleanup
+~~~
+
+The LAN Feature exposes only a narrow public capability and never imports the
+screen-share Feature. An App-scope peer arbitration registry covers pending and
+active intents for a remote peer, uses the public UTF-8
+`(initiatorPeerId, operationId)` comparator, and does not duplicate consent
+business logic. The App session lease owns only the `RealtimeSession`, stop,
+terminal wait, and exact SDK release. The media coordinator owns endpoints,
+capture/encoder, decoder, and platform surface/texture. Sender teardown stops
+production before capture/endpoint release and then stops/releases the session;
+receiver teardown stops ingress, stops/releases the session, then detaches and
+releases the decoder/surface. No route stops the App `NetworkRuntime`.
 
 ## Media lifecycle, backpressure, and recovery
 

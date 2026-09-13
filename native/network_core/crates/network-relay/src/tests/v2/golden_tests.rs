@@ -359,11 +359,30 @@ fn realtime_and_error_frames_match_the_frozen_golden_fixtures() {
             revision: REVISION_A as u64,
             payload: b"sdp-mid=0;candidate:842163049 1 udp 1677729535 198.51.100.7 54321 typ srflx"
                 .to_vec(),
+            source_device_id: String::new(),
         })),
     };
     assert_matches_golden(
         "realtime_signal.control.bin",
         &encode_control_frame(&signal).expect("encode"),
+    );
+
+    let forwarded_signal = RelayFrame {
+        version: RELAY_V2_VERSION,
+        kind: Some(relay_frame::Kind::RealtimeSignal(RealtimeSignal {
+            request_id: REQUEST_ID,
+            realtime_id: REALTIME_ID.into(),
+            target_device_id: DEVICE_B.into(),
+            kind: 3, // REALTIME_SIGNAL_KIND_ICE_CANDIDATE
+            revision: REVISION_A as u64,
+            payload: b"sdp-mid=0;candidate:842163049 1 udp 1677729535 198.51.100.7 54321 typ srflx"
+                .to_vec(),
+            source_device_id: DEVICE_A.into(),
+        })),
+    };
+    assert_matches_golden(
+        "realtime_signal_forwarded.control.bin",
+        &encode_control_frame(&forwarded_signal).expect("encode"),
     );
 
     let error = RelayFrame {

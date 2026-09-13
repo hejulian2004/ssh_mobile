@@ -75,7 +75,7 @@ class FrozenContractCompatibilityMixin:
         self.assertIsNotNone(signal)
         assert offer is not None and signal is not None
         self.assertNotIn("target_device_id", offer.group(1))
-        self.assertNotIn("sender_device_id", signal.group(1))
+        self.assertIn("source_device_id", signal.group(1))
 
     def test_relay_bootstrap_v1_retirement_guards(self) -> None:
         """Ensure active code, test, and scripts contain no Relay Bootstrap V1 routes or transcripts."""

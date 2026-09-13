@@ -131,6 +131,56 @@ abstract interface class RealtimeConsentBackend {
   });
 }
 
+/// Metadata published only after native has paired an authenticated Offer
+/// with the original typed screen-share REQUEST.
+///
+/// SDP, ICE, and the native pending-offer handle never cross this boundary.
+final class RealtimeIncomingSessionOffer {
+  const RealtimeIncomingSessionOffer({
+    required this.offerId,
+    required this.claimToken,
+    required this.realtimeId,
+    required this.authenticatedPeerId,
+    required this.sharedSessionInstanceId,
+    required this.bindingExpiresAt,
+    required this.request,
+  });
+
+  final String offerId;
+  final String claimToken;
+  final String realtimeId;
+  final String authenticatedPeerId;
+  final String sharedSessionInstanceId;
+  final DateTime bindingExpiresAt;
+  final RealtimeConsent request;
+}
+
+/// Backend event for one metadata-paired incoming screen-share offer.
+final class RealtimeIncomingSessionOfferBackendEvent
+    extends RealtimeBackendEvent {
+  const RealtimeIncomingSessionOfferBackendEvent(this.offer);
+
+  final RealtimeIncomingSessionOffer offer;
+}
+
+/// Provisional native-owner capability for an incoming screen-share binding.
+///
+/// Implementations keep raw Offer/ICE and the claim token native. A claim is
+/// passed the already-registered SDK session so synchronous Negotiating events
+/// cannot be lost by the client registry.
+abstract interface class RealtimeIncomingSessionBackend {
+  Future<SdkResult<void>> claimIncomingOffer({
+    required RealtimeIncomingSessionOffer offer,
+    required RealtimeSession session,
+  });
+
+  Future<SdkResult<void>> rejectIncomingOffer(
+    RealtimeIncomingSessionOffer offer,
+  );
+
+  Future<void> discardIncomingOffer(RealtimeIncomingSessionOffer offer);
+}
+
 /// A backend audio state event consumed by the SDK session coordinator.
 final class RealtimeAudioStateChangedEvent extends RealtimeBackendEvent {
   const RealtimeAudioStateChangedEvent({
@@ -186,6 +236,14 @@ abstract interface class RealtimeSession {
 
   RealtimeAudioState get audioState;
 
+  /// Latest SDK-normalized lifecycle projection.
+  RealtimeSnapshot? get currentSnapshot => null;
+
+  /// Emits after every accepted state or full-snapshot lifecycle update.
+  /// Consumers should read, subscribe, then read again before waiting.
+  Stream<RealtimeSnapshot> get snapshots =>
+      const Stream<RealtimeSnapshot>.empty();
+
   /// Low-frequency typed consent events for this session. The stream carries
   /// metadata only and is generation-filtered by the SDK coordinator.
   Stream<RealtimeConsent> get consentEvents;
@@ -205,6 +263,38 @@ abstract interface class RealtimeClient {
     required String realtimeId,
     required String peerId,
   });
+
+  /// Releases exactly [session] from the client registry.
+  Future<void> releaseSession(RealtimeSession session) async {}
+
+  /// Claims a metadata-only incoming offer after the user explicitly accepts.
+  Future<SdkResult<RealtimeSession>> claimIncomingSession(
+    RealtimeIncomingSessionOffer offer,
+  ) async => SdkFailure(
+    NetworkError(
+      code: NetworkErrorCode.invalidArgument,
+      message: 'Incoming Realtime offers are unavailable on this client.',
+      operation: NetworkOperation.connect,
+      peerId: offer.authenticatedPeerId,
+    ),
+  );
+
+  Future<SdkResult<void>> rejectIncomingOffer(
+    RealtimeIncomingSessionOffer offer,
+  ) async => SdkFailure(
+    NetworkError(
+      code: NetworkErrorCode.invalidArgument,
+      message: 'Incoming Realtime offers are unavailable on this client.',
+      operation: NetworkOperation.send,
+      peerId: offer.authenticatedPeerId,
+    ),
+  );
+
+  Future<void> discardIncomingOffer(RealtimeIncomingSessionOffer offer) async {}
+
+  /// Emits metadata-only offers after native has paired Offer + REQUEST.
+  Stream<RealtimeIncomingSessionOffer> get incomingOffers =>
+      const Stream<RealtimeIncomingSessionOffer>.empty();
 
   Future<void> dispose();
 }

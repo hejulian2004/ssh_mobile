@@ -344,6 +344,8 @@ pub struct RealtimeSignal {
     pub revision: u64,
     #[prost(bytes = "vec", tag = "6")]
     pub payload: Vec<u8>,
+    #[prost(string, tag = "7")]
+    pub source_device_id: String,
 }
 
 #[derive(Clone, PartialEq, Eq, Message)]

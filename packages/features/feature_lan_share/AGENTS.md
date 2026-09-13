@@ -1,4 +1,4 @@
-最新更新时间：2026-08-30
+最新更新时间：2026-09-12
 
 # feature_lan_share 维护约束
 
@@ -28,6 +28,11 @@
   reconfigures App Facade/NetworkRuntime/native handle. `LanRelayCoordinator`
   owns endpoint observation, enrollment/refresh, Relay subscriptions and bounded
   retry timers through `LanRelay*Port` only.
+- Screen sharing is a peer-scoped secondary action only. Use the public
+  `LanShareScreenSharePort`; never import `feature_screen_share`, access the
+  TrustStore from App Shell, or replace the existing device-tap Chat action.
+  Outgoing UI calls `canShareWith`; incoming App hosts call the independent
+  `canReceiveScreenShareFrom` capability.
 
 ## Protocol, trust, and transfer invariants
 

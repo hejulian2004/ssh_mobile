@@ -155,6 +155,15 @@ fn command_peer_id(command: &NetworkCommand) -> Option<String> {
         Some(network_command::Payload::SendRealtimeSignal(command)) => {
             Some(command.peer_id.clone())
         }
+        Some(network_command::Payload::ClaimIncomingRealtimeOffer(command)) => {
+            Some(command.peer_id.clone())
+        }
+        Some(network_command::Payload::RejectIncomingRealtimeOffer(command)) => {
+            Some(command.peer_id.clone())
+        }
+        Some(network_command::Payload::DiscardIncomingRealtimeOffer(command)) => {
+            Some(command.peer_id.clone())
+        }
         Some(network_command::Payload::UpsertPeerV2(command)) => {
             command.config.as_ref().map(|config| config.peer_id.clone())
         }
@@ -293,6 +302,15 @@ async fn dispatch_command_payload(
         }
         Some(network_command::Payload::SendRealtimeSignal(signal)) => {
             crate::realtime::send_signal_command(&state, signal).await
+        }
+        Some(network_command::Payload::ClaimIncomingRealtimeOffer(claim)) => {
+            crate::realtime::claim_incoming_offer(state, claim).await
+        }
+        Some(network_command::Payload::RejectIncomingRealtimeOffer(reject)) => {
+            crate::realtime::reject_incoming_offer(&state, reject).await
+        }
+        Some(network_command::Payload::DiscardIncomingRealtimeOffer(discard)) => {
+            crate::realtime::discard_incoming_offer(&state, discard).await
         }
         Some(network_command::Payload::ConfigureRelay(config)) => {
             start_configure_relay(state, config).await

@@ -1,4 +1,4 @@
-最新更新时间：2026-08-26
+最新更新时间：2026-09-12
 
 # feature_lan_share
 
@@ -21,6 +21,12 @@ control HTTP、WSS Relay enrollment/编排、Web Share、传输历史和非秘�
 - `LanShareModule` 独占 `lan_share.db`、历史 Repository 和接收器资源；App
   Shell 创建并注入 App Scope NetworkIdentity、NetworkRuntime 和共享 NetworkFacade，
   只负责配置是否激活接收器。
+- LAN 的可信在线设备卡片可以通过注入的 `LanShareScreenSharePort` 发起
+  screen-share secondary action。该 Port 只表达 `canShareWith`、
+  `canReceiveScreenShareFrom` 和 `startScreenShare`；LAN Feature 不导入
+  `feature_screen_share`，也不创建 Realtime session 或路由。
+- `canReceiveScreenShareFrom` 是 incoming global host 的独立 trust/self/
+  platform capability，不得用 outgoing `canShareWith` 代替。
 - `LanReceiverCoordinator` 负责 LAN listener、discovery、pairing 和 ViewModel
   生命周期，借用 AppRuntime 的共享 Facade；它不得创建、启动、停止、释放或重新
   配置 NetworkRuntime/native handle。其内部 `LanRelayCoordinator` 独占 enrollment、

@@ -22,6 +22,9 @@ const _pathProviderChannel = MethodChannel('plugins.flutter.io/path_provider');
 /// 可注入的 NetworkRuntime 替身：记录 dispose 次数，可配置 dispose 抛错，
 /// 便于确定性地验证回滚顺序和错误隔离，而不触碰 native handle。
 final class FakeNetworkRuntime implements NetworkRuntime {
+  FakeNetworkRuntime({this.realtimeGateway});
+
+  NetworkRealtimeGateway? realtimeGateway;
   Object? disposeError;
   int disposeCalls = 0;
   int ensureCapabilityCalls = 0;
@@ -57,7 +60,11 @@ final class FakeNetworkRuntime implements NetworkRuntime {
 
   @override
   Future<NetworkRealtimeGateway> openRealtimeGateway() async {
-    throw UnimplementedError('openRealtimeGateway is not expected in tests');
+    final gateway = realtimeGateway;
+    if (gateway == null) {
+      throw UnimplementedError('openRealtimeGateway is not expected in tests');
+    }
+    return gateway;
   }
 
   @override
@@ -74,10 +81,16 @@ final class FakeNetworkRuntime implements NetworkRuntime {
 }
 
 final class FakeCommandGateway implements NetworkCommandGateway {
+  FakeCommandGateway({this.commandCompletion});
+
   final StreamController<Uint8List> _events =
       StreamController<Uint8List>.broadcast();
   final List<Uint8List> commands = <Uint8List>[];
   final NetworkProtocolV2Codec _codec = const NetworkProtocolV2Codec();
+
+  /// Test-only command gate. Returning false keeps the command pending until
+  /// the test emits its own result frame.
+  FutureOr<bool> Function(String commandId)? commandCompletion;
 
   @override
   Stream<Uint8List> get events => _events.stream;
@@ -86,21 +99,44 @@ final class FakeCommandGateway implements NetworkCommandGateway {
   TransportOperationStatus sendCommand(Uint8List command) {
     commands.add(command);
     final commandId = _codec.commandId(command);
-    scheduleMicrotask(() {
-      if (!_events.isClosed) _events.add(_commandResultFrame(commandId));
+    scheduleMicrotask(() async {
+      final complete = await commandCompletion?.call(commandId) ?? true;
+      if (complete && !_events.isClosed) {
+        _events.add(_commandResultFrame(commandId));
+      }
     });
     return TransportOperationStatus.success;
+  }
+
+  int countCommands(String prefix) => commands
+      .map(_codec.commandId)
+      .where((commandId) => commandId.startsWith(prefix))
+      .length;
+
+  String latestCommandId(String prefix) => commands
+      .map(_codec.commandId)
+      .lastWhere((commandId) => commandId.startsWith(prefix));
+
+  void emitCommandResult(String commandId, {bool accepted = true}) {
+    if (!_events.isClosed) {
+      _events.add(_commandResultFrame(commandId, accepted: accepted));
+    }
+  }
+
+  void emitEvent(Uint8List event) {
+    if (!_events.isClosed) _events.add(event);
   }
 
   Future<void> close() => _events.close();
 }
 
-Uint8List _commandResultFrame(String commandId) => Uint8List.fromList(
-  _eventFrame(13, <int>[
-    ..._bytesField(1, utf8.encode(commandId)),
-    ..._varintField(2, 1),
-  ]),
-);
+Uint8List _commandResultFrame(String commandId, {bool accepted = true}) =>
+    Uint8List.fromList(
+      _eventFrame(13, <int>[
+        ..._bytesField(1, utf8.encode(commandId)),
+        ..._varintField(2, accepted ? 1 : 0),
+      ]),
+    );
 
 List<int> _eventFrame(int eventField, List<int> payload) => <int>[
   ..._bytesField(1, utf8.encode('event-a')),
@@ -214,6 +250,7 @@ Future<RuntimeHarness> newRuntimeHarness({
   String? relayCredential,
   String relayDeviceId = 'runtime-test-device',
   bool disposeLogger = true,
+  bool startPendingInitialization = true,
   void Function(String event)? lifecycleObserver,
 }) async {
   final preferences = <String, Object>{'relay_endpoint': relayEndpoint};
@@ -255,6 +292,7 @@ Future<RuntimeHarness> newRuntimeHarness({
           NativeDatabase.memory(),
         ),
     lanShareReceiverEnabled: false,
+    startPendingInitialization: startPendingInitialization,
     playbookDatabaseFactory: () =>
         feature_playbook.PlaybookDatabase.forTesting(NativeDatabase.memory()),
     ragDatabaseFactory: () =>

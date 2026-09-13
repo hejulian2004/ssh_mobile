@@ -112,6 +112,31 @@ final class NativeRealtimeSnapshotEvent extends NativeNetworkEvent {
   final NativeNetworkError? error;
 }
 
+/// Metadata-only incoming screen-share offer published after native paired an
+/// authenticated Offer with its original typed REQUEST.
+final class NativeRealtimeIncomingSessionOfferEvent extends NativeNetworkEvent {
+  const NativeRealtimeIncomingSessionOfferEvent({
+    required super.eventId,
+    required super.timestampMs,
+    required super.protocolVersion,
+    required this.offerId,
+    required this.claimToken,
+    required this.realtimeId,
+    required this.authenticatedPeerId,
+    required this.sharedSessionInstanceId,
+    required this.bindingExpiresAtMs,
+    required this.request,
+  });
+
+  final String offerId;
+  final String claimToken;
+  final String realtimeId;
+  final String authenticatedPeerId;
+  final String sharedSessionInstanceId;
+  final int bindingExpiresAtMs;
+  final NativeScreenShareConsent request;
+}
+
 /// Realtime signaling event containing bounded SDP/ICE opaque bytes.
 final class NativeRealtimeSignalEvent extends NativeNetworkEvent {
   /// Creates a realtime signaling event.

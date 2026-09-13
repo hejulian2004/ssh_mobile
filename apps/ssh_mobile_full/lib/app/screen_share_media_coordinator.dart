@@ -96,6 +96,7 @@ final class AppScreenShareMediaCoordinator {
   late final AppScreenShareMediaPort _port;
   RealtimeMediaSessionController? _mediaSession;
   RealtimeMediaEndpoint? _endpoint;
+  RemoteVideoSurface? _remoteSurface;
   String? _operationId;
   Future<void>? _activeMediaOperation;
   bool _prepared = false;
@@ -103,6 +104,9 @@ final class AppScreenShareMediaCoordinator {
   int _operationEpoch = 0;
 
   AppScreenShareMediaPort get port => _port;
+
+  /// Opaque platform presentation capability for the App-owned route.
+  RemoteVideoSurface? get remoteSurface => _remoteSurface;
 
   /// Verifies the local native generation and source metadata.
   /// Permission, source enumeration, endpoint creation, and capture remain
@@ -334,7 +338,7 @@ final class AppScreenShareMediaCoordinator {
     _endpoint = endpoint;
     _operationId = operationId;
     try {
-      await mediaSession.attachRemoteVideoSurface(endpoint);
+      _remoteSurface = await mediaSession.attachRemoteVideoSurface(endpoint);
       _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
     } catch (_) {
       await _releaseCurrentEndpoint();
@@ -378,6 +382,7 @@ final class AppScreenShareMediaCoordinator {
     try {
       await _mediaSession!.release(endpoint);
       _endpoint = null;
+      _remoteSurface = null;
     } catch (_) {
       // Keep the endpoint reference so the controller can retry the native
       // cleanup. RealtimeMediaSessionController retains retryable leases.

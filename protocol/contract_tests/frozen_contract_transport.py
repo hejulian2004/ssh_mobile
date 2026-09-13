@@ -21,7 +21,7 @@ class FrozenContractTransportMixin:
         signal_end = proto.index("}\n", signal_start)
         signal = proto[signal_start:signal_end]
         self.assertIn("string target_device_id = 3", signal)
-        self.assertNotIn("sender_device_id", signal)
+        self.assertIn("string source_device_id = 7", signal)
 
         contract = _read("protocol/RELAY_V2_CONTRACT.md")
         self.assertIn("Relay NEVER parses", contract)
@@ -32,7 +32,7 @@ class FrozenContractTransportMixin:
         self.assertIn("WebSocket Ping", contract)
         self.assertIn("active data lifetime", contract)
         self.assertIn("no `RelayDataReady`", contract)
-        self.assertIn("no `sender_device_id`", contract)
+        self.assertIn("`source_device_id`", contract)
 
     def test_relay_dispatch_checks_path_admission_before_business_dispatch(self) -> None:
         relay = _read("native/network_core/crates/network-core/src/relay_data.rs")

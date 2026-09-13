@@ -4,7 +4,7 @@
 Implements the minimal protobuf wire encoding for exactly the relay.v2
 messages frozen in protocol/proto/relay/v2/relay_v2.proto, then emits:
 
-  * 22 full-wire-frame .bin fixtures (4-byte big-endian length + protobuf)
+  * 23 full-wire-frame .bin fixtures (4-byte big-endian length + protobuf)
   * manifest.json  — semantic expectations shared by the Rust and Go codecs
   * session_sequence.golden.json — ordered full-lifecycle frame sequence
 
@@ -40,6 +40,7 @@ CONSTANTS = {
     "MAX_ATTEMPT_ID_BYTES": 128,
     "MAX_REALTIME_ID_BYTES": 128,
     "MAX_REALTIME_SIGNAL_PAYLOAD_BYTES": 256 * 1024,
+    "REALTIME_SIGNAL_SOURCE_DEVICE_ID_FIELD_TAG": 7,
     "MAX_DISCOVERY_CANDIDATES": 64,
     "MAX_DISCOVERY_CANDIDATE_BYTES": 4096,
     "MAX_DISCOVERY_CAPABILITIES": 64,
@@ -400,7 +401,8 @@ def msg_incoming_relay_reservation(attempt_id, reservation_id, initiator_device_
     return out
 
 
-def msg_realtime_signal(request_id, realtime_id, target_device_id, kind, revision, payload):
+def msg_realtime_signal(request_id, realtime_id, target_device_id, kind, revision, payload,
+                        source_device_id=""):
     out = b""
     if request_id:
         out += f_varint(1, request_id)
@@ -414,6 +416,8 @@ def msg_realtime_signal(request_id, realtime_id, target_device_id, kind, revisio
         out += f_varint(5, revision)
     if payload:
         out += f_len(6, payload)
+    if source_device_id:
+        out += f_len(7, source_device_id)
     return out
 
 
@@ -730,6 +734,21 @@ FIXTURES = [
     ),
     # 19
     dict(
+        name="realtime_signal_forwarded", file="realtime_signal_forwarded.control.bin",
+        transport="control", direction="server->client",
+        build=lambda: relay_frame("realtime_signal", msg_realtime_signal(
+            request_id=SEED["request_id"], realtime_id=SEED["realtime_id"],
+            target_device_id=SEED["device_b"], kind=3, revision=SEED["revision"],
+            payload=REALTIME_PAYLOAD, source_device_id=SEED["device_a"])),
+        expects=dict(
+            message="realtime_signal", version=2, request_id=SEED["request_id"],
+            realtime_id=SEED["realtime_id"], target_device_id=SEED["device_b"],
+            source_device_id=SEED["device_a"], kind=3,
+            kind_name="REALTIME_SIGNAL_KIND_ICE_CANDIDATE", revision=SEED["revision"],
+            payload_hex=REALTIME_PAYLOAD.hex()),
+    ),
+    # 20
+    dict(
         name="protocol_error", file="protocol_error.control.bin", transport="control",
         direction="server->client",
         build=lambda: relay_frame("protocol_error", msg_protocol_error(
@@ -838,8 +857,8 @@ def generated_files():
 def main():
     check_only = "--check" in sys.argv
     files = generated_files()
-    if len(FIXTURES) != 22:
-        print("error: expected 22 fixtures, got %d" % len(FIXTURES), file=sys.stderr)
+    if len(FIXTURES) != 23:
+        print("error: expected 23 fixtures, got %d" % len(FIXTURES), file=sys.stderr)
         return 1
     if check_only:
         ok = True

@@ -1,9 +1,9 @@
-最新更新时间：2026-09-07
+最新更新时间：2026-09-12
 
 # 模块依赖审计
 
 本文件记录 Step 32 的最终依赖审计结果。审计对象是根 `pubspec.yaml` 明确列出的
-23 个 workspace 成员，依赖边只统计各 Package `dependencies` 中指向另一个
+25 个 workspace 成员，依赖边只统计各 Package `dependencies` 中指向另一个
 workspace 成员的直接生产依赖。
 
 ## 审计命令
@@ -44,7 +44,7 @@ Feature。Feature 之间默认禁止直接依赖，当前唯一登记的例外�
 
 | 层级 | Package | 内部生产依赖 | 边界说明 |
 | --- | --- | --- | --- |
-| App | `ssh_mobile` | `app_core`, `app_ui`, `connection_core`, `feature_ai`, `feature_connection`, `feature_developer`, `feature_lan_share`, `feature_mcp`, `feature_monitoring`, `feature_playbook`, `feature_rag`, `feature_sftp`, `feature_system_admin`, `feature_terminal`, `feature_webview`, `network_sdk`, `network_transport`, `realtime_media`, `realtime_media_windows`, `ssh_core`, `ssh_mobile_network_native` | Full App 组合根，负责注入 App Scope 与 Feature Route |
+| App | `ssh_mobile` | `app_core`, `app_ui`, `connection_core`, `feature_ai`, `feature_connection`, `feature_developer`, `feature_lan_share`, `feature_mcp`, `feature_monitoring`, `feature_playbook`, `feature_rag`, `feature_screen_share`, `feature_sftp`, `feature_system_admin`, `feature_terminal`, `feature_webview`, `network_sdk`, `network_transport`, `realtime_media`, `realtime_media_android`, `realtime_media_windows`, `ssh_core`, `ssh_mobile_network_native` | Full App 组合根，负责注入 App Scope 与 Feature Route；screen-share 由 App Shell 组合 `feature_lan_share` 的窄 Port 与 `feature_screen_share` 的业务状态 |
 | App | `ssh_mobile_terminal` | `app_core`, `app_ui`, `connection_core`, `feature_terminal`, `network_transport`, `ssh_core` | Terminal-only 组合根；不加载 Connection editor Feature |
 | Core | `app_core` | 无 | 生命周期、日志和公共能力契约 |
 | Core | `app_ui` | 无 | 共享主题、响应式指标和通用 UI |
@@ -53,6 +53,7 @@ Feature。Feature 之间默认禁止直接依赖，当前唯一登记的例外�
 | Feature | `feature_connection` | `app_core`, `connection_core` | Connection 编辑器和路由状态 |
 | Feature | `feature_developer` | `app_core`, `app_ui` | Developer Log、诊断和浮动面板 |
 | Feature | `feature_lan_share` | `app_core`, `app_ui`, `network_sdk`, `network_transport` | LAN Control V2 只消费公共 Network SDK/Capability；App Shell 注入共享 NetworkFacade、NetworkIdentity 和 Runtime，Feature 不创建 native socket/FFI/runtime |
+| Feature | `feature_screen_share` | `app_ui`, `network_sdk` | 只拥有 consent/business state、source metadata 和 opaque media port；Realtime session、provisional binding、native media、route 和 presenter 由 App/platform owner 管理 |
 | Feature | `feature_mcp` | `app_core`, `app_ui` | MCP 服务、审批和活动记录 |
 | Feature | `feature_monitoring` | `app_core`, `connection_core`, `ssh_core` | 监控业务代码不依赖共享 UI；展示由调用方组合 |
 | Feature | `feature_playbook` | `app_core`, `app_ui`, `connection_core`, `ssh_core` | Playbook 执行、审批和运行记录 |
@@ -79,6 +80,10 @@ Feature。Feature 之间默认禁止直接依赖，当前唯一登记的例外�
 - Step 32 还清理了两条经过源码审计确认未使用的 manifest 边：
   `feature_monitoring -> app_ui` 和
   `ssh_mobile_terminal -> feature_connection`。
+
+PR74 的依赖边仍是 App Shell → LAN/Screen-share Feature；LAN 不得反向依赖
+`feature_screen_share`。LAN 的 screen-share secondary action、incoming trust
+capability 和 App coordinator 通过公开 `LanShareScreenSharePort` 组合。
 
 新增或移动 Package 时，必须先更新根 workspace，再运行本文件顶部的三个命令；
 如果新增 Feature 之间的公共能力，优先新增 Core/Capability 边界，只有经过架构

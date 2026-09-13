@@ -1,4 +1,4 @@
-> Last updated: 2026-08-30
+> Last updated: 2026-09-12
 
 # Transport and Routing
 
@@ -55,3 +55,18 @@ Rationale: [path quality/migration ADR](../../../docs/adr/ADR-014-path-quality-a
 [generic Connection](../../../docs/adr/ADR-019-generic-connection-layer.md),
 [generic Session routes](../../../docs/adr/ADR-027-generic-session-routes.md),
 and [forward-secret Session E2EE](../../../docs/adr/ADR-028-forward-secret-session-e2ee.md).
+
+## Realtime screen-share signaling
+
+WebRTC screen sharing remains a native Realtime carrier, not Relay video
+forwarding. Relay Control V2 forwards the bounded signaling payload and writes
+authenticated `source_device_id` only on the server-to-target direction. An
+unknown incoming Offer is retained as native-only provisional state with formal
+ICE bounds; matching typed REQUEST is required before Dart notification.
+`ACCEPT` is a user decision and is sent immediately after claim/identity, while
+Connected/native readiness is a separate media gate. Sender CANCEL, native
+claim rollback, late ICE, and generation replacement must preserve exact-owner
+cleanup and must not migrate candidates to a replacement session. Claiming ICE
+uses a hybrid owner rule: queue until exact responder registration, then route
+matching candidates only to that exact claiming generation. Provisional expiry
+is native-authoritative; App timers only remove stale UI/arbitration state.

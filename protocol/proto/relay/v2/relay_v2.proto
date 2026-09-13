@@ -17,6 +17,7 @@
 //   MAX_ATTEMPT_ID_BYTES                   = 128
 //   MAX_REALTIME_ID_BYTES                  = 128
 //   MAX_REALTIME_SIGNAL_PAYLOAD_BYTES      = 256 * 1024
+//   REALTIME_SIGNAL_SOURCE_DEVICE_ID_FIELD_TAG = 7
 //   MAX_DISCOVERY_CANDIDATES               = 64
 //   MAX_DISCOVERY_CANDIDATE_BYTES          = 4096
 //   MAX_DISCOVERY_CAPABILITIES             = 64
@@ -256,6 +257,10 @@ message RealtimeSignal {
   RealtimeSignalKind kind = 4;
   uint64 revision = 5;
   bytes payload = 6;                         // <= 256 KiB
+  // Relay-authenticated source identity. Clients MUST omit this field on
+  // ingress; the Relay rejects non-empty client values and writes the
+  // authenticated sender.deviceID on forwarded frames.
+  string source_device_id = 7;
 }
 
 message ProtocolError {

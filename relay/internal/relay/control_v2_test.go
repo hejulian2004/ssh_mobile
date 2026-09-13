@@ -996,11 +996,45 @@ func TestControlV2RealtimeSignalForwarding(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			signal := send(t, tc.from, tc.to, uint64(len(tc.name)), tc.target, tc.kind, tc.payload)
 			if signal.TargetDeviceId != tc.target ||
-				signal.Kind != tc.kind || !bytes.Equal(signal.Payload, []byte(tc.payload)) {
+				signal.Kind != tc.kind || !bytes.Equal(signal.Payload, []byte(tc.payload)) ||
+				signal.SourceDeviceId != map[*websocket.Conn]string{connA: "device-a", connB: "device-b"}[tc.from] {
 				t.Fatalf("unexpected realtime signal: %+v", signal)
 			}
 		})
 	}
+}
+
+func TestControlV2RejectsClientSuppliedRealtimeSource(t *testing.T) {
+	server, httpServer := newV2TestServer(t)
+	credA, privA := enrollV2(t, httpServer.URL, "device-a")
+	credB, privB := enrollV2(t, httpServer.URL, "device-b")
+	connA := dialControlV2(t, httpServer.URL, credA, "device-a", 0x61, privA)
+	defer connA.Close()
+	connB := dialControlV2(t, httpServer.URL, credB, "device-b", 0x62, privB)
+	defer connB.Close()
+
+	writeV2ControlFrame(t, connA, &v2.RelayFrame{
+		Version: v2.RELAY_V2_VERSION,
+		Kind: &v2.RelayFrame_RealtimeSignal{RealtimeSignal: &v2.RealtimeSignal{
+			RequestId:      99,
+			RealtimeId:     "rt-1234",
+			TargetDeviceId: "device-b",
+			SourceDeviceId: "spoofed-source",
+			Kind:           v2.RealtimeSignalKind_REALTIME_SIGNAL_KIND_OFFER,
+			Payload:        []byte("offer"),
+		}},
+	})
+	errFrame := readV2ControlFrame(t, connA)
+	if errFrame.GetProtocolError() == nil || errFrame.GetProtocolError().Code != v2.ErrorCode_ERROR_CODE_PROTOCOL {
+		t.Fatalf("expected protocol error for spoofed source, got %+v", errFrame)
+	}
+	server.hub.mutex.Lock()
+	target := server.hub.peers["device-b"]
+	server.hub.mutex.Unlock()
+	if target == nil {
+		t.Fatal("target control peer disappeared")
+	}
+	assertNoOutbound(t, target)
 }
 
 // ---------------------------------------------------------------------------

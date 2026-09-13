@@ -6,6 +6,7 @@ import 'package:network_sdk/network_sdk.dart';
 
 import 'screen_share_models.dart';
 import 'screen_share_ports.dart';
+import 'screen_share_intent_comparator.dart';
 
 part 'screen_share_controller_media.dart';
 part 'screen_share_controller_consent.dart';
@@ -60,6 +61,7 @@ final class ScreenShareController extends ChangeNotifier
   Timer? _expiryTimer;
   bool _disposed = false;
   bool _mediaStartInFlight = false;
+  bool _incomingRequestSeeded = false;
   int _operationEpoch = 0;
   // Action revisions are monotonic per (operation_id, sender_peer_id), so a
   // local request/decision and a remote decision each have their own lane.
@@ -167,6 +169,21 @@ final class ScreenShareController extends ChangeNotifier
     }
     _setState(ScreenShareOperationState.accepted);
     await _startViewerIfReady();
+  }
+
+  /// Seeds the exact REQUEST retained by the native provisional binding.
+  ///
+  /// This is a one-time handoff after an incoming session has been claimed;
+  /// it does not send anything on the wire and therefore cannot duplicate the
+  /// original request.
+  void seedIncomingRequest(RealtimeConsent request) {
+    _ensureUsable();
+    if (_incomingRequestSeeded) return;
+    if (request.decision != RealtimeConsentDecision.request) {
+      throw ArgumentError.value(request, 'request');
+    }
+    _incomingRequestSeeded = true;
+    _handleScreenShareConsent(this, request);
   }
 
   Future<void> rejectIncoming() async {
@@ -382,6 +399,13 @@ final class ScreenShareController extends ChangeNotifier
   }
 
   void _setState(ScreenShareOperationState next) {
+    if (next == ScreenShareOperationState.rejected ||
+        next == ScreenShareOperationState.cancelled ||
+        next == ScreenShareOperationState.expired ||
+        next == ScreenShareOperationState.failed) {
+      _expiryTimer?.cancel();
+      _expiryTimer = null;
+    }
     _setSnapshot(
       ScreenShareOperationSnapshot(
         state: next,
