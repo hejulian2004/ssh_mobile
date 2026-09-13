@@ -24,6 +24,7 @@ void main() {
       final harness = await newRuntimeHarness(
         networkRuntime: network,
         disposeLogger: false,
+        startPendingInitialization: false,
       );
       final runtime = await harness.createFuture;
       final navigatorKey = GlobalKey<NavigatorState>();
