@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -54,7 +55,12 @@ void main() {
         realtimeId: '00112233445566778899aabbccddee00',
         peerId: 'peer-a',
       );
-      await warmup.start();
+      // Opening the lazy realtime gateway is enough to install the backend
+      // event subscription. Keep the command-result round trip out of this
+      // Host-only regression; AppRuntime disposal force-cleans the helper
+      // session if its start remains pending.
+      unawaited(warmup.start());
+      await tester.pump();
 
       final now = DateTime.now().toUtc();
       commandGateway.emitEvent(
