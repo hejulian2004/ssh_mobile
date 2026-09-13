@@ -98,16 +98,37 @@ final class _RealtimeSession implements RealtimeSession {
     _releaseRequested = false;
     _authoritativeTerminal = false;
     _state = RealtimeSessionState.starting;
-    final future = _startInternal();
-    _startFuture = future;
-    future.then<void>(
-      (_) {
+    final operation = _startInternal();
+    late final Future<SdkResult<void>> future;
+    future = operation.then<SdkResult<void>>(
+      (result) async {
         if (identical(_startFuture, future)) _startFuture = null;
+        // A successful command only means that native accepted/completed the
+        // command. The authoritative generation may still arrive later.
+        // Only a failed command with no generation can prove that no native
+        // session was established and make this object releaseable.
+        if (result is SdkFailure<void> && _generation == null) {
+          _state = RealtimeSessionState.failed;
+          _authoritativeTerminal = true;
+        }
+        if (_releaseRequested && _authoritativeTerminal) {
+          await _finalizeRelease();
+        }
+        return result;
       },
-      onError: (Object _, StackTrace _) {
+      onError: (Object error, StackTrace stackTrace) async {
         if (identical(_startFuture, future)) _startFuture = null;
+        if (_generation == null) {
+          _state = RealtimeSessionState.failed;
+          _authoritativeTerminal = true;
+        }
+        if (_releaseRequested && _authoritativeTerminal) {
+          await _finalizeRelease();
+        }
+        Error.throwWithStackTrace(error, stackTrace);
       },
     );
+    _startFuture = future;
     return future;
   }
 
@@ -165,6 +186,17 @@ final class _RealtimeSession implements RealtimeSession {
     if (_disposed) return;
     _releaseRequested = true;
     if (_authoritativeTerminal) {
+      await _finalizeRelease();
+      return;
+    }
+    if (_state == RealtimeSessionState.idle &&
+        _generation == null &&
+        _startFuture == null) {
+      // An idle object has never asked native to create a generation. Failed
+      // objects take this path only when the start wrapper has already marked
+      // a no-generation command failure as authoritative above; a failed
+      // state from any other command must still wait for native terminal
+      // ownership.
       await _finalizeRelease();
       return;
     }

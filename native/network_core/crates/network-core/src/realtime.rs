@@ -221,7 +221,11 @@ impl RealtimeManager {
     }
 
     fn wake_provisional_expiry(&self) {
-        self.provisional_expiry_wake.notify_waiters();
+        // There is exactly one supervised provisional-expiry worker. Keep a
+        // permit when a deadline changes while the worker is between creating
+        // the waiter and reading the manager, so an earlier entry cannot lose
+        // its wake-up.
+        self.provisional_expiry_wake.notify_one();
     }
 
     fn next_provisional_expiry(&self) -> Option<(String, u64, Instant)> {
@@ -827,6 +831,220 @@ pub(crate) async fn stop_session(
     Ok(())
 }
 
+struct IncomingClaimResponder {
+    provisional_epoch: u64,
+    generation: u64,
+    driver: RealtimeIoDriverHandle,
+}
+
+fn exact_claiming_binding(
+    manager: &RealtimeManager,
+    realtime_id: &str,
+    peer_id: &str,
+    shared_session_instance_id: &str,
+    claim_token: &str,
+    provisional_epoch: u64,
+    now_ms: u64,
+) -> bool {
+    manager.provisional.get(realtime_id).is_some_and(|binding| {
+        binding.claim_token == claim_token
+            && binding.provisional_epoch == provisional_epoch
+            && binding.authenticated_peer_id == peer_id
+            && binding.shared_session_instance_id == shared_session_instance_id
+            && binding.state == ProvisionalBindingState::Claiming
+            && !binding.is_expired(now_ms)
+    })
+}
+
+fn exact_claim_responder(
+    manager: &RealtimeManager,
+    realtime_id: &str,
+    peer_id: &str,
+    shared_session_instance_id: &str,
+    generation: u64,
+    driver: &RealtimeIoDriverHandle,
+) -> bool {
+    manager.session_generation(realtime_id) == Some(generation)
+        && manager.sessions.get(realtime_id).is_some_and(|session| {
+            session.peer_id == peer_id
+                && session.shared_session_instance_id == shared_session_instance_id
+                && session
+                    .driver
+                    .as_ref()
+                    .is_some_and(|candidate| Arc::ptr_eq(candidate, driver))
+        })
+}
+
+fn take_provisional_claim(
+    manager: &mut RealtimeManager,
+    realtime_id: &str,
+    claim_token: &str,
+    provisional_epoch: u64,
+) -> bool {
+    if !manager.provisional.get(realtime_id).is_some_and(|binding| {
+        binding.claim_token == claim_token
+            && binding.provisional_epoch == provisional_epoch
+            && binding.state == ProvisionalBindingState::Claiming
+    }) {
+        return false;
+    }
+    if let Some(mut binding) = manager.provisional.remove(realtime_id) {
+        binding.state = ProvisionalBindingState::Terminal;
+        manager.wake_provisional_expiry();
+        return true;
+    }
+    false
+}
+
+fn next_claim_close_signal(
+    manager: &mut RealtimeManager,
+    realtime_id: &str,
+    peer_id: &str,
+    shared_session_instance_id: &str,
+    answer_revision: u64,
+    responder: &IncomingClaimResponder,
+) -> Option<OutboundSignal> {
+    if !exact_claim_responder(
+        manager,
+        realtime_id,
+        peer_id,
+        shared_session_instance_id,
+        responder.generation,
+        &responder.driver,
+    ) {
+        return None;
+    }
+    let session = manager.sessions.get_mut(realtime_id)?;
+    let close_revision = session.revision.max(answer_revision).checked_add(1)?;
+    session.revision = close_revision;
+    Some(OutboundSignal {
+        realtime_id: realtime_id.to_owned(),
+        peer_id: peer_id.to_owned(),
+        shared_session_instance_id: shared_session_instance_id.to_owned(),
+        kind: RealtimeSignalKind::WebRtcClose,
+        revision: close_revision,
+        payload: b"close".to_vec(),
+    })
+}
+
+fn commit_incoming_claim(
+    manager: &mut RealtimeManager,
+    realtime_id: &str,
+    peer_id: &str,
+    shared_session_instance_id: &str,
+    claim_token: &str,
+    responder: &IncomingClaimResponder,
+) -> Result<(), network_protocol::NetworkError> {
+    let now_ms = crate::events::unix_timestamp_ms().max(0) as u64;
+    if !exact_claiming_binding(
+        manager,
+        realtime_id,
+        peer_id,
+        shared_session_instance_id,
+        claim_token,
+        responder.provisional_epoch,
+        now_ms,
+    ) || !exact_claim_responder(
+        manager,
+        realtime_id,
+        peer_id,
+        shared_session_instance_id,
+        responder.generation,
+        &responder.driver,
+    ) {
+        return Err(realtime_error(
+            network_protocol::NetworkErrorCode::StaleOperation,
+            "incoming realtime offer claim was superseded or expired",
+            "claim_incoming_realtime_offer",
+            peer_id,
+        ));
+    }
+
+    loop {
+        let queued = {
+            let Some(binding) = manager.provisional.get_mut(realtime_id) else {
+                return Err(realtime_error(
+                    network_protocol::NetworkErrorCode::StaleOperation,
+                    "incoming realtime offer claim was superseded",
+                    "claim_incoming_realtime_offer",
+                    peer_id,
+                ));
+            };
+            if binding.claim_token != claim_token
+                || binding.provisional_epoch != responder.provisional_epoch
+                || binding.state != ProvisionalBindingState::Claiming
+            {
+                return Err(realtime_error(
+                    network_protocol::NetworkErrorCode::StaleOperation,
+                    "incoming realtime offer claim was superseded",
+                    "claim_incoming_realtime_offer",
+                    peer_id,
+                ));
+            }
+            let queued = binding.ice_candidates.drain(..).collect::<Vec<_>>();
+            binding.ice_total_bytes = 0;
+            queued
+        };
+        if queued.is_empty() {
+            break;
+        }
+        for candidate in queued {
+            apply_signal_with_driver(
+                manager,
+                realtime_id,
+                peer_id,
+                InboundSignal {
+                    shared_session_instance_id: shared_session_instance_id.to_owned(),
+                    kind: RealtimeSignalKind::IceCandidate,
+                    revision: candidate.revision,
+                    payload: candidate.payload,
+                },
+                None,
+                None,
+            )
+            .map_err(|error| {
+                realtime_error(
+                    network_protocol::NetworkErrorCode::IoError,
+                    error.to_string(),
+                    "claim_incoming_realtime_offer",
+                    peer_id,
+                )
+            })?;
+        }
+    }
+
+    let now_ms = crate::events::unix_timestamp_ms().max(0) as u64;
+    if !exact_claiming_binding(
+        manager,
+        realtime_id,
+        peer_id,
+        shared_session_instance_id,
+        claim_token,
+        responder.provisional_epoch,
+        now_ms,
+    ) || !exact_claim_responder(
+        manager,
+        realtime_id,
+        peer_id,
+        shared_session_instance_id,
+        responder.generation,
+        &responder.driver,
+    ) {
+        return Err(realtime_error(
+            network_protocol::NetworkErrorCode::StaleOperation,
+            "incoming realtime offer claim expired during commit",
+            "claim_incoming_realtime_offer",
+            peer_id,
+        ));
+    }
+    if let Some(binding) = manager.provisional.get_mut(realtime_id) {
+        binding.state = ProvisionalBindingState::Claimed;
+    }
+    manager.provisional.remove(realtime_id);
+    manager.wake_provisional_expiry();
+    Ok(())
+}
+
 /// Atomically promotes one metadata-paired provisional binding into the exact
 /// responder generation registered by the SDK. The binding remains `Claiming`
 /// while the Answer is sent. ICE arriving before the exact responder owns the
@@ -840,7 +1058,7 @@ pub(crate) async fn claim_incoming_offer(
     validate_realtime_id(&command.realtime_id)?;
     validate_peer(&state, &command.peer_id).await?;
     let now_ms = crate::events::unix_timestamp_ms().max(0) as u64;
-    let (offer, offer_revision, queued_ice, shared_session_instance_id) = {
+    let (offer, offer_revision, queued_ice, shared_session_instance_id, provisional_epoch) = {
         let mut manager = state.realtime.lock().await;
         prune_provisional_bindings(&mut manager, now_ms);
         let Some(binding) = manager.provisional.get_mut(&command.realtime_id) else {
@@ -855,6 +1073,7 @@ pub(crate) async fn claim_incoming_offer(
             || binding.authenticated_peer_id != command.peer_id
             || !matches!(binding.state, ProvisionalBindingState::Pending)
             || binding.request.is_none()
+            || binding.is_expired(now_ms)
         {
             return Err(realtime_error(
                 network_protocol::NetworkErrorCode::InvalidArgument,
@@ -871,16 +1090,19 @@ pub(crate) async fn claim_incoming_offer(
             binding.offer_revision,
             queued_ice,
             binding.shared_session_instance_id.clone(),
+            binding.provisional_epoch,
         )
     };
     let driver = match create_io_driver(&state, runtime_webrtc_config()).await {
         Ok(driver) => driver.into_handle(),
         Err(error) => {
             let mut manager = state.realtime.lock().await;
-            if let Some(mut binding) = manager.provisional.remove(&command.realtime_id) {
-                binding.state = ProvisionalBindingState::Terminal;
-                manager.wake_provisional_expiry();
-            }
+            take_provisional_claim(
+                &mut manager,
+                &command.realtime_id,
+                &command.claim_token,
+                provisional_epoch,
+            );
             return Err(realtime_error(
                 network_protocol::NetworkErrorCode::IoError,
                 error.to_string(),
@@ -895,13 +1117,15 @@ pub(crate) async fn claim_incoming_offer(
         .await;
     let outcome = {
         let mut manager = state.realtime.lock().await;
-        let binding_valid = manager
-            .provisional
-            .get(&command.realtime_id)
-            .is_some_and(|binding| {
-                binding.claim_token == command.claim_token
-                    && matches!(binding.state, ProvisionalBindingState::Claiming)
-            });
+        let binding_valid = exact_claiming_binding(
+            &manager,
+            &command.realtime_id,
+            &command.peer_id,
+            &shared_session_instance_id,
+            &command.claim_token,
+            provisional_epoch,
+            crate::events::unix_timestamp_ms().max(0) as u64,
+        );
         if !binding_valid {
             if let Ok(mut driver) = driver.lock() {
                 let _ = driver.close();
@@ -929,12 +1153,14 @@ pub(crate) async fn claim_incoming_offer(
         let outcome = match outcome {
             Ok(outcome) => outcome,
             Err(error) => {
+                let generation = manager.session_generation(&command.realtime_id);
                 drop(manager);
                 rollback_incoming_claim(
                     &state,
-                    &command.realtime_id,
-                    &command.peer_id,
-                    &command.claim_token,
+                    &command,
+                    &shared_session_instance_id,
+                    provisional_epoch,
+                    generation,
                     &driver,
                 )
                 .await;
@@ -945,6 +1171,11 @@ pub(crate) async fn claim_incoming_offer(
                     &command.peer_id,
                 ));
             }
+        };
+        let responder = IncomingClaimResponder {
+            provisional_epoch,
+            generation: outcome.generation,
+            driver: driver.clone(),
         };
         for candidate in queued_ice {
             if let Err(error) = apply_signal_with_driver(
@@ -963,9 +1194,10 @@ pub(crate) async fn claim_incoming_offer(
                 drop(manager);
                 rollback_incoming_claim(
                     &state,
-                    &command.realtime_id,
-                    &command.peer_id,
-                    &command.claim_token,
+                    &command,
+                    &shared_session_instance_id,
+                    provisional_epoch,
+                    Some(responder.generation),
                     &driver,
                 )
                 .await;
@@ -977,10 +1209,11 @@ pub(crate) async fn claim_incoming_offer(
                 ));
             }
         }
-        outcome
+        (outcome, responder)
     };
+    let (outcome, responder) = outcome;
 
-    let cleanup_driver = Arc::clone(&driver);
+    let cleanup_driver = Arc::clone(&responder.driver);
     if state
         .task_supervisor
         .spawn_session(
@@ -990,16 +1223,17 @@ pub(crate) async fn claim_incoming_offer(
                 Arc::clone(&state),
                 command.realtime_id.clone(),
                 command.peer_id.clone(),
-                driver,
+                responder.driver.clone(),
             ),
         )
         .is_none()
     {
         rollback_incoming_claim(
             &state,
-            &command.realtime_id,
-            &command.peer_id,
-            &command.claim_token,
+            &command,
+            &shared_session_instance_id,
+            provisional_epoch,
+            Some(responder.generation),
             &cleanup_driver,
         )
         .await;
@@ -1017,9 +1251,10 @@ pub(crate) async fn claim_incoming_offer(
             .await;
         rollback_incoming_claim(
             &state,
-            &command.realtime_id,
-            &command.peer_id,
-            &command.claim_token,
+            &command,
+            &shared_session_instance_id,
+            provisional_epoch,
+            Some(responder.generation),
             &cleanup_driver,
         )
         .await;
@@ -1037,73 +1272,67 @@ pub(crate) async fn claim_incoming_offer(
             .await;
         rollback_incoming_claim(
             &state,
-            &command.realtime_id,
-            &command.peer_id,
-            &command.claim_token,
+            &command,
+            &shared_session_instance_id,
+            provisional_epoch,
+            Some(responder.generation),
             &cleanup_driver,
         )
         .await;
         return Err(error);
     }
 
-    let mut late_ice_failed = None;
-    {
+    let (commit_result, close_signal) = {
         let mut manager = state.realtime.lock().await;
-        let queued_late = manager
-            .provisional
-            .get_mut(&command.realtime_id)
-            .filter(|binding| binding.claim_token == command.claim_token)
-            .map(|binding| {
-                let queued = binding.ice_candidates.drain(..).collect::<Vec<_>>();
-                binding.ice_total_bytes = 0;
-                queued
-            })
-            .unwrap_or_default();
-        for candidate in queued_late {
-            if let Err(error) = apply_signal_with_driver(
+        let result = commit_incoming_claim(
+            &mut manager,
+            &command.realtime_id,
+            &command.peer_id,
+            &shared_session_instance_id,
+            &command.claim_token,
+            &responder,
+        );
+        let close_signal = if result.is_err() {
+            next_claim_close_signal(
                 &mut manager,
                 &command.realtime_id,
                 &command.peer_id,
-                InboundSignal {
-                    shared_session_instance_id: shared_session_instance_id.clone(),
-                    kind: RealtimeSignalKind::IceCandidate,
-                    revision: candidate.revision,
-                    payload: candidate.payload,
-                },
-                None,
-                None,
-            ) {
-                late_ice_failed = Some(error);
-                break;
+                &shared_session_instance_id,
+                answer.revision,
+                &responder,
+            )
+        } else {
+            None
+        };
+        (result, close_signal)
+    };
+    if let Err(error) = commit_result {
+        if let Some(close_signal) = close_signal {
+            if send_signal(&state, &close_signal).await.is_ok() {
+                emit_realtime_signal(
+                    &state.event_tx,
+                    &close_signal.realtime_id,
+                    &close_signal.peer_id,
+                    close_signal.kind as i32,
+                    close_signal.revision,
+                    close_signal.payload.clone(),
+                );
             }
         }
-        if late_ice_failed.is_none() {
-            if let Some(binding) = manager.provisional.get_mut(&command.realtime_id) {
-                binding.state = ProvisionalBindingState::Claimed;
-            }
-            manager.provisional.remove(&command.realtime_id);
-            manager.wake_provisional_expiry();
-        }
-    }
-    if let Some(error) = late_ice_failed {
         state
             .task_supervisor
             .cancel_session(&realtime_task_key(&command.realtime_id))
             .await;
         rollback_incoming_claim(
             &state,
-            &command.realtime_id,
-            &command.peer_id,
-            &command.claim_token,
+            &command,
+            &shared_session_instance_id,
+            provisional_epoch,
+            Some(responder.generation),
             &cleanup_driver,
         )
         .await;
-        return Err(realtime_error(
-            network_protocol::NetworkErrorCode::IoError,
-            error.to_string(),
-            "claim_incoming_realtime_offer",
-            &command.peer_id,
-        ));
+        return Err(error);
     }
     emit_realtime_signal(
         &state.event_tx,
@@ -1127,18 +1356,25 @@ pub(crate) async fn claim_incoming_offer(
 
 async fn rollback_incoming_claim(
     state: &RuntimeState,
-    realtime_id: &str,
-    peer_id: &str,
-    claim_token: &str,
+    command: &ClaimIncomingRealtimeOfferCommand,
+    shared_session_instance_id: &str,
+    provisional_epoch: u64,
+    responder_generation: Option<u64>,
     driver: &RealtimeIoDriverHandle,
 ) {
     let removed = {
         let mut manager = state.realtime.lock().await;
         let mut provisional_removed = false;
-        if manager.provisional.get(realtime_id).is_some_and(|binding| {
-            binding.claim_token == claim_token && binding.state == ProvisionalBindingState::Claiming
-        }) {
-            if let Some(mut binding) = manager.provisional.remove(realtime_id) {
+        if manager
+            .provisional
+            .get(&command.realtime_id)
+            .is_some_and(|binding| {
+                binding.claim_token == command.claim_token
+                    && binding.provisional_epoch == provisional_epoch
+                    && binding.state == ProvisionalBindingState::Claiming
+            })
+        {
+            if let Some(mut binding) = manager.provisional.remove(&command.realtime_id) {
                 binding.state = ProvisionalBindingState::Terminal;
                 provisional_removed = true;
             }
@@ -1146,9 +1382,27 @@ async fn rollback_incoming_claim(
         if provisional_removed {
             manager.wake_provisional_expiry();
         }
-        let removed = take_realtime_session_if_owned(&mut manager, realtime_id, peer_id, driver);
+        let removed = responder_generation
+            .filter(|generation| {
+                exact_claim_responder(
+                    &manager,
+                    &command.realtime_id,
+                    &command.peer_id,
+                    shared_session_instance_id,
+                    *generation,
+                    driver,
+                )
+            })
+            .and_then(|_| {
+                take_realtime_session_if_owned(
+                    &mut manager,
+                    &command.realtime_id,
+                    &command.peer_id,
+                    driver,
+                )
+            });
         if removed.is_some() {
-            crate::realtime_media::invalidate_realtime(state, realtime_id);
+            crate::realtime_media::invalidate_realtime(state, &command.realtime_id);
         }
         removed
     };
@@ -1430,6 +1684,170 @@ pub(crate) async fn send_signal_command(
 /// envelope 把信令绑定到跨设备共享的 session instance，而不是 process-local
 /// native generation。新 Relay V2 帧携带由 Relay 写入的 authenticated source；
 /// 已绑定 session 仍兼容 source 缺省的旧 Relay，未知 session 则必须有 source。
+struct ClaimingControlSignal<'a> {
+    local_device_id: &'a str,
+    kind: RealtimeSignalKind,
+    realtime_id: &'a str,
+    authenticated_peer_id: &'a str,
+    revision: u64,
+    shared_session_instance_id: &'a str,
+    payload: &'a [u8],
+}
+
+async fn handle_claiming_control_signal(
+    state: &Arc<RuntimeState>,
+    signal: ClaimingControlSignal<'_>,
+) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    validate_signal(signal.kind, signal.revision, signal.payload).map_err(boxed_protocol_error)?;
+    let mut closed_session: Option<(RealtimeSession, u64)> = None;
+    let handled = {
+        let mut manager = state.realtime.lock().await;
+        if let Some(binding) = manager.provisional.get(signal.realtime_id) {
+            if binding.authenticated_peer_id != signal.authenticated_peer_id
+                || binding.shared_session_instance_id != signal.shared_session_instance_id
+                || binding.state != ProvisionalBindingState::Claiming
+            {
+                false
+            } else {
+                match signal.kind {
+                    RealtimeSignalKind::ScreenShareConsent => {
+                        let consent = validate_screen_share_consent(
+                            signal.payload,
+                            signal.realtime_id,
+                            Some(signal.authenticated_peer_id),
+                            Some(signal.shared_session_instance_id),
+                        )?;
+                        if ScreenShareConsentDecision::try_from(consent.decision)
+                            .map_err(|_| boxed_message("unknown screen-share consent decision"))?
+                            != ScreenShareConsentDecision::Cancel
+                        {
+                            return Err(boxed_message(
+                                "only screen-share CANCEL is valid while claim is in progress",
+                            ));
+                        }
+                        let binding = manager
+                            .provisional
+                            .get(signal.realtime_id)
+                            .expect("claiming provisional binding exists");
+                        if !binding.request.as_ref().is_some_and(|request| {
+                            request.operation_id == consent.operation_id
+                                && request.shared_session_instance_id
+                                    == consent.shared_session_instance_id
+                        }) {
+                            return Err(boxed_message(
+                                "screen-share CANCEL binding does not match claiming operation",
+                            ));
+                        }
+                        let expected_revision = manager
+                            .latest_provisional_action_revision(
+                                signal.authenticated_peer_id,
+                                signal.realtime_id,
+                                &consent.operation_id,
+                            )
+                            .ok_or_else(|| {
+                                boxed_message("screen-share CANCEL REQUEST lane is missing")
+                            })?
+                            .saturating_add(1);
+                        if consent.action_revision != expected_revision || expected_revision != 2 {
+                            return Err(boxed_message(
+                                "screen-share CANCEL action revision is not contiguous",
+                            ));
+                        }
+                        manager.remember_provisional_action(
+                            ProvisionalReplayKey {
+                                sender_peer_id: signal.authenticated_peer_id.to_owned(),
+                                target_device_id: signal.local_device_id.to_owned(),
+                                realtime_id: signal.realtime_id.to_owned(),
+                                operation_id: consent.operation_id,
+                                decision: consent.decision,
+                                action_revision: consent.action_revision,
+                            },
+                            crate::events::unix_timestamp_ms().max(0) as u64,
+                        )?;
+                        if let Some(mut binding) = manager.provisional.remove(signal.realtime_id) {
+                            binding.state = ProvisionalBindingState::Terminal;
+                        }
+                        manager.wake_provisional_expiry();
+                        true
+                    }
+                    RealtimeSignalKind::WebRtcClose => {
+                        let exact_session =
+                            manager
+                                .sessions
+                                .get(signal.realtime_id)
+                                .is_some_and(|session| {
+                                    session.peer_id == signal.authenticated_peer_id
+                                        && session.shared_session_instance_id
+                                            == signal.shared_session_instance_id
+                                        && signal.revision > session.remote_revision
+                                });
+                        if manager.sessions.contains_key(signal.realtime_id) && !exact_session {
+                            return Err(boxed_message(
+                                "claiming WebRTC close does not match responder binding",
+                            ));
+                        }
+                        let (claim_token, epoch) = manager
+                            .provisional
+                            .get(signal.realtime_id)
+                            .map(|binding| (binding.claim_token.clone(), binding.provisional_epoch))
+                            .expect("claiming provisional binding exists");
+                        take_provisional_claim(
+                            &mut manager,
+                            signal.realtime_id,
+                            &claim_token,
+                            epoch,
+                        );
+                        if exact_session {
+                            let generation =
+                                manager.session_generation(signal.realtime_id).ok_or_else(
+                                    || boxed_message("claiming responder generation missing"),
+                                )?;
+                            let session =
+                                manager.remove_session(signal.realtime_id).ok_or_else(|| {
+                                    boxed_message("claiming responder session missing")
+                                })?;
+                            crate::realtime_media::invalidate_realtime(state, signal.realtime_id);
+                            closed_session = Some((session, generation));
+                        }
+                        true
+                    }
+                    _ => false,
+                }
+            }
+        } else {
+            false
+        }
+    };
+    if !handled {
+        return Ok(false);
+    }
+    if let Some((mut session, generation)) = closed_session {
+        state
+            .task_supervisor
+            .cancel_session(&realtime_task_key(signal.realtime_id))
+            .await;
+        let _ = with_session_peer(&mut session, WebRtcPeer::close);
+        emit_realtime_signal(
+            &state.event_tx,
+            signal.realtime_id,
+            signal.authenticated_peer_id,
+            signal.kind as i32,
+            signal.revision,
+            signal.payload.to_vec(),
+        );
+        emit_realtime_state(
+            &state.event_tx,
+            signal.realtime_id,
+            signal.authenticated_peer_id,
+            RealtimeSessionState::Closed as i32,
+            signal.revision,
+            RealtimeSessionIdentity::new(generation, signal.shared_session_instance_id),
+            None,
+        );
+    }
+    Ok(true)
+}
+
 pub(crate) async fn handle_v2_realtime_signal(
     state: &Arc<RuntimeState>,
     signal: &V2RealtimeSignal,
@@ -1481,6 +1899,25 @@ pub(crate) async fn handle_v2_realtime_signal(
         .map_err(|error| boxed_message(error.to_string()))?;
     let kind = RealtimeSignalKind::try_from(signal.kind)
         .map_err(|_| boxed_message("invalid v2 WebRTC signal kind"))?;
+    if matches!(
+        kind,
+        RealtimeSignalKind::ScreenShareConsent | RealtimeSignalKind::WebRtcClose
+    ) && handle_claiming_control_signal(
+        state,
+        ClaimingControlSignal {
+            local_device_id: &local_device_id,
+            kind,
+            realtime_id: &signal.realtime_id,
+            authenticated_peer_id: &peer_id,
+            revision: signal.revision,
+            shared_session_instance_id: &shared_session_instance_id,
+            payload: &payload,
+        },
+    )
+    .await?
+    {
+        return Ok(());
+    }
     if bound_peer_id.is_none() {
         return handle_provisional_realtime_signal(
             state,

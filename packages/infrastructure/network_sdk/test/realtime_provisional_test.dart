@@ -54,6 +54,26 @@ void main() {
     },
   );
 
+  test(
+    'releaseSession finalizes an idle session without a native generation',
+    () async {
+      final backend = _ClaimBackend();
+      final client = RealtimeClientImpl(backend: backend);
+      addTearDown(client.dispose);
+      final first = client.createSession(
+        realtimeId: _realtimeId,
+        peerId: 'peer-a',
+      );
+      await client.releaseSession(first);
+      final replacement = client.createSession(
+        realtimeId: _realtimeId,
+        peerId: 'peer-a',
+      );
+      expect(replacement.state, RealtimeSessionState.idle);
+      await client.releaseSession(replacement);
+    },
+  );
+
   test('releaseSession waits for an authoritative terminal event', () async {
     final backend = _ClaimBackend();
     final client = RealtimeClientImpl(backend: backend);
@@ -62,6 +82,17 @@ void main() {
       realtimeId: _realtimeId,
       peerId: 'peer-a',
     );
+    await first.start();
+    backend.emit(
+      const RealtimeSessionStateChangedEvent(
+        realtimeId: _realtimeId,
+        peerId: 'peer-a',
+        state: RealtimeSessionState.negotiating,
+        generation: 12,
+        sharedSessionInstanceId: _sharedId,
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
     await client.releaseSession(first);
     expect(
       () => client.createSession(realtimeId: _realtimeId, peerId: 'peer-a'),
@@ -73,7 +104,7 @@ void main() {
         realtimeId: _realtimeId,
         peerId: 'peer-a',
         state: RealtimeSessionState.stopped,
-        generation: 13,
+        generation: 12,
         sharedSessionInstanceId: _sharedId,
       ),
     );
@@ -87,6 +118,69 @@ void main() {
     await client.releaseSession(first);
     expect(replacement.state, RealtimeSessionState.idle);
   });
+
+  test('successful start without identity does not release early', () async {
+    final backend = _ClaimBackend();
+    final client = RealtimeClientImpl(backend: backend);
+    addTearDown(client.dispose);
+    final session = client.createSession(
+      realtimeId: _realtimeId,
+      peerId: 'peer-a',
+    );
+
+    await session.start();
+    await client.releaseSession(session);
+    expect(
+      () => client.createSession(realtimeId: _realtimeId, peerId: 'peer-a'),
+      throwsStateError,
+    );
+  });
+
+  test(
+    'start failure clears the in-flight marker before release finalizes',
+    () async {
+      final backend = _ClaimBackend(startFailure: true);
+      final client = RealtimeClientImpl(backend: backend);
+      addTearDown(client.dispose);
+      final session = client.createSession(
+        realtimeId: _realtimeId,
+        peerId: 'peer-a',
+      );
+
+      expect(await session.start(), isA<SdkFailure<void>>());
+      await client.releaseSession(session);
+
+      final replacement = client.createSession(
+        realtimeId: _realtimeId,
+        peerId: 'peer-a',
+      );
+      expect(replacement.state, RealtimeSessionState.idle);
+      await client.releaseSession(replacement);
+    },
+  );
+
+  test(
+    'start throw clears the in-flight marker before release finalizes',
+    () async {
+      final backend = _ClaimBackend(throwOnStart: true);
+      final client = RealtimeClientImpl(backend: backend);
+      addTearDown(client.dispose);
+      final session = client.createSession(
+        realtimeId: _realtimeId,
+        peerId: 'peer-a',
+      );
+
+      await expectLater(session.start(), throwsA(isA<StateError>()));
+      await client.releaseSession(session);
+
+      final replacement = client.createSession(
+        realtimeId: _realtimeId,
+        peerId: 'peer-a',
+      );
+      expect(replacement.state, RealtimeSessionState.idle);
+      await client.releaseSession(replacement);
+    },
+  );
 
   test('releaseSession does not wait for a command timeout', () async {
     final backend = _ClaimBackend(blockStop: true);
@@ -137,10 +231,14 @@ final class _ClaimBackend
   _ClaimBackend({
     this.emitSynchronouslyDuringClaim = false,
     this.blockStop = false,
+    this.startFailure = false,
+    this.throwOnStart = false,
   });
 
   final bool emitSynchronouslyDuringClaim;
   final bool blockStop;
+  final bool startFailure;
+  final bool throwOnStart;
   final StreamController<RealtimeBackendEvent> _events =
       StreamController<RealtimeBackendEvent>.broadcast();
   RealtimeSession? claimedSession;
@@ -154,7 +252,15 @@ final class _ClaimBackend
   Future<SdkResult<void>> start({
     required String realtimeId,
     required String peerId,
-  }) async => const SdkSuccess<void>(null);
+  }) async {
+    if (throwOnStart) throw StateError('start failed');
+    if (startFailure) {
+      return const SdkFailure<void>(
+        NetworkError(code: NetworkErrorCode.ioError, message: 'start failed'),
+      );
+    }
+    return const SdkSuccess<void>(null);
+  }
 
   @override
   Future<SdkResult<void>> stop({required String realtimeId}) async {

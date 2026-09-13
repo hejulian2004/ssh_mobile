@@ -22,6 +22,9 @@ const _pathProviderChannel = MethodChannel('plugins.flutter.io/path_provider');
 /// 可注入的 NetworkRuntime 替身：记录 dispose 次数，可配置 dispose 抛错，
 /// 便于确定性地验证回滚顺序和错误隔离，而不触碰 native handle。
 final class FakeNetworkRuntime implements NetworkRuntime {
+  FakeNetworkRuntime({this.realtimeGateway});
+
+  final NetworkRealtimeGateway? realtimeGateway;
   Object? disposeError;
   int disposeCalls = 0;
   int ensureCapabilityCalls = 0;
@@ -57,7 +60,11 @@ final class FakeNetworkRuntime implements NetworkRuntime {
 
   @override
   Future<NetworkRealtimeGateway> openRealtimeGateway() async {
-    throw UnimplementedError('openRealtimeGateway is not expected in tests');
+    final gateway = realtimeGateway;
+    if (gateway == null) {
+      throw UnimplementedError('openRealtimeGateway is not expected in tests');
+    }
+    return gateway;
   }
 
   @override
@@ -90,6 +97,10 @@ final class FakeCommandGateway implements NetworkCommandGateway {
       if (!_events.isClosed) _events.add(_commandResultFrame(commandId));
     });
     return TransportOperationStatus.success;
+  }
+
+  void emitEvent(Uint8List event) {
+    if (!_events.isClosed) _events.add(event);
   }
 
   Future<void> close() => _events.close();

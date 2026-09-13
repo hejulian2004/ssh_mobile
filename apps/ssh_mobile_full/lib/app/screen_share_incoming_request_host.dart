@@ -45,6 +45,7 @@ final class _AppScreenShareIncomingRequestHostState
   Timer? _offerExpiryTimer;
   _IncomingOfferState _offerState = _IncomingOfferState.terminal;
   int _hostEpoch = 0;
+  int? _activeOfferEpoch;
   bool _busy = false;
 
   @override
@@ -82,7 +83,9 @@ final class _AppScreenShareIncomingRequestHostState
       return;
     }
     _rememberOffer(key, effectiveExpiry, now);
-    final candidateEpoch = ++_hostEpoch;
+    // Keep this epoch tentative until arbitration accepts the candidate. A
+    // losing intent must not invalidate the current owner's expiry callback.
+    final candidateEpoch = _hostEpoch + 1;
     final acquired = widget.arbitration.acquire(
       remotePeerId: offer.authenticatedPeerId,
       initiatorPeerId: offer.request.senderPeerId,
@@ -90,7 +93,7 @@ final class _AppScreenShareIncomingRequestHostState
       onReplaced: () async {
         if (_isExactPending(offer, candidateEpoch)) {
           await _expirePending(offer, candidateEpoch);
-        } else if (mounted && identical(_activeOffer, offer)) {
+        } else if (_isExactActive(offer, candidateEpoch)) {
           unawaited(widget.navigatorKey.currentState?.maybePop());
         }
       },
@@ -101,8 +104,13 @@ final class _AppScreenShareIncomingRequestHostState
     }
     final previous = _offer;
     if (previous != null && !identical(previous, offer)) {
-      _finishPending(previous);
+      // Finish the current owner while [_hostEpoch] still names it. The
+      // arbitration callback may also run asynchronously; doing this before
+      // committing the candidate epoch makes replacement cleanup deterministic
+      // and leaves the new owner as the only mutable Host state.
+      _finishPending(previous, _hostEpoch, discard: true);
     }
+    _hostEpoch = candidateEpoch;
     _offer = offer;
     _offerState = _IncomingOfferState.pending;
     _busy = false;
@@ -182,15 +190,17 @@ final class _AppScreenShareIncomingRequestHostState
 
   Future<void> _reject(RealtimeIncomingSessionOffer offer) async {
     if (!_beginResolving(offer)) return;
+    final ownerEpoch = _hostEpoch;
     try {
       await widget.runtime.realtimeClient.rejectIncomingOffer(offer);
     } finally {
-      _finish(offer);
+      _finish(offer, ownerEpoch);
     }
   }
 
   Future<void> _accept(RealtimeIncomingSessionOffer offer) async {
     if (!_beginResolving(offer)) return;
+    final ownerEpoch = _hostEpoch;
     AppScreenShareSessionLease? lease;
     RealtimeSession? session;
     var handedOff = false;
@@ -224,6 +234,7 @@ final class _AppScreenShareIncomingRequestHostState
       handedOff = true;
       lease = null;
       _activeOffer = offer;
+      _activeOfferEpoch = ownerEpoch;
       _offerState = _IncomingOfferState.handedOff;
       if (mounted && identical(_offer, offer)) {
         setState(() {
@@ -243,25 +254,17 @@ final class _AppScreenShareIncomingRequestHostState
           await widget.runtime.realtimeClient.releaseSession(session);
         }
       }
-      _finish(offer);
+      _finish(offer, ownerEpoch);
     }
   }
 
-  void _finish(RealtimeIncomingSessionOffer offer) {
-    _offerExpiryTimer?.cancel();
-    _offerExpiryTimer = null;
-    _offerState = _IncomingOfferState.terminal;
-    widget.arbitration.release(
-      remotePeerId: offer.authenticatedPeerId,
-      initiatorPeerId: offer.request.senderPeerId,
-      operationId: offer.request.operationId,
-    );
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      if (identical(_offer, offer)) _offer = null;
-      if (identical(_activeOffer, offer)) _activeOffer = null;
-    });
+  void _finish(RealtimeIncomingSessionOffer offer, int ownerEpoch) {
+    if (_isExactPendingOwner(offer, ownerEpoch)) {
+      _finishPending(offer, ownerEpoch);
+    }
+    if (_isExactActive(offer, ownerEpoch)) {
+      _finishActive(offer, ownerEpoch);
+    }
   }
 
   bool _beginResolving(RealtimeIncomingSessionOffer offer) {
@@ -283,6 +286,21 @@ final class _AppScreenShareIncomingRequestHostState
       identical(_offer, offer) &&
       _offerState == _IncomingOfferState.pending &&
       hostEpoch == _hostEpoch;
+
+  bool _isExactPendingOwner(
+    RealtimeIncomingSessionOffer offer,
+    int hostEpoch,
+  ) =>
+      mounted &&
+      identical(_offer, offer) &&
+      (_offerState == _IncomingOfferState.pending ||
+          _offerState == _IncomingOfferState.resolving) &&
+      hostEpoch == _hostEpoch;
+
+  bool _isExactActive(RealtimeIncomingSessionOffer offer, int hostEpoch) =>
+      mounted &&
+      identical(_activeOffer, offer) &&
+      _activeOfferEpoch == hostEpoch;
 
   Future<void> _expirePending(
     RealtimeIncomingSessionOffer offer,
@@ -307,13 +325,42 @@ final class _AppScreenShareIncomingRequestHostState
     }
   }
 
-  void _finishPending(RealtimeIncomingSessionOffer offer) {
+  void _finishPending(
+    RealtimeIncomingSessionOffer offer,
+    int ownerEpoch, {
+    bool discard = false,
+  }) {
+    if (!_isExactPendingOwner(offer, ownerEpoch)) return;
+    _offerExpiryTimer?.cancel();
+    _offerExpiryTimer = null;
+    _offerState = _IncomingOfferState.terminal;
+    _offer = null;
+    _busy = false;
     widget.arbitration.release(
       remotePeerId: offer.authenticatedPeerId,
       initiatorPeerId: offer.request.senderPeerId,
       operationId: offer.request.operationId,
     );
-    _discardBestEffort(offer);
+    if (discard) _discardBestEffort(offer);
+    if (mounted) setState(() {});
+  }
+
+  void _finishActive(RealtimeIncomingSessionOffer offer, int ownerEpoch) {
+    if (!_isExactActive(offer, ownerEpoch)) return;
+    _activeOffer = null;
+    _activeOfferEpoch = null;
+    widget.arbitration.release(
+      remotePeerId: offer.authenticatedPeerId,
+      initiatorPeerId: offer.request.senderPeerId,
+      operationId: offer.request.operationId,
+    );
+    // A pending replacement owns the global state and timer. An old active
+    // route completion must never overwrite it.
+    if (_offer == null && _offerState == _IncomingOfferState.handedOff) {
+      _offerState = _IncomingOfferState.terminal;
+      _busy = false;
+    }
+    if (mounted) setState(() {});
   }
 
   void _discardBestEffort(RealtimeIncomingSessionOffer offer) {
