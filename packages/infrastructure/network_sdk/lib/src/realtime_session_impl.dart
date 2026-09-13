@@ -107,7 +107,7 @@ final class _RealtimeSession implements RealtimeSession {
         // command. The authoritative generation may still arrive later.
         // Only a failed command with no generation can prove that no native
         // session was established and make this object releaseable.
-        if (result is SdkFailure<void> && _generation == null) {
+        if (!_disposed && result is SdkFailure<void> && _generation == null) {
           _state = RealtimeSessionState.failed;
           _authoritativeTerminal = true;
         }
@@ -118,7 +118,7 @@ final class _RealtimeSession implements RealtimeSession {
       },
       onError: (Object error, StackTrace stackTrace) async {
         if (identical(_startFuture, future)) _startFuture = null;
-        if (_generation == null) {
+        if (!_disposed && _generation == null) {
           _state = RealtimeSessionState.failed;
           _authoritativeTerminal = true;
         }
