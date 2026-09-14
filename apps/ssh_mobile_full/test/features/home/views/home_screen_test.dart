@@ -1,6 +1,8 @@
 import 'package:connection_core/connection_core.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:feature_ai/feature_ai.dart' as feature_ai;
+import 'package:feature_connection/feature_connection.dart'
+    as feature_connection;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -59,6 +61,7 @@ void main() {
     Duration? settle,
     SettingsViewModel? settings,
     bool pumpAdditionalFrame = true,
+    void Function(RouteSettings settings)? onRouteGenerated,
   }) async {
     await tester.pumpWidget(
       MultiProvider(
@@ -71,9 +74,12 @@ void main() {
         ],
         child: MaterialApp(
           theme: AppTheme.lightThemeFor(),
-          onGenerateRoute: (settings) => MaterialPageRoute<void>(
-            builder: (_) => Text('route ${settings.name}'),
-          ),
+          onGenerateRoute: (settings) {
+            onRouteGenerated?.call(settings);
+            return MaterialPageRoute<void>(
+              builder: (_) => Text('route ${settings.name}'),
+            );
+          },
           home: AppConnectionRouteScope(
             connectionRepository: storage.connectionRepository,
             credentialRepository: storage.credentialRepository,
@@ -125,6 +131,43 @@ void main() {
     expect(find.byType(PageView), findsNothing);
     expect(find.byType(ServerListPane), findsOneWidget);
     expect(find.byType(feature_ai.LlmChatScreen), findsNothing);
+
+    await disposeHome(tester);
+  });
+
+  testWidgets('empty-state add actions reuse the Home connection ViewModel', (
+    tester,
+  ) async {
+    RouteSettings? generatedRoute;
+    await pumpHome(
+      tester,
+      onRouteGenerated: (settings) => generatedRoute = settings,
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final homeViewModel = tester
+        .element(find.byType(HomeScreen))
+        .read<feature_connection.ConnectionViewModel>();
+    final strings = AppStrings(appSettings.language);
+
+    Future<void> expectEmptyStateAddReusesHomeViewModel(IconData icon) async {
+      final rail = find.byType(NavigationRail);
+      await tester.tap(find.descendant(of: rail, matching: find.byIcon(icon)));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text(strings.addConnection), findsOneWidget);
+      await tester.tap(find.text(strings.addConnection));
+      await tester.pump();
+
+      expect(generatedRoute?.name, '/add');
+      expect(generatedRoute?.arguments, same(homeViewModel));
+
+      tester.state<NavigatorState>(find.byType(Navigator)).pop();
+      await tester.pump();
+    }
+
+    await expectEmptyStateAddReusesHomeViewModel(Icons.folder_open_outlined);
+    await expectEmptyStateAddReusesHomeViewModel(Icons.monitor_heart_outlined);
 
     await disposeHome(tester);
   });

@@ -20,6 +20,7 @@ import 'package:feature_terminal/feature_terminal.dart' as feature_terminal;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
 import 'package:ssh_mobile/app/app_runtime.dart';
 import 'package:ssh_mobile/app/connection_feature_adapters.dart';
 import 'package:ssh_mobile/app/navigation/app_route_contributions.dart';
@@ -287,6 +288,43 @@ void main() {
       await tapRailIconOnce(tester, Icons.monitor_heart_outlined);
       expect(find.byType(feature_system_admin.SystemAdminScreen), findsNothing);
       expect(find.text(strings.systemOmAdmin), findsOneWidget);
+
+      await disposeTree(tester);
+    });
+  });
+
+  testWidgets('home empty-state add action reuses its connection ViewModel', (
+    tester,
+  ) async {
+    await withWindowsPlatform(tester, () async {
+      await pumpApp(tester);
+      await pushRoute(tester, AppShellRouteNames.performance);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 500)),
+      );
+      await tester.pump();
+
+      final homeViewModel = tester
+          .element(find.byType(HomeScreen))
+          .read<feature_connection.ConnectionViewModel>();
+      final strings = AppStrings(runtime.appSettings.language);
+
+      Future<void> expectAddRouteReusesHomeViewModel(IconData icon) async {
+        await tapRailIconOnce(tester, icon);
+        await tester.tap(find.text(strings.addConnection));
+        await tester.pump();
+        expectRoute(tester, feature_connection.AddEditScreen);
+
+        final addViewModel = tester
+            .element(find.byType(feature_connection.AddEditScreen))
+            .read<feature_connection.ConnectionViewModel>();
+        expect(identical(addViewModel, homeViewModel), isTrue);
+
+        await popRoute(tester);
+      }
+
+      await expectAddRouteReusesHomeViewModel(Icons.folder_open_outlined);
+      await expectAddRouteReusesHomeViewModel(Icons.monitor_heart_outlined);
 
       await disposeTree(tester);
     });

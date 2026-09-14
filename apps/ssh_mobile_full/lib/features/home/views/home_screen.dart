@@ -605,7 +605,11 @@ class _HomeScreenState extends State<HomeScreen> {
       title: isSftp ? strings.sftpEmptyTitle : strings.systemOmAdmin,
       message: isSftp ? strings.sftpEmptyHint : strings.selectServerToManage,
       action: FilledButton.icon(
-        onPressed: () => Navigator.pushNamed(context, '/add'),
+        onPressed: () => Navigator.pushNamed(
+          context,
+          '/add',
+          arguments: context.read<ConnectionViewModel>(),
+        ),
         icon: const Icon(Icons.add_rounded),
         label: Text(strings.addConnection),
       ),
