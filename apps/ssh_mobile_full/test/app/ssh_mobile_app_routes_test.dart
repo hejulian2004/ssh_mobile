@@ -14,6 +14,8 @@ import 'package:feature_mcp/feature_mcp.dart' as feature_mcp;
 import 'package:feature_playbook/feature_playbook.dart' as feature_playbook;
 import 'package:feature_rag/feature_rag.dart' as feature_rag;
 import 'package:feature_sftp/feature_sftp.dart' as feature_sftp;
+import 'package:feature_system_admin/feature_system_admin.dart'
+    as feature_system_admin;
 import 'package:feature_terminal/feature_terminal.dart' as feature_terminal;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -26,6 +28,7 @@ import 'package:ssh_mobile/app/ssh_mobile_app.dart';
 import 'package:ssh_mobile/app/terminal_feature_adapters.dart';
 import 'package:ssh_mobile/features/home/views/home_screen.dart';
 import 'package:ssh_mobile/features/startup/views/startup_screen.dart';
+import 'package:ssh_mobile/services/app_settings.dart';
 
 import 'support/app_runtime_test_support.dart';
 
@@ -260,6 +263,30 @@ void main() {
 
       await tapRailIconOnce(tester, Icons.psychology_outlined);
       expect(tester.widget<feature_ai.LlmChatScreen>(aiFinder).active, isTrue);
+
+      await disposeTree(tester);
+    });
+  });
+
+  testWidgets('home enters no-connection states without feature shell flash', (
+    tester,
+  ) async {
+    await withWindowsPlatform(tester, () async {
+      await pumpApp(tester);
+      await pushRoute(tester, AppShellRouteNames.performance);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 500)),
+      );
+      await tester.pump();
+      final strings = AppStrings(runtime.appSettings.language);
+
+      await tapRailIconOnce(tester, Icons.folder_open_outlined);
+      expect(find.byType(feature_sftp.SftpScreen), findsNothing);
+      expect(find.text(strings.sftpEmptyTitle), findsOneWidget);
+
+      await tapRailIconOnce(tester, Icons.monitor_heart_outlined);
+      expect(find.byType(feature_system_admin.SystemAdminScreen), findsNothing);
+      expect(find.text(strings.systemOmAdmin), findsOneWidget);
 
       await disposeTree(tester);
     });

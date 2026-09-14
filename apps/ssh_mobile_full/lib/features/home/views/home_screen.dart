@@ -88,6 +88,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final hasConnections = context.select<ConnectionViewModel, bool>(
       (vm) => vm.connections.isNotEmpty,
     );
+    final isLoadingConnections = context.select<ConnectionViewModel, bool>(
+      (vm) => vm.isLoading,
+    );
 
     final content = NotificationListener<OpenSettingsNotification>(
       onNotification: (notification) {
@@ -106,7 +109,12 @@ class _HomeScreenState extends State<HomeScreen> {
               index: _selectedIndex,
               children: [
                 for (var index = _firstPage; index <= _lastPage; index++)
-                  _buildPage(index),
+                  _buildPage(
+                    index,
+                    strings: strings,
+                    hasConnections: hasConnections,
+                    isLoadingConnections: isLoadingConnections,
+                  ),
               ],
             ),
           ),
@@ -502,16 +510,41 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildPage(int index) {
+  Widget _buildPage(
+    int index, {
+    required AppStrings strings,
+    required bool hasConnections,
+    required bool isLoadingConnections,
+  }) {
     final active = _selectedIndex == index;
     return _RetainedNavPage(
       key: ValueKey<String>('home-nav-slot-$index'),
       active: active,
-      builder: (context) => _pageShell(_buildFeaturePage(context, index)),
+      builder: (context) => _pageShell(
+        _buildFeaturePage(
+          context,
+          index,
+          strings: strings,
+          hasConnections: hasConnections,
+          isLoadingConnections: isLoadingConnections,
+        ),
+      ),
     );
   }
 
-  Widget _buildFeaturePage(BuildContext context, int index) {
+  Widget _buildFeaturePage(
+    BuildContext context,
+    int index, {
+    required AppStrings strings,
+    required bool hasConnections,
+    required bool isLoadingConnections,
+  }) {
+    if (!hasConnections && (index == _sftpPage || index == _adminPage)) {
+      return isLoadingConnections
+          ? _buildConnectionCatalogLoadingState()
+          : _buildNoConnectionsState(context, index, strings);
+    }
+
     switch (index) {
       case _aiPage:
         return feature_ai.LlmChatScreen(
@@ -555,6 +588,28 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _pageShell(Widget child) {
     return RepaintBoundary(child: AppPageSurface(child: child));
+  }
+
+  Widget _buildConnectionCatalogLoadingState() {
+    return const Center(child: AppLoadingIndicator(size: 24, strokeWidth: 2));
+  }
+
+  Widget _buildNoConnectionsState(
+    BuildContext context,
+    int index,
+    AppStrings strings,
+  ) {
+    final isSftp = index == _sftpPage;
+    return AppEmptyState(
+      icon: isSftp ? Icons.folder_open_rounded : Icons.monitor_heart_outlined,
+      title: isSftp ? strings.sftpEmptyTitle : strings.systemOmAdmin,
+      message: isSftp ? strings.sftpEmptyHint : strings.selectServerToManage,
+      action: FilledButton.icon(
+        onPressed: () => Navigator.pushNamed(context, '/add'),
+        icon: const Icon(Icons.add_rounded),
+        label: Text(strings.addConnection),
+      ),
+    );
   }
 
   Future<void> _exportAppData(BuildContext context, AppStrings strings) async {
