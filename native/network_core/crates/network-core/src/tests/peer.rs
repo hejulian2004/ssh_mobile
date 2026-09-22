@@ -148,6 +148,7 @@ async fn wait_for_active_task_count(
 #[tokio::test]
 async fn session_close_stops_and_joins_generic_route_tasks() {
     let state = new_test_state().await;
+    state.allow_routes_for_test("generic-close-peer").await;
     let session_id = started_session(&state, "generic-close-peer").await;
     let (connection, mut server) = generic_connection_pair().await;
     let mut scope =
@@ -197,6 +198,7 @@ async fn connected_session_rejects_a_second_route_to_enforce_one_to_one() {
     // §18 1:1：Session 已 Connected 且持有 route 时，拒绝再挂第二条 route。
     let state = new_test_state().await;
     let peer_id = "generic-one-to-one-peer";
+    state.allow_routes_for_test(peer_id).await;
     let session_id = started_session(&state, peer_id).await;
     let (first_connection, _server) = generic_connection_pair().await;
     let mut first_scope =
@@ -229,6 +231,7 @@ async fn outbound_generic_peer_restart_replaces_session_and_cancels_old_tasks() 
     // SessionId + 新 root），并且旧 Session 的 task group 在 admission 时立即取消。
     let state = new_test_state().await;
     let peer_id = "generic-outbound-restart-peer";
+    state.allow_routes_for_test(peer_id).await;
     let local_peer_id = "generic-outbound-local";
     let old_session_id = started_session(&state, peer_id).await;
     let old_remote_binding = "11".repeat(16);
@@ -415,6 +418,7 @@ async fn inbound_authenticated_generic_route_commits_a_fresh_session() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test(peer_id.into()).await;
     state.trusted_peer_keys.write().await.insert(
         peer_id.into(),
         remote_identity.public_identity_key().to_bytes(),
@@ -520,6 +524,9 @@ fn runtime_stop_joins_generic_route_tasks() {
         .clone()
         .expect("runtime state");
     let (server, scope) = runtime.handle().block_on(async {
+        state
+            .allow_routes_for_test("generic-runtime-stop-peer")
+            .await;
         let session_id = started_session(&state, "generic-runtime-stop-peer").await;
         let (connection, server) = generic_connection_pair().await;
         let mut scope =
@@ -556,19 +563,14 @@ async fn losing_candidate_admit_never_replaces_attached_winner_session() {
     // 双方都掉线。
     let state = new_test_state().await;
     let peer_id = "candidate-race-peer";
+    state.allow_routes_for_test(peer_id).await;
     let session_id = started_session(&state, peer_id).await;
     let binding = "11".repeat(16);
 
     // winner：第一次 admit 成功，保持 in-flight Session（Initialize）。
-    let winner = admit_single_winner(
-        &state,
-        peer_id,
-        Some(session_id),
-        &binding,
-        DEFAULT_CONNECTION_CAPABILITY,
-    )
-    .await
-    .expect("winner admission should succeed");
+    let winner = admit_single_winner(&state, peer_id, Some(session_id), &binding)
+        .await
+        .expect("winner admission should succeed");
     assert_eq!(winner.session_id, session_id);
 
     // winner 挂载一条 generic route（Session → Connected）。
@@ -582,15 +584,9 @@ async fn losing_candidate_admit_never_replaces_attached_winner_session() {
 
     // loser：同 (peer, expected_session_id) 的迟到 admit 必须被拒绝，绝不替换。
     assert!(
-        admit_single_winner(
-            &state,
-            peer_id,
-            Some(session_id),
-            &binding,
-            DEFAULT_CONNECTION_CAPABILITY
-        )
-        .await
-        .is_err(),
+        admit_single_winner(&state, peer_id, Some(session_id), &binding)
+            .await
+            .is_err(),
         "losing candidate must not trigger a Session replacement"
     );
 
@@ -940,9 +936,10 @@ async fn websocket_candidate_without_stream_capability_does_not_admit_route() {
         Ok(_) => panic!("WebSocket must not be admitted as a stream-capable route"),
         Err(error) => error,
     };
-    // The companion TCP attempt is deliberately held open by the mixed
-    // responder, so the bounded race reports Timeout after the authenticated
-    // WebSocket route is rejected for lacking ReliableStream.
+    // WebSocket is connected and then dropped before Noise authentication,
+    // because its profile cannot carry ReliableStream. The companion TCP
+    // attempt stays open, so the bounded race reports Timeout and no stream
+    // route is admitted.
     assert_eq!(error.code, NetworkErrorCode::Timeout as i32);
     let _ = release_tx.send(());
     responder_task
@@ -1022,6 +1019,7 @@ async fn relay_crypto_rejects_disabled_policy_and_cleans_session() {
             e2ee_policy: network_protocol::E2eePolicy::Disabled,
         },
     );
+    state.allow_routes_for_test(peer_id.into()).await;
     let session_id = started_session(&state, peer_id).await;
     let identity = Arc::new(DeviceIdentity::from_private_keys(
         "device-a".into(),
@@ -1063,6 +1061,7 @@ async fn relay_crypto_send_failure_removes_waiter_without_leaking_state() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test(peer_id.into()).await;
     let session_id = started_session(&state, peer_id).await;
     let identity = Arc::new(DeviceIdentity::from_private_keys(
         "device-a".into(),
@@ -1113,6 +1112,7 @@ async fn inbound_admission_requires_configured_peer_and_marks_supervisor_online(
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test(peer_id.into()).await;
     InboundConnectionAcceptor::admit_authenticated_inbound(
         &state,
         peer_id,
@@ -1223,6 +1223,7 @@ async fn late_quic_candidate_arriving_before_direct_deadline_can_win() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    server_state.allow_routes_for_test(local_peer_id).await;
     server_state.trusted_peer_keys.write().await.insert(
         local_peer_id.to_string(),
         local_identity.public_identity_key().to_bytes(),
@@ -1436,7 +1437,7 @@ async fn spawn_mixed_generic_responder(
             tokio::sync::RwLock::new(HashMap::from([(local_peer_id, local_public_key)]));
         let mut release_rx = release_rx;
         let mut raw_connections = Vec::new();
-        let mut websocket_authenticated = false;
+        let mut websocket_seen = false;
         loop {
             tokio::select! {
                 _ = &mut release_rx => break,
@@ -1458,7 +1459,10 @@ async fn spawn_mixed_generic_responder(
                         let mut connection = GenericConnection::from_transport(
                             Transport::WebSocket(Box::new(socket)),
                         );
-                        authenticate_responder(
+                        websocket_seen = true;
+                        // The client drops a WebSocket whose profile cannot carry
+                        // the requested capability before the Noise handshake.
+                        let _ = authenticate_responder(
                             &mut connection,
                             Arc::clone(&remote_identity),
                             &trusted_peer_keys,
@@ -1466,9 +1470,7 @@ async fn spawn_mixed_generic_responder(
                                 Ok(("33".repeat(16), ()))
                             },
                         )
-                        .await
-                        .expect("authenticate WebSocket responder");
-                        websocket_authenticated = true;
+                        .await;
                     } else {
                         // TCP has connected but the responder never sends the generic
                         // handshake, so the TCP race remains a blackhole.
@@ -1478,7 +1480,7 @@ async fn spawn_mixed_generic_responder(
             }
         }
         assert!(
-            websocket_authenticated,
+            websocket_seen,
             "the mixed responder should observe a WebSocket attempt"
         );
         drop(raw_connections);

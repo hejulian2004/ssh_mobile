@@ -135,8 +135,7 @@ impl ConnectivityAttemptCoordinator {
             .await
         {
             state
-                .connection_sessions
-                .release_authenticated_session(peer_id, session_id, &crypto.remote_session_binding)
+                .release_claimed_session(peer_id, session_id, &crypto.remote_session_binding)
                 .await;
             return Err(protocol_error_with_peer(
                 NetworkErrorCode::NoRoute,

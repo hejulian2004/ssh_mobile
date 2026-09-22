@@ -102,6 +102,7 @@ async fn connect_command_maps_unsuccessful_attempt_cancellation_to_io_error() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a".into()).await;
     let supervisor = state
         .peer_supervisors
         .get_or_create_with_configured("peer-a", true)

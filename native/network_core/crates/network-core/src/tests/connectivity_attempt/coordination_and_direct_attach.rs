@@ -260,9 +260,17 @@ async fn stage_c_direct_success_attaches_a_fresh_quic_session() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    server_state.allow_routes_for_test(&client_identity.device_id).await;
     server_state.trusted_peer_keys.write().await.insert(
         client_identity.device_id.clone(),
         client_identity.public_identity_key().to_bytes(),
+    );
+    server_state.peer_route_authorizations.write().await.insert(
+        client_identity.device_id.clone(),
+        crate::runtime::PeerRouteAuthorization {
+            direct: true,
+            relay: true,
+        },
     );
     let server_endpoint = network_quic::QuicEndpointManager::new(
         "127.0.0.1:0".parse().expect("server address"),
@@ -341,7 +349,7 @@ async fn stage_c_direct_success_attaches_a_fresh_quic_session() {
         .map(|manager| {
             let manager = manager.lock().expect("peer path manager lock");
             (
-                manager.direct_ready().len(),
+                usize::from(manager.direct_ready().is_some()),
                 manager.relay_ready().is_some(),
             )
         });

@@ -190,7 +190,7 @@ fn direct_and_relay_can_coexist() {
 
     assert_eq!(manager.direct_state(), DirectPathState::Ready);
     assert_eq!(manager.relay_state(), RelayPathState::Ready);
-    assert_eq!(manager.direct_ready(), std::slice::from_ref(&direct));
+    assert_eq!(manager.direct_ready(), Some(&direct));
     assert_eq!(manager.relay_ready(), Some(&relay));
     assert_eq!(
         manager.select(CAPABILITY_RELIABLE_MESSAGE),
@@ -496,7 +496,7 @@ fn equivalent_late_direct_loses() {
     );
 
     assert_eq!(result, Err(CoreNetworkError::StaleAttempt));
-    assert_eq!(manager.direct_ready(), std::slice::from_ref(&first));
+    assert_eq!(manager.direct_ready(), Some(&first));
     assert!(first_closes.lock().expect("first close log").is_empty());
     assert_eq!(
         late_closes.lock().expect("late close log").as_slice(),
@@ -524,7 +524,7 @@ fn weaker_late_direct_loses() {
     );
 
     assert_eq!(result, Err(CoreNetworkError::StaleAttempt));
-    assert_eq!(manager.direct_ready(), std::slice::from_ref(&first));
+    assert_eq!(manager.direct_ready(), Some(&first));
     assert!(first_closes.lock().expect("first close log").is_empty());
     assert_eq!(
         late_closes.lock().expect("late close log").as_slice(),
@@ -556,7 +556,7 @@ fn needed_strict_superset_can_promote() {
         .expect("needed stream-capable direct path");
 
     assert_ne!(promoted, old);
-    assert_eq!(manager.direct_ready(), std::slice::from_ref(&promoted));
+    assert_eq!(manager.direct_ready(), Some(&promoted));
     assert!(manager.direct_probe().is_none());
     assert_eq!(
         old_closes.lock().expect("old close log").as_slice(),
@@ -810,6 +810,69 @@ fn manager_retires_stale_and_ephemeral_paths_by_topology() {
     );
 }
 
+#[tokio::test]
+async fn generic_route_loss_uses_carrier_id_rather_than_path_id() {
+    let registry = Arc::new(PathRegistry::new());
+    let mut manager = PeerPathManager::new(test_peer(), Arc::clone(&registry));
+    let route = crate::connection::test_blocking_generic_route();
+    let generic_id = route.handle.id();
+    loop {
+        let handle = manager
+            .publish_ready(profile(PathKind::Direct, RouteTransport::Tcp))
+            .expect("burn a path id");
+        manager.hard_close_direct();
+        if handle.id() >= generic_id.raw() {
+            break;
+        }
+    }
+    let published = manager
+        .publish_ready_with_route(ActiveRoute::generic_test(route.handle.clone()))
+        .expect("publish generic carrier");
+    assert_ne!(
+        published.id(),
+        generic_id.raw(),
+        "path registry ids and generic route ids are different counters"
+    );
+    assert_eq!(
+        manager.close_ready_direct(Some(generic_id)).as_ref(),
+        Some(&published)
+    );
+    assert!(manager.direct_ready().is_none());
+    let _ = route.release.send(());
+    route.worker.abort();
+}
+
+#[test]
+fn saturated_relay_leases_still_close_by_client_identity() {
+    let registry = Arc::new(PathRegistry::new());
+    let mut manager = PeerPathManager::new(test_peer(), Arc::clone(&registry));
+    let data = Arc::new(
+        network_relay::RelayDataClient::new(
+            "ws://127.0.0.1:9/v2/relay/9a8b7c6d5e4f3a2b1c9d8e7f6a5b4c3d".into(),
+            "9a8b7c6d5e4f3a2b1c9d8e7f6a5b4c3d".into(),
+            vec![0u8; 32],
+            "credential".into(),
+            [0u8; 32],
+        )
+        .expect("relay data client"),
+    );
+    let handle = manager
+        .publish_ready_with_route(ActiveRoute::relay(Some(Arc::clone(&data))))
+        .expect("publish relay path");
+    let projection = manager.projection(&handle).expect("projection");
+    let mut leases = Vec::new();
+    for _ in 0..MAX_PATH_LEASES {
+        leases.push(projection.acquire().expect("lease within the borrower cap"));
+    }
+    assert!(projection.acquire().is_err());
+    assert_eq!(
+        manager.close_ready_relay(Some(&data)).as_ref(),
+        Some(&handle)
+    );
+    assert!(manager.current_relay_data().is_none());
+    drop(leases);
+}
+
 #[test]
 fn conditional_hard_close_never_retires_a_replacement_path() {
     let registry = Arc::new(PathRegistry::new());
@@ -823,7 +886,7 @@ fn conditional_hard_close_never_retires_a_replacement_path() {
         .expect("direct B");
 
     assert!(manager.hard_close_direct_if_handle(&direct_a).is_none());
-    assert_eq!(manager.direct_ready(), std::slice::from_ref(&direct_b));
+    assert_eq!(manager.direct_ready(), Some(&direct_b));
     assert!(registry.acquire(&direct_b).is_ok());
 
     let relay_a = manager

@@ -133,11 +133,11 @@ const DATA_ENV_CHANNEL: u8 = 0x08;
 const DATA_ENV_CHANNEL_ACK: u8 = 0x09;
 const DATA_ENV_STREAM: u8 = 0x0A;
 
-#[path = "relay_control.rs"]
+#[path = "relay_control/mod.rs"]
 mod relay_control;
-#[path = "relay_data.rs"]
+#[path = "relay_data/mod.rs"]
 mod relay_data;
-#[path = "relay_transfer.rs"]
+#[path = "relay_transfer/mod.rs"]
 mod relay_transfer;
 
 pub(super) use relay_control::*;

@@ -119,6 +119,13 @@ pub(crate) fn default_communication_class(class: CommunicationClass) -> Communic
 
 /// 从已建立的 route profile 推导注册表能力位（§34）：注册表记录连接**实际**能
 /// 承载什么，因此 QUIC/TCP 基线连接可被后续 ReliableStream 请求复用。
+pub(crate) fn profile_satisfies(
+    profile: crate::connection::ConnectionProfile,
+    required_capabilities: u8,
+) -> bool {
+    profile_capability_mask(profile) & required_capabilities == required_capabilities
+}
+
 pub(crate) fn profile_capability_mask(profile: crate::connection::ConnectionProfile) -> u8 {
     use crate::connection::ConnectionCapability as Cap;
     let mut mask = 0;

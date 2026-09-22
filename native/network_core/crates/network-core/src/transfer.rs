@@ -150,10 +150,9 @@ impl TransferDispatcher {
         }
         match lease.profile().transport() {
             RouteTransport::Quic => {
-                let connection = self
-                    .state
-                    .path_connection_for_lease(&lease)
-                    .await
+                let connection = lease
+                    .connection()
+                    .filter(|_| lease.is_active())
                     .ok_or_else(|| {
                         protocol_error_with_peer(
                             NetworkErrorCode::NoRoute,
@@ -175,7 +174,7 @@ impl TransferDispatcher {
             RouteTransport::WebSocket
                 if lease.profile().topology() == crate::connection::RouteTopology::Relay =>
             {
-                let usable = match self.state.path_relay_data_for_lease(&lease).await {
+                let usable = match lease.relay_data().filter(|_| lease.is_active()) {
                     Some(data) => data.is_usable().await,
                     None => false,
                 };
@@ -293,7 +292,7 @@ impl TransferAttemptError {
     }
 }
 
-#[path = "transfer_operations.rs"]
+#[path = "transfer_operations/mod.rs"]
 mod transfer_operations;
 
 pub(super) use transfer_operations::*;

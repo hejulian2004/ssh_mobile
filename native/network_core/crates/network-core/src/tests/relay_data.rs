@@ -261,6 +261,7 @@ async fn relay_business_payloads_bind_peer_tokens_and_stream_identity() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a".into()).await;
 
     let message = DataMessage {
         session_id: "session-a".into(),
@@ -435,6 +436,7 @@ async fn relay_crypto_handshake_rejects_unbound_steps_and_policy_downgrades() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a".into()).await;
 
     let error = handle_relay_crypto_handshake(&state, &data, "short", "peer-a", &[1, 2])
         .await
@@ -543,6 +545,7 @@ async fn relay_crypto_hello_stages_a_responder_before_socket_failure() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a".into()).await;
     *state.lifecycle.identity.write().await = Some(Arc::new(
         network_identity::DeviceIdentity::from_private_keys("peer-a".into(), [5u8; 32], [6u8; 32]),
     ));
@@ -589,6 +592,7 @@ async fn relay_admission_checks_policy_binding_path_and_commits_current_route() 
                 e2ee_policy: network_protocol::E2eePolicy::Required,
             },
         );
+        state.allow_routes_for_test("peer-a".into()).await;
         state
     };
 
@@ -812,6 +816,7 @@ async fn relay_data_connectors_pair_over_fake_v2_and_replace_stale_readiness() {
         expires_at_ms: 0,
         local_token: responder_token,
     };
+    responder_state.allow_routes_for_test("peer-a").await;
     let (initiator, _) = tokio::join!(
         connect_initiator_relay_data(&initiator_state, "peer-a", reserve),
         async {
@@ -901,6 +906,9 @@ async fn relay_noise_handshake_round_trips_and_admits_both_sessions() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    initiator_state
+        .allow_routes_for_test("responder".into())
+        .await;
     let responder_state = state();
     *responder_state.lifecycle.identity.write().await = Some(Arc::clone(&responder_identity));
     responder_state.peers.write().await.insert(
@@ -912,6 +920,9 @@ async fn relay_noise_handshake_round_trips_and_admits_both_sessions() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    responder_state
+        .allow_routes_for_test("initiator".into())
+        .await;
     responder_state.trusted_peer_keys.write().await.insert(
         "initiator".into(),
         initiator_identity.public_identity_key().to_bytes(),
@@ -1006,6 +1017,7 @@ async fn relay_crypto_response_reports_a_closed_initiator_waiter() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a".into()).await;
     let (sender, receiver) = mpsc::channel(1);
     drop(receiver);
     state
@@ -1049,6 +1061,7 @@ async fn relay_business_envelopes_reject_malformed_token_and_stream_frames() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a".into()).await;
     state
         .relay
         .relay_path_ready
@@ -1129,6 +1142,7 @@ async fn relay_crypto_final_and_root_confirm_fail_closed_after_authentication() 
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    final_state.allow_routes_for_test("peer-a".into()).await;
     final_state
         .trusted_peer_keys
         .write()
@@ -1187,6 +1201,7 @@ async fn relay_crypto_final_and_root_confirm_fail_closed_after_authentication() 
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    root_state.allow_routes_for_test("peer-a".into()).await;
     let root_initiator = Arc::new(network_identity::DeviceIdentity::from_private_keys(
         "peer-a".into(),
         [31u8; 32],
@@ -1219,12 +1234,7 @@ async fn relay_crypto_final_and_root_confirm_fail_closed_after_authentication() 
         )
         .expect("valid root final");
     let admission = root_state
-        .admit_authenticated_session_with_capability(
-            "peer-a",
-            None,
-            &token,
-            crate::connect::DEFAULT_CONNECTION_CAPABILITY,
-        )
+        .admit_authenticated_session("peer-a", None, &token)
         .await
         .expect("authenticated Relay admission");
     let (_, confirmer, encrypted_seed) = root_responder_handshake
@@ -1270,6 +1280,7 @@ async fn relay_payload_dispatch_reaches_offer_chunk_and_stream_success_boundarie
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a".into()).await;
     state
         .relay
         .relay_path_ready
@@ -1339,6 +1350,7 @@ async fn relay_admission_rejects_a_session_that_becomes_stale_before_finalize() 
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a".into()).await;
     let admission = state
         .admit_authenticated_session("peer-a", None, "remote-a")
         .await
