@@ -6,6 +6,8 @@ use std::sync::{
     Arc, Mutex, Weak,
 };
 
+#[cfg(test)]
+use network_webrtc::{H264AdaptationTarget, MediaDirection};
 use network_webrtc::{RealtimeIoDriver, RealtimeIoDriverHandle, WebRtcError};
 
 use super::*;

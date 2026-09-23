@@ -290,6 +290,11 @@ impl RuntimeState {
                 .is_none()
     }
 
+    #[cfg(test)]
+    pub(crate) async fn wait_for_path_change(&self) {
+        self.path_changed.notified().await;
+    }
+
     pub(crate) async fn fail_session(&self, peer_id: &str, session_id: SessionId) {
         // A stale coordinator must only hard-close projections that still
         // belong to its exact session.  The peer may already have admitted a
