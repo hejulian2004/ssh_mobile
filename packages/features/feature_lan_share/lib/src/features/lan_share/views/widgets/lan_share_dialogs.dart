@@ -69,7 +69,16 @@ extension _LanShareDialogActions on _LanShareScreenState {
     LanShareViewModel vm,
   ) async {
     if (!vm.isWebShareActive) {
-      await vm.toggleWebShare();
+      final result = await vm.toggleWebShare();
+      if (result is NetworkFailure<void> && context.mounted) {
+        final message = vm.webShareAddressSelectionMessage;
+        if (message != null) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(message)));
+        }
+        return;
+      }
     }
     if (!context.mounted) return;
 
@@ -120,18 +129,18 @@ extension _LanShareDialogActions on _LanShareScreenState {
         ).showSnackBar(SnackBar(content: Text(strings.lanShareInvalidAddress)));
         return;
       }
-      final uri = parsedUri;
-      ip = uri.host;
-      advertisedDeviceId = uri.queryParameters['deviceId'];
-      final advertisedLanPort = int.tryParse(
-        uri.queryParameters['lanPort'] ?? '',
-      );
-      final advertisedNativePort = int.tryParse(
-        uri.queryParameters['nativePort'] ?? '',
-      );
-      // V2 links carry the control and native data-plane ports separately.
-      port = advertisedLanPort ?? (uri.port > 0 ? uri.port : 53317);
-      nativePort = advertisedNativePort;
+      final target = parseLanShareWebSharePairingTarget(input);
+      if (target == null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(strings.lanShareInvalidAddress)));
+        return;
+      }
+      ip = target.host;
+      advertisedDeviceId = target.deviceId;
+      // V2 QR URLs carry the control and native data-plane ports separately.
+      port = target.controlPort;
+      nativePort = target.nativePort;
     } else {
       // 解析 IP:端口或纯 IP 地址。
       final parts = input.split(':');
@@ -253,6 +262,20 @@ extension _LanShareDialogActions on _LanShareScreenState {
     Map<String, String> currentIpMap = Map<String, String>.from(ipMap);
     bool isRefreshing = false;
 
+    Future<void> applyOverride(BuildContext dialogContext, String? ip) async {
+      final result = await vm.updateWebShareAddressOverride(ip);
+      if (result is NetworkFailure<void>) {
+        final message = vm.webShareAddressSelectionMessage;
+        if (message != null && context.mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(message)));
+        }
+        return;
+      }
+      if (dialogContext.mounted) Navigator.pop(dialogContext);
+    }
+
     Widget buildIpList(BuildContext ctx, StateSetter setDialogState) {
       final copySuccessMsg = isEn ? 'IP copied to clipboard' : 'IP 已复制到剪贴板';
 
@@ -262,18 +285,15 @@ extension _LanShareDialogActions on _LanShareScreenState {
         children: [
           _buildIpSelectorCardItem(
             context: ctx,
-            title: isEn ? 'Automatic (Default)' : '自动选择（默认第一个）',
+            title: isEn ? 'Automatic' : '自动选择',
             subtitle: isEn
-                ? 'System automatically uses the primary active network card'
-                : '由系统自动判定推荐最适合的活动网卡',
+                ? 'Selects a unique suitable LAN address; choose manually if ambiguous'
+                : '自动选择唯一合适的局域网地址；无法判定时请手动选择',
             icon: Icons.alt_route_rounded,
             isSelected: vm.customIp == null,
             badgeText: isEn ? 'Auto' : '自动',
             copySuccessMsg: copySuccessMsg,
-            onTap: () {
-              vm.setCustomIp(null);
-              Navigator.pop(ctx);
-            },
+            onTap: () => applyOverride(ctx, null),
           ),
           const SizedBox(height: 4),
           ...currentIpMap.entries.map((entry) {
@@ -282,12 +302,7 @@ extension _LanShareDialogActions on _LanShareScreenState {
             final friendlyName = _getFriendlyInterfaceName(interfaceName);
             final icon = _getInterfaceIcon(interfaceName);
             final isSelected = vm.customIp == ip;
-            final isDefaultIp = (currentIpMap.keys.firstOrNull == ip);
-            final badgeText = isSelected
-                ? (isEn ? 'In Use' : '使用中')
-                : (vm.customIp == null && isDefaultIp
-                      ? (isEn ? 'Default' : '默认')
-                      : null);
+            final badgeText = isSelected ? (isEn ? 'In Use' : '使用中') : null;
 
             return _buildIpSelectorCardItem(
               context: ctx,
@@ -298,10 +313,7 @@ extension _LanShareDialogActions on _LanShareScreenState {
               badgeText: badgeText,
               ipToCopy: ip,
               copySuccessMsg: copySuccessMsg,
-              onTap: () {
-                vm.setCustomIp(ip);
-                Navigator.pop(ctx);
-              },
+              onTap: () => applyOverride(ctx, ip),
             );
           }),
         ],

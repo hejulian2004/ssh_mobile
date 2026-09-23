@@ -54,6 +54,10 @@ extension _AppRuntimeFactoryNetwork on _AppRuntimeFactoryContext {
             AppLanShareNetworkIdentityAdapter(runtimeNetworkIdentityService),
         feature_lan_share.LanShareNetworkAccessPort:
             AppLanShareNetworkAccessAdapter(networkFacade),
+        feature_lan_share.LanShareLocalAddressSelectionPort:
+            createLanShareLocalAddressSelectionPort(
+              isWindows: Platform.isWindows,
+            ),
         BootstrapClient: bootstrapClient,
         NetworkRuntime: runtimeNetworkRuntime,
       }),

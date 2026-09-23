@@ -108,7 +108,7 @@ class _LanPairingNavigationHostState extends State<LanPairingNavigationHost> {
   final LanPairingNavigationQueue _requests = LanPairingNavigationQueue();
   ValueNotifier<LanPairingRequest>? _routeRequest;
   bool _routeOpen = false;
-  bool _navigatorRetryScheduled = false;
+  bool _navigationScheduled = false;
   bool _initialized = false;
 
   @override
@@ -170,20 +170,31 @@ class _LanPairingNavigationHostState extends State<LanPairingNavigationHost> {
       return;
     }
     if (decision == LanPairingNavigationDecision.open) {
-      _openActivePairing();
+      _scheduleOpenActivePairing();
     }
   }
 
+  void _scheduleOpenActivePairing() {
+    if (_navigationScheduled) return;
+    _navigationScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _navigationScheduled = false;
+      if (!mounted || _routeOpen || _requests.activeRequest == null) return;
+      if (widget.navigatorKey.currentState == null) return;
+      _openActivePairing();
+    });
+    // Stream events can arrive while the app is idle; registering a post-frame
+    // callback alone does not guarantee that another frame will be scheduled.
+    WidgetsBinding.instance.scheduleFrame();
+  }
+
   void _openActivePairing() {
-    if (_routeOpen) return;
+    if (!mounted || _routeOpen) return;
     final request = _requests.activeRequest;
     if (request == null) return;
 
     final navigator = widget.navigatorKey.currentState;
-    if (navigator == null) {
-      _scheduleNavigatorRetry();
-      return;
-    }
+    if (navigator == null) return;
 
     _routeOpen = true;
     final routeRequest = ValueNotifier<LanPairingRequest>(request);
@@ -215,17 +226,8 @@ class _LanPairingNavigationHostState extends State<LanPairingNavigationHost> {
           }
           _routeOpen = false;
           final nextRequest = _requests.completeActive();
-          if (nextRequest != null) _openActivePairing();
+          if (nextRequest != null) _scheduleOpenActivePairing();
         });
-  }
-
-  void _scheduleNavigatorRetry() {
-    if (_navigatorRetryScheduled) return;
-    _navigatorRetryScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _navigatorRetryScheduled = false;
-      if (mounted) _openActivePairing();
-    });
   }
 
   @override

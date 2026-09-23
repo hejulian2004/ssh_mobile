@@ -37,6 +37,7 @@ final class LanShareModule implements AppModule {
   LanShareDataProtectionPort? _dataProtection;
   LanShareNetworkIdentityPort? _networkIdentity;
   LanShareNetworkAccessPort? _networkAccess;
+  LanShareLocalAddressSelectionPort? _localAddressSelectionPort;
   BootstrapClient? _bootstrapClient;
   NetworkRuntime? _networkRuntime;
   bool? _receiverEnabled;
@@ -86,6 +87,8 @@ final class LanShareModule implements AppModule {
     _dataProtection = context.require<LanShareDataProtectionPort>();
     _networkIdentity = context.require<LanShareNetworkIdentityPort>();
     _networkAccess = context.require<LanShareNetworkAccessPort>();
+    _localAddressSelectionPort = context
+        .require<LanShareLocalAddressSelectionPort>();
     _bootstrapClient = context.require<BootstrapClient>();
     _networkRuntime = context.require<NetworkRuntime>();
     _receiverEnabled = _configuredReceiverEnabled ?? _settings!.receiverEnabled;
@@ -105,6 +108,7 @@ final class LanShareModule implements AppModule {
     final dataProtection = _dataProtection;
     final networkIdentity = _networkIdentity;
     final networkAccess = _networkAccess;
+    final localAddressSelectionPort = _localAddressSelectionPort;
     final bootstrapClient = _bootstrapClient;
     final networkRuntime = _networkRuntime;
     if (settings == null ||
@@ -112,6 +116,7 @@ final class LanShareModule implements AppModule {
         dataProtection == null ||
         networkIdentity == null ||
         networkAccess == null ||
+        localAddressSelectionPort == null ||
         bootstrapClient == null ||
         networkRuntime == null) {
       _initializeFuture = null;
@@ -137,6 +142,7 @@ final class LanShareModule implements AppModule {
         bootstrapClient: bootstrapClient,
         historyRepository: repository,
         networkRuntime: networkRuntime,
+        localAddressSelectionPort: localAddressSelectionPort,
         peerTrustStore: peerTrustStore,
         initializeNetwork: receiverEnabled,
       );
@@ -212,6 +218,7 @@ final class LanShareModule implements AppModule {
     _dataProtection = null;
     _networkIdentity = null;
     _networkAccess = null;
+    _localAddressSelectionPort = null;
     _bootstrapClient = null;
     _networkRuntime = null;
     _state = ModuleState.disposed;

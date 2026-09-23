@@ -94,6 +94,7 @@ dependencies:
   mobile_scanner: ^7.4.0
   device_info_plus: ^13.2.0
   connectivity_plus: ^6.1.5
+  ffi: ^2.2.0
 
 dev_dependencies:
   flutter_test:

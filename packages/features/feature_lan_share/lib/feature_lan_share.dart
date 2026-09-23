@@ -27,6 +27,8 @@ export 'src/features/lan_share/utils/lan_platform_capabilities.dart';
 export 'src/features/lan_share/utils/lan_preview_safety.dart';
 export 'src/features/lan_share/utils/lan_text_action_helper.dart';
 export 'src/services/lan_share/lan_network_models.dart';
+export 'src/services/lan_share/lan_local_address_selection.dart';
+export 'src/services/lan_share/lan_web_share_url.dart';
 export 'src/services/lan_share/lan_peer_trust.dart';
 export 'src/services/lan_share/lan_pairing_crypto.dart';
 export 'src/services/lan_share/lan_multicast_lock.dart';
