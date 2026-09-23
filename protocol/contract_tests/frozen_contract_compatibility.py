@@ -139,7 +139,7 @@ class FrozenContractCompatibilityMixin:
         """A source-shape guard for duplicate carrier ownership, not a lifecycle proof."""
         if os.environ.get("SSH_MOBILE_ACCEPTANCE_STRICT") != "1":
             self.skipTest("architecture guards run in strict acceptance")
-        runtime = _read("native/network_core/crates/network-core/src/runtime.rs")
+        runtime = _read("native/network_core/crates/network-core/src/runtime/mod.rs")
         self.assertNotRegex(
             runtime,
             r"struct\s+OwnedTransportPath\s*\{.*?\broute:\s*Arc<PhysicalRoute>",

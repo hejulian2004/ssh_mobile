@@ -51,6 +51,8 @@ impl ConnectivityAttemptCoordinator {
                     // the route it actually produced. This branch is before
                     // Resolve/Offer, so it cannot orphan a coordination ticket.
                     let retry_admission = loop {
+                        let changed = state.path_change_notified();
+                        tokio::pin!(changed);
                         if state.connection_sessions.current_session_id(peer_id).await
                             != Some(session_id)
                         {
@@ -84,7 +86,7 @@ impl ConnectivityAttemptCoordinator {
                                 peer_id,
                             ));
                         }
-                        state.wait_for_path_change().await;
+                        changed.await;
                     };
                     if retry_admission && !re_evaluated_in_progress {
                         re_evaluated_in_progress = true;
@@ -341,7 +343,7 @@ impl ConnectivityAttemptCoordinator {
                         Some(direct_error.clone()),
                     );
                 }
-                if authorization.is_some_and(|authorization| !authorization.relay) {
+                if !authorization.is_some_and(|authorization| authorization.relay) {
                     state.fail_session(peer_id, session_id).await;
                     return Err(protocol_error_with_peer(
                         NetworkErrorCode::NoRoute,

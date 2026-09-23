@@ -58,6 +58,7 @@ async fn environment_change_retires_an_unmaintained_direct_owner() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a").await;
     let supervisor = state
         .peer_supervisors
         .get_or_create_with_configured("peer-a", false)
@@ -79,6 +80,7 @@ async fn environment_change_retires_an_unmaintained_direct_owner() {
         .write()
         .await
         .insert("peer-a".into(), Arc::new(std::sync::Mutex::new(manager)));
+    state.allow_routes_for_test("peer-a").await;
 
     handle_network_environment_changed(
         &state,
@@ -112,6 +114,7 @@ async fn environment_change_preserves_relay_and_retires_only_direct_path() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a").await;
     state
         .peer_supervisors
         .get_or_create_with_configured("peer-a", false)
@@ -135,6 +138,7 @@ async fn environment_change_preserves_relay_and_retires_only_direct_path() {
         .write()
         .await
         .insert("peer-a".into(), Arc::new(std::sync::Mutex::new(manager)));
+    state.allow_routes_for_test("peer-a").await;
 
     handle_network_environment_changed(
         &state,
@@ -168,6 +172,7 @@ async fn environment_change_restarts_a_maintained_direct_supervisor() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a").await;
     let supervisor = state
         .peer_supervisors
         .get_or_create_with_configured("peer-a", true)
@@ -193,6 +198,7 @@ async fn environment_change_restarts_a_maintained_direct_supervisor() {
         .write()
         .await
         .insert("peer-a".into(), Arc::new(std::sync::Mutex::new(manager)));
+    state.allow_routes_for_test("peer-a").await;
 
     handle_network_environment_changed(
         &state,
@@ -233,6 +239,7 @@ async fn environment_change_starts_relay_backed_direct_recovery() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a").await;
     let supervisor = state
         .peer_supervisors
         .get_or_create_with_configured("peer-a", true)

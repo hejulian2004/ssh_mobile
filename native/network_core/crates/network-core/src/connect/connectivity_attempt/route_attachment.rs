@@ -24,8 +24,7 @@ impl ConnectivityAttemptCoordinator {
                 {
                     connection.close(VarInt::from_u32(0), b"candidate lacks requested capability");
                     state
-                        .connection_sessions
-                        .release_authenticated_session(
+                        .release_claimed_session(
                             peer_id,
                             session_id,
                             &crypto.remote_session_binding,
@@ -63,8 +62,7 @@ impl ConnectivityAttemptCoordinator {
                     Err(_) => {
                         state.crypto.remove_session(peer_id, &session_id.wire_key());
                         state
-                            .connection_sessions
-                            .release_authenticated_session(
+                            .release_claimed_session(
                                 peer_id,
                                 session_id,
                                 &crypto.remote_session_binding,
@@ -81,8 +79,7 @@ impl ConnectivityAttemptCoordinator {
                 if state.connection_sessions.current_session_id(peer_id).await != Some(session_id) {
                     state.crypto.remove_session(peer_id, &session_id.wire_key());
                     state
-                        .connection_sessions
-                        .release_authenticated_session(
+                        .release_claimed_session(
                             peer_id,
                             session_id,
                             &crypto.remote_session_binding,
@@ -136,8 +133,7 @@ impl ConnectivityAttemptCoordinator {
                 {
                     scope.close().await;
                     state
-                        .connection_sessions
-                        .release_authenticated_session(
+                        .release_claimed_session(
                             peer_id,
                             session_id,
                             &generic.crypto.remote_session_binding,
@@ -172,8 +168,7 @@ impl ConnectivityAttemptCoordinator {
                         scope.close().await;
                         state.crypto.remove_session(peer_id, &session_id.wire_key());
                         state
-                            .connection_sessions
-                            .release_authenticated_session(
+                            .release_claimed_session(
                                 peer_id,
                                 session_id,
                                 &generic.crypto.remote_session_binding,

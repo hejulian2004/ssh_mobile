@@ -40,6 +40,7 @@ async fn state_with_identity(
             e2ee_policy: E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test(&peer.device_id).await;
     state
 }
 
@@ -57,6 +58,7 @@ async fn install_relay_path(state: &Arc<RuntimeState>, peer_id: &str, data: Arc<
         .write()
         .await
         .insert(peer_id.into(), Arc::new(std::sync::Mutex::new(manager)));
+    state.allow_routes_for_test(peer_id).await;
 }
 
 fn install_crypto(state: &RuntimeState, peer_id: &str, session_id: &str, initiator: bool) {

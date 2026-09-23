@@ -36,6 +36,7 @@ async fn stream_auto_ensures_reliable_stream() {
         .write()
         .await
         .insert("peer-a".to_string(), Arc::new(StdMutex::new(paths)));
+    state.allow_routes_for_test("peer-a").await;
     crate::transfer::ensure_business_path(
         &state,
         "peer-a",
@@ -924,6 +925,7 @@ async fn duplicate_inbound_open_ignored_keeps_existing_stream_live() {
         .register_pending_session(peer_id, session_id)
         .await
         .expect("register stream test session");
+    state.allow_routes_for_test(peer_id).await;
     let route = crate::connection::test_blocking_generic_route();
     let route_id = route.handle.id();
     state
@@ -999,6 +1001,7 @@ async fn inbound_open_rejects_carrier_mismatch_without_rebinding() {
         .register_pending_session(peer_id, session_id)
         .await
         .expect("register stream test session");
+    state.allow_routes_for_test(peer_id).await;
     let route = crate::connection::test_blocking_generic_route();
     let route_id = route.handle.id();
     state
@@ -1013,7 +1016,9 @@ async fn inbound_open_rejects_carrier_mismatch_without_rebinding() {
         StreamOpener::Remote,
         43,
         "custom",
-        InboundPath::Generic(route_id.wrapping_add(1)),
+        InboundPath::Generic(crate::connection::GenericRouteId::new(
+            route_id.raw().wrapping_add(1),
+        )),
     )
     .await;
     assert!(matches!(result, Err(StreamError::Closed)));

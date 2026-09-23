@@ -2476,6 +2476,7 @@ async fn register_realtime_peer(state: &RuntimeState, peer_id: &str) {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test(peer_id).await;
 }
 
 #[tokio::test]
@@ -2878,6 +2879,7 @@ async fn realtime_peer_and_session_helpers_fail_closed_and_remove_exact_owner() 
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a").await;
     assert!(validate_peer(&state, "peer-a").await.is_ok());
     assert!(validate_peer(&state, &"x".repeat(129)).await.is_err());
 

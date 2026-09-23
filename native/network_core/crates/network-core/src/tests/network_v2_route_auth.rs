@@ -70,6 +70,7 @@ async fn configured_connect_state(
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    runtime.allow_routes_for_test(peer_id).await;
     runtime
         .peer_route_authorizations
         .write()

@@ -133,6 +133,18 @@ async fn configured_reuse_state() -> (
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-b").await;
+    state
+        .peer_route_authorizations
+        .write()
+        .await
+        .insert(
+            "peer-b".to_string(),
+            crate::runtime::PeerRouteAuthorization {
+                direct: true,
+                relay: true,
+            },
+        );
     let control = StubControl::new(
         ResolveStatus::Ready,
         Some(DiscoverySnapshot {
@@ -211,6 +223,7 @@ async fn install_ready_direct_path(state: &RuntimeState, peer_id: &str, transpor
         peer_id.to_string(),
         Arc::new(std::sync::Mutex::new(manager)),
     );
+    state.allow_routes_for_test(peer_id).await;
 }
 
 #[test]

@@ -12,13 +12,10 @@ impl ConnectivityAttemptCoordinator {
         identity: Arc<network_identity::DeviceIdentity>,
         capability: u8,
     ) -> Result<bool, ProtocolError> {
-        if self
+        if !self
             .state
-            .peer_route_authorizations
-            .read()
+            .route_is_authorized(peer_id, crate::connection::RouteTopology::Direct)
             .await
-            .get(peer_id)
-            .is_some_and(|authorization| !authorization.direct)
         {
             return Ok(false);
         }

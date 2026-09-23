@@ -35,7 +35,7 @@ class FrozenContractTransportMixin:
         self.assertIn("`source_device_id`", contract)
 
     def test_relay_dispatch_checks_path_admission_before_business_dispatch(self) -> None:
-        relay = _read("native/network_core/crates/network-core/src/relay_data.rs")
+        relay = _read("native/network_core/crates/network-core/src/relay_data/payload.rs")
         guard_start = relay.index("if kind != DATA_ENV_CRYPTO")
         match_start = relay.index("match kind", guard_start)
         self.assertLess(guard_start, match_start)

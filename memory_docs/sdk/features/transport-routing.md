@@ -1,4 +1,4 @@
-> Last updated: 2026-09-12
+> Last updated: 2026-09-23
 
 # Transport and Routing
 
@@ -45,9 +45,9 @@ routes, or protocol implementations. Operations borrow and release a
   before the Direct deadline. Relay Data `Ready` is one-shot per pair; replacing or
   disconnecting either side closes the old pair and requires Connect → Ready again.
 
-Implementation entry points: [Rust Connection](../../../native/network_core/crates/network-core/src/connection.rs),
+Implementation entry points: [Rust Connection](../../../native/network_core/crates/network-core/src/connection/mod.rs),
 [Rust Session](../../../native/network_core/crates/network-core/src/session.rs),
-[peer routing](../../../native/network_core/crates/network-core/src/peer.rs),
+[peer routing](../../../native/network_core/crates/network-core/src/peer/mod.rs),
 [Dart facade](../../../packages/infrastructure/network_transport/README.md), and
 [Go Relay](../../../relay/README.md).
 

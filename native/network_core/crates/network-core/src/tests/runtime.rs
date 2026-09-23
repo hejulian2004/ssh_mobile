@@ -8,6 +8,16 @@ use crate::connection::{ConnectionProfile, Route, RouteTransport};
 use std::sync::atomic::AtomicU16;
 use tokio::sync::mpsc;
 
+async fn allow_routes(state: &RuntimeState, peer_id: &str) {
+    state.peer_route_authorizations.write().await.insert(
+        peer_id.to_string(),
+        PeerRouteAuthorization {
+            direct: true,
+            relay: true,
+        },
+    );
+}
+
 #[tokio::test]
 async fn runtime_path_projection_is_non_owning() {
     let (event_tx, _event_rx) = mpsc::unbounded_channel();
@@ -33,6 +43,7 @@ async fn runtime_path_projection_is_non_owning() {
         .write()
         .await
         .insert(peer_id.to_string(), Arc::new(Mutex::new(manager)));
+    state.allow_routes_for_test(peer_id).await;
     state
         .path_projections
         .replace_topology(peer_id, session_id, projection.clone())
@@ -68,6 +79,7 @@ async fn stale_session_failure_does_not_close_replacement_path() {
             .retire_session(peer_id, old_session)
             .await
     );
+    allow_routes(&state, peer_id).await;
     state
         .connection_sessions
         .register_pending_session(peer_id, replacement_session)
@@ -95,6 +107,7 @@ async fn stale_session_failure_does_not_close_replacement_path() {
         .write()
         .await
         .insert(peer_id.to_string(), Arc::new(Mutex::new(manager)));
+    state.allow_routes_for_test(peer_id).await;
     state
         .path_projections
         .replace_topology(peer_id, replacement_session, replacement_projection)
@@ -121,6 +134,7 @@ async fn authenticated_session_rejects_an_incompatible_connected_path() {
     let (event_tx, _event_rx) = mpsc::unbounded_channel();
     let state = RuntimeState::new(event_tx, Arc::new(AtomicU16::new(0)));
     let peer_id = "capability-peer";
+    allow_routes(&state, peer_id).await;
     let session_id = SessionId::new();
     state
         .connection_sessions
@@ -150,6 +164,7 @@ async fn authenticated_session_rejects_an_incompatible_connected_path() {
         .write()
         .await
         .insert(peer_id.to_string(), Arc::new(Mutex::new(manager)));
+    state.allow_routes_for_test(peer_id).await;
 
     assert_eq!(
         state
@@ -177,6 +192,7 @@ async fn runtime_path_lease_lookup_is_exact_and_rejects_stale_or_missing_routes(
     ));
 
     let peer_id = "generic-runtime-peer";
+    allow_routes(&state, peer_id).await;
     let session_id = SessionId::new();
     state
         .connection_sessions
@@ -219,7 +235,11 @@ async fn runtime_path_lease_lookup_is_exact_and_rejects_stale_or_missing_routes(
     };
     assert_eq!(carrier_id, Some(route_id));
     assert!(state
-        .acquire_path_lease_for_generic_route(peer_id, route_id + 1, CAPABILITY_RELIABLE_STREAM)
+        .acquire_path_lease_for_generic_route(
+            peer_id,
+            crate::connection::GenericRouteId::new(route_id.raw().wrapping_add(1)),
+            CAPABILITY_RELIABLE_STREAM,
+        )
         .await
         .is_err());
     lease.release();
@@ -235,6 +255,7 @@ async fn failing_an_exact_session_closes_its_owned_direct_projection() {
     let (event_tx, _event_rx) = mpsc::unbounded_channel();
     let state = RuntimeState::new(event_tx, Arc::new(AtomicU16::new(0)));
     let peer_id = "runtime-fail-session-peer";
+    allow_routes(&state, peer_id).await;
     let session_id = SessionId::new();
     state
         .connection_sessions
@@ -311,6 +332,7 @@ async fn stale_direct_cleanup_preserves_a_concurrent_replacement() {
     let (event_tx, _event_rx) = mpsc::unbounded_channel();
     let state = RuntimeState::new(event_tx, Arc::new(AtomicU16::new(0)));
     let peer_id = "concurrent-replacement-peer";
+    allow_routes(&state, peer_id).await;
     let old_session = SessionId::new();
     let replacement_session = SessionId::new();
     let manager = state
@@ -436,6 +458,7 @@ async fn direct_recovery_probe_helpers_are_bounded_and_owner_scoped() {
         .write()
         .await
         .insert("peer-a".into(), Arc::new(Mutex::new(manager)));
+    state.allow_routes_for_test("peer-a").await;
     assert!(
         state
             .arm_direct_probe(
@@ -485,9 +508,16 @@ async fn stale_session_retirement_is_idempotent_and_path_wait_is_bounded() {
             .retire_session_without_transport("peer-a", session_id)
             .await
     );
-    tokio::time::timeout(Duration::from_secs(1), state.wait_for_path_change())
+    let pending = state.wait_for_path_change();
+    tokio::pin!(pending);
+    tokio::select! {
+        _ = &mut pending => panic!("path wait must stay pending until a path change"),
+        _ = tokio::time::sleep(Duration::from_millis(30)) => {}
+    }
+    state.notify_path_changed();
+    tokio::time::timeout(Duration::from_secs(1), pending)
         .await
-        .expect("path wait must remain bounded");
+        .expect("a path change must wake the waiter");
 }
 
 #[tokio::test]
@@ -495,6 +525,7 @@ async fn relay_data_path_lease_requires_the_current_client_identity() {
     let (event_tx, _event_rx) = mpsc::unbounded_channel();
     let state = RuntimeState::new(event_tx, Arc::new(AtomicU16::new(0)));
     let peer_id = "relay-lease-peer";
+    allow_routes(&state, peer_id).await;
     let session_id = match state
         .begin_connect(peer_id, crate::connect::DEFAULT_CONNECTION_CAPABILITY)
         .await

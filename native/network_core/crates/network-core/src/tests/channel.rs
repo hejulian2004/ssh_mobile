@@ -51,6 +51,7 @@ async fn message_auto_ensures_without_connect_peer() {
         .write()
         .await
         .insert(peer_id.to_string(), manager);
+    state.allow_routes_for_test(peer_id).await;
     let session_id = SessionId::new();
     state
         .connection_sessions
@@ -173,6 +174,7 @@ async fn business_selection_uses_peer_manager_and_fresh_lease_after_loss() {
         .write()
         .await
         .insert(peer_id.to_string(), Arc::clone(&manager));
+    state.allow_routes_for_test(peer_id).await;
 
     let old_lease = select_business_path_lease(&state, peer_id, CAPABILITY_RELIABLE_MESSAGE)
         .await
@@ -197,6 +199,7 @@ async fn business_selection_uses_peer_manager_and_fresh_lease_after_loss() {
         .write()
         .await
         .insert(peer_id.to_string(), fresh_manager);
+    state.allow_routes_for_test(peer_id).await;
 
     let fresh_lease = select_business_path_lease(&state, peer_id, CAPABILITY_RELIABLE_MESSAGE)
         .await
@@ -211,6 +214,7 @@ async fn ordered_next_is_published_before_transport_ack_completes() {
     let channel_id = "control";
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let state = Arc::new(RuntimeState::new(event_tx, Arc::new(AtomicU16::new(0))));
+    state.allow_routes_for_test(peer_id).await;
 
     let session_id = match state
         .begin_connect(peer_id, crate::connect::DEFAULT_CONNECTION_CAPABILITY)
@@ -369,6 +373,7 @@ async fn best_effort_delivery_sends_once_over_a_live_generic_route() {
             e2ee_policy: network_protocol::E2eePolicy::Disabled,
         },
     );
+    state.allow_routes_for_test(peer_id).await;
     let session_id = match state
         .begin_connect(peer_id, crate::connect::DEFAULT_CONNECTION_CAPABILITY)
         .await
@@ -434,6 +439,7 @@ async fn ordered_inbound_conflicts_fail_the_channel_and_reject_followups() {
             e2ee_policy: network_protocol::E2eePolicy::Disabled,
         },
     );
+    state.allow_routes_for_test("ordered-input-peer").await;
 
     let message = |message_id: u8, sequence: u64| DataMessage {
         session_id: "ordered-session".into(),
@@ -492,6 +498,7 @@ async fn inbound_delivery_capacity_is_rejected_without_evicting_active_handlers(
             e2ee_policy: network_protocol::E2eePolicy::Disabled,
         },
     );
+    state.allow_routes_for_test("capacity-peer").await;
     for index in 0..4096u16 {
         assert_eq!(
             state
@@ -598,6 +605,7 @@ async fn relay_policy_validation_maps_disabled_policy_to_typed_error() {
             e2ee_policy: network_protocol::E2eePolicy::Disabled,
         },
     );
+    state.allow_routes_for_test("relay-policy-peer").await;
     let session_id = SessionId::new();
     state
         .connection_sessions
@@ -616,6 +624,7 @@ async fn relay_policy_validation_maps_disabled_policy_to_typed_error() {
         .write()
         .await
         .insert("relay-policy-peer".into(), Arc::new(Mutex::new(manager)));
+    state.allow_routes_for_test("relay-policy-peer").await;
 
     let error = validate_business_application_policy(&state, "relay-policy-peer", session_id)
         .await
@@ -810,6 +819,7 @@ async fn sending_message_reports_cancellation_when_delivery_task_cannot_start() 
             e2ee_policy: network_protocol::E2eePolicy::Disabled,
         },
     );
+    state.allow_routes_for_test(peer_id).await;
     let manager = Arc::new(Mutex::new(PeerPathManager::new(
         PeerId::new(peer_id).expect("peer id"),
         Arc::clone(&state.ready_paths),
@@ -824,6 +834,7 @@ async fn sending_message_reports_cancellation_when_delivery_task_cannot_start() 
         .write()
         .await
         .insert(peer_id.into(), manager);
+    state.allow_routes_for_test(peer_id).await;
     state
         .connection_sessions
         .register_pending_session(peer_id, SessionId::new())
@@ -868,6 +879,7 @@ async fn application_policy_validation_requires_a_ready_path_and_matching_crypto
         .write()
         .await
         .insert("peer-a".into(), Arc::new(Mutex::new(manager)));
+    state.allow_routes_for_test("peer-a").await;
     let mismatch = validate_business_application_policy(&state, "peer-a", session_id)
         .await
         .expect_err("Required policy needs an application crypto context");
@@ -897,6 +909,7 @@ async fn business_frame_rejects_wrong_peer_and_inactive_lease() {
         .write()
         .await
         .insert(peer_id.into(), manager.clone());
+    state.allow_routes_for_test(peer_id).await;
     let lease = select_business_path_lease(&state, peer_id, CAPABILITY_RELIABLE_MESSAGE)
         .await
         .expect("active lease");
@@ -936,6 +949,7 @@ async fn inbound_plaintext_delivery_emits_once_and_deduplicates_replays() {
             e2ee_policy: network_protocol::E2eePolicy::Disabled,
         },
     );
+    state.allow_routes_for_test("peer-a").await;
 
     let best_effort = DataMessage {
         session_id: "session-a".into(),
@@ -1008,6 +1022,7 @@ async fn required_inbound_messages_decrypt_and_reject_missing_application_e2ee()
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a").await;
     let root = [0x41; 32];
     state
         .install_crypto_material(
@@ -1111,6 +1126,7 @@ async fn delivery_send_rejects_a_replaced_connection_session_before_encoding() {
         .write()
         .await
         .insert(peer_id.into(), manager);
+    state.allow_routes_for_test(peer_id).await;
     let lease = select_business_path_lease(&state, peer_id, CAPABILITY_RELIABLE_MESSAGE)
         .await
         .expect("path lease");
@@ -1151,6 +1167,7 @@ async fn delivery_send_rejects_an_encoded_message_over_the_frame_limit() {
             e2ee_policy: network_protocol::E2eePolicy::Disabled,
         },
     );
+    state.allow_routes_for_test(peer_id).await;
     let manager = Arc::new(Mutex::new(PeerPathManager::new(
         PeerId::new(peer_id).expect("peer id"),
         Arc::clone(&state.ready_paths),
@@ -1165,6 +1182,7 @@ async fn delivery_send_rejects_an_encoded_message_over_the_frame_limit() {
         .write()
         .await
         .insert(peer_id.into(), manager);
+    state.allow_routes_for_test(peer_id).await;
     let session_id = SessionId::new();
     state
         .connection_sessions

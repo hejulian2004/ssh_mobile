@@ -480,6 +480,7 @@ async fn responder_connectivity_checks_stop_before_endpoint_is_available() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a").await;
     spawn_responder_connectivity_checks(
         Arc::clone(&state),
         ConnectivityOffer {
@@ -519,6 +520,7 @@ async fn responder_connectivity_checks_fail_closed_for_empty_offer() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
+    state.allow_routes_for_test("peer-a").await;
 
     spawn_responder_connectivity_checks(
         Arc::clone(&state),

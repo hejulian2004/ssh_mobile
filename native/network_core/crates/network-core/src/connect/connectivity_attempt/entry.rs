@@ -65,13 +65,10 @@ impl ConnectivityAttemptCoordinator {
                     peer_id,
                 )
             })?;
-        if self
+        if !self
             .state
-            .peer_route_authorizations
-            .read()
+            .route_is_authorized(peer_id, crate::connection::RouteTopology::Direct)
             .await
-            .get(peer_id)
-            .is_some_and(|authorization| !authorization.direct)
         {
             return Err(protocol_error_with_peer(
                 NetworkErrorCode::NoRoute,
@@ -208,19 +205,15 @@ impl ConnectivityAttemptCoordinator {
                     peer_id,
                 )
             })?;
-        // Commands register a route authorization together with the peer
-        // configuration.  Keep the lower-level coordinator usable for the
-        // native-owned test/integration seams that construct a PeerConfig
-        // directly; those seams predate the command boundary and have no
-        // persisted authorization record.  Once a record exists, it is the
-        // sole source of route eligibility and must be enforced fail-closed.
+        // UpsertPeerV2 writes the route policy with the peer. A missing record
+        // is not authorization.
         let authorization = state
             .peer_route_authorizations
             .read()
             .await
             .get(peer_id)
             .copied();
-        if authorization.is_some_and(|authorization| !authorization.direct) {
+        if !authorization.is_some_and(|authorization| authorization.direct) {
             return Err(protocol_error_with_peer(
                 NetworkErrorCode::NoRoute,
                 "direct route is not authorized",
