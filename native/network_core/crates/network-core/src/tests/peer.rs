@@ -418,7 +418,7 @@ async fn inbound_authenticated_generic_route_commits_a_fresh_session() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
-    state.allow_routes_for_test(peer_id.into()).await;
+    state.allow_routes_for_test(peer_id).await;
     state.trusted_peer_keys.write().await.insert(
         peer_id.into(),
         remote_identity.public_identity_key().to_bytes(),
@@ -1019,7 +1019,7 @@ async fn relay_crypto_rejects_disabled_policy_and_cleans_session() {
             e2ee_policy: network_protocol::E2eePolicy::Disabled,
         },
     );
-    state.allow_routes_for_test(peer_id.into()).await;
+    state.allow_routes_for_test(peer_id).await;
     let session_id = started_session(&state, peer_id).await;
     let identity = Arc::new(DeviceIdentity::from_private_keys(
         "device-a".into(),
@@ -1061,7 +1061,7 @@ async fn relay_crypto_send_failure_removes_waiter_without_leaking_state() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
-    state.allow_routes_for_test(peer_id.into()).await;
+    state.allow_routes_for_test(peer_id).await;
     let session_id = started_session(&state, peer_id).await;
     let identity = Arc::new(DeviceIdentity::from_private_keys(
         "device-a".into(),
@@ -1112,7 +1112,7 @@ async fn inbound_admission_requires_configured_peer_and_marks_supervisor_online(
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
-    state.allow_routes_for_test(peer_id.into()).await;
+    state.allow_routes_for_test(peer_id).await;
     InboundConnectionAcceptor::admit_authenticated_inbound(
         &state,
         peer_id,

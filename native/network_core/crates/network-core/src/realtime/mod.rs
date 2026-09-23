@@ -56,11 +56,10 @@ pub(crate) use claim_reject::{discard_incoming_offer, reject_incoming_offer};
 pub(crate) use io::{
     close_realtime_sessions_for_session, create_io_driver, realtime_task_key,
     remove_realtime_session_if_owned, run_realtime_session_io, runtime_webrtc_config,
-    runtime_webrtc_config_from_values, take_realtime_session_if_owned, with_session_peer,
+    take_realtime_session_if_owned, with_session_peer,
 };
 pub(crate) use provisional::{
     ensure_provisional_expiry_worker, provisional_deadline, prune_provisional_bindings,
-    run_provisional_expiry_worker,
 };
 pub(crate) use provisional_signal::handle_provisional_realtime_signal;
 pub(crate) use session::{preserve_for_environment_reprobe, start_session, stop_session};
@@ -69,17 +68,23 @@ pub(crate) use signal_apply::{apply_signal_with_driver, close_remote_realtime_se
 pub(crate) use signal_control::handle_claiming_control_signal;
 pub(crate) use wire::{
     boxed_message, boxed_protocol_error, decode_realtime_signal_payload, forward_local_candidate,
-    new_shared_session_instance_id, realtime_error, send_signal, to_v2_signal_kind, validate_peer,
+    new_shared_session_instance_id, realtime_error, send_signal, validate_peer,
     validate_realtime_id, validate_screen_share_consent, validate_shared_session_instance_id,
     validate_signal,
 };
 
 #[cfg(test)]
-pub(crate) use io::{handle_io_event, remove_realtime_session, session_revision};
+pub(crate) use io::{
+    handle_io_event, remove_realtime_session, runtime_webrtc_config_from_values, session_revision,
+};
+#[cfg(test)]
+pub(crate) use provisional::run_provisional_expiry_worker;
 #[cfg(test)]
 pub(crate) use session::start_session_with_config;
 #[cfg(test)]
 pub(crate) use signal_apply::apply_signal;
+#[cfg(test)]
+pub(crate) use wire::to_v2_signal_kind;
 #[cfg(test)]
 pub(crate) use wire::{encode_realtime_signal_payload, validate_screen_share_consent_at};
 

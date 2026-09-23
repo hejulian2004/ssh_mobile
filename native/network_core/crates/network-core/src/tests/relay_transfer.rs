@@ -50,7 +50,7 @@ async fn install_relay_path(state: &Arc<RuntimeState>, data: Arc<RelayDataClient
         .write()
         .await
         .insert("peer-a".into(), Arc::new(std::sync::Mutex::new(manager)));
-    state.allow_routes_for_test("peer-a".into()).await;
+    state.allow_routes_for_test("peer-a").await;
 }
 
 async fn relay_lease(state: &Arc<RuntimeState>) -> crate::connect::PathLease {
@@ -437,7 +437,7 @@ async fn relay_offer_admission_rejects_unregistered_and_malformed_envelopes() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
-    state.allow_routes_for_test("peer-a".into()).await;
+    state.allow_routes_for_test("peer-a").await;
     let error = receive_relay_offer(&state, &data, "peer-a", &[0; 31])
         .await
         .expect_err("short Relay offers must be rejected");
@@ -467,9 +467,7 @@ async fn relay_offer_admission_rejects_unregistered_and_malformed_envelopes() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
-    state_without_identity
-        .allow_routes_for_test("peer-a".into())
-        .await;
+    state_without_identity.allow_routes_for_test("peer-a").await;
     let error = receive_relay_offer(
         &state_without_identity,
         &data,

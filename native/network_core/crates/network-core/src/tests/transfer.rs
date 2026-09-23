@@ -63,7 +63,7 @@ async fn state_with_route_profile(route: crate::connection::Route) -> Arc<Runtim
         .write()
         .await
         .insert("peer-a".into(), Arc::new(Mutex::new(manager)));
-    state.allow_routes_for_test("peer-a".into()).await;
+    state.allow_routes_for_test("peer-a").await;
     let session_id = SessionId::new();
     state
         .connection_sessions
@@ -128,7 +128,7 @@ async fn transfer_dispatcher_rejects_relay_dispatch_for_an_unregistered_peer() {
         .write()
         .await
         .insert("peer-a".into(), Arc::new(Mutex::new(manager)));
-    state.allow_routes_for_test("peer-a".into()).await;
+    state.allow_routes_for_test("peer-a").await;
     let lease = registry.acquire(&handle).expect("dispatch test lease");
     let manifest = network_transfer::FileManifest {
         transfer_id: "relay-dispatch".into(),

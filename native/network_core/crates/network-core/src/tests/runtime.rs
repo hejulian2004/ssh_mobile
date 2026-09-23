@@ -458,7 +458,7 @@ async fn direct_recovery_probe_helpers_are_bounded_and_owner_scoped() {
         .write()
         .await
         .insert("peer-a".into(), Arc::new(Mutex::new(manager)));
-    state.allow_routes_for_test("peer-a".into()).await;
+    state.allow_routes_for_test("peer-a").await;
     assert!(
         state
             .arm_direct_probe(

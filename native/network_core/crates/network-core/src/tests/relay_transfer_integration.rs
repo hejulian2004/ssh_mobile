@@ -58,7 +58,7 @@ async fn install_relay_path(state: &Arc<RuntimeState>, peer_id: &str, data: Arc<
         .write()
         .await
         .insert(peer_id.into(), Arc::new(std::sync::Mutex::new(manager)));
-    state.allow_routes_for_test(peer_id.into()).await;
+    state.allow_routes_for_test(peer_id).await;
 }
 
 fn install_crypto(state: &RuntimeState, peer_id: &str, session_id: &str, initiator: bool) {

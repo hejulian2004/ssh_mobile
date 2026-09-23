@@ -11,7 +11,7 @@ async fn remove_peer_evicts_configuration_and_supervisor() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
-    state.allow_routes_for_test("peer-a".into()).await;
+    state.allow_routes_for_test("peer-a").await;
     state
         .trusted_peer_keys
         .write()
@@ -136,7 +136,7 @@ async fn diagnostics_reads_live_supervisor_and_path_manager() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
-    state.allow_routes_for_test("peer-a".into()).await;
+    state.allow_routes_for_test("peer-a").await;
     let supervisor = state
         .peer_supervisors
         .get_or_create_with_configured("peer-a", true)
@@ -158,7 +158,7 @@ async fn diagnostics_reads_live_supervisor_and_path_manager() {
         "peer-a".into(),
         Arc::new(std::sync::Mutex::new(path_manager)),
     );
-    state.allow_routes_for_test("peer-a".into()).await;
+    state.allow_routes_for_test("peer-a").await;
     let stream_manager = ReliableStreamManager::new(state.event_tx.clone());
     stream_manager
         .open(StreamOpener::Local, 1, "ssh", StreamConsumer::Poll)

@@ -30,12 +30,13 @@ mod manager;
 mod physical;
 mod registry;
 
-pub(crate) use active_route::{callback_path_carrier, ActiveRoute, PathCarrier, StreamCarrier};
+#[cfg(test)]
+pub(crate) use active_route::PathCarrier;
+pub(crate) use active_route::{callback_path_carrier, ActiveRoute, StreamCarrier};
 pub(crate) use generic_route::GenericRouteScope;
-pub(crate) use manager::{
-    DirectPathState, DirectProbe, PathCloseReason, PathKind, PathSelection, PeerPathManager,
-    RelayPathState,
-};
+#[cfg(test)]
+pub(crate) use manager::{DirectPathState, PathCloseReason, RelayPathState};
+pub(crate) use manager::{DirectProbe, PathKind, PathSelection, PeerPathManager};
 pub(crate) use physical::{PathLease, PathProjection};
 pub(crate) use registry::PathRegistry;
 

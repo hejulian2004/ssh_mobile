@@ -71,7 +71,7 @@ async fn ready_stream_lease(state: &Arc<RuntimeState>) -> crate::connect::PathLe
         .write()
         .await
         .insert("peer-a".into(), Arc::new(std::sync::Mutex::new(manager)));
-    state.allow_routes_for_test("peer-a".into()).await;
+    state.allow_routes_for_test("peer-a").await;
     registry.acquire(&handle).expect("incoming transfer lease")
 }
 
@@ -164,7 +164,7 @@ async fn start_file_send_rejects_invalid_source_and_missing_route_before_dispatc
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
-    state.allow_routes_for_test("peer-a".into()).await;
+    state.allow_routes_for_test("peer-a").await;
     let _lease = ready_stream_lease(&state).await;
     let no_carrier = start_file_send(
         Arc::clone(&state),
@@ -640,7 +640,7 @@ async fn transfer_dispatcher_starts_relay_worker_for_registered_peer() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
-    state.allow_routes_for_test("peer-a".into()).await;
+    state.allow_routes_for_test("peer-a").await;
     let lease = ready_stream_lease(&state).await;
     let transfer = ResumableTransfer {
         transfer_id: "relay-dispatch-worker".into(),
@@ -1083,7 +1083,7 @@ async fn start_file_send_rejects_a_duplicate_after_selecting_a_live_quic_path() 
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
-    state.allow_routes_for_test("peer-a".into()).await;
+    state.allow_routes_for_test("peer-a").await;
     let root = std::env::temp_dir().join(format!(
         "ssh-mobile-transfer-duplicate-{}",
         std::process::id()

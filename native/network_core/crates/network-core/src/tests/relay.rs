@@ -1100,7 +1100,7 @@ async fn relay_approval_timeout_releases_transfer_id_for_reoffer() {
             e2ee_policy: network_protocol::E2eePolicy::Required,
         },
     );
-    state.allow_routes_for_test("sender".into()).await;
+    state.allow_routes_for_test("sender").await;
     let data = Arc::new(
         RelayDataClient::new(
             "ws://127.0.0.1:9/v2/relay/9a8b7c6d5e4f3a2b1c9d8e7f6a5b4c3d".into(),

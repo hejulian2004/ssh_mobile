@@ -7,9 +7,7 @@ use std::sync::{
 };
 use tokio::sync::{mpsc, oneshot};
 
-use network_transport::{
-    Transport, TransportError, TransportKind, TransportReader, TransportWriter,
-};
+use network_transport::{Transport, TransportError, TransportReader, TransportWriter};
 
 use crate::task_supervisor::CancellationToken;
 

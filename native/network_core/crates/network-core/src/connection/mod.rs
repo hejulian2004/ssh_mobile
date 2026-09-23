@@ -38,9 +38,10 @@ pub(crate) use generic::ConnectionError;
 pub use generic::GenericConnection;
 pub(crate) use generic::{
     decode_generic_frame, prepare_generic_route, GenericFrameKind, GenericInboundFrame,
-    GenericRouteHandle, GenericRouteRuntime, GENERIC_FRAME_HEADER_BYTES,
-    GENERIC_ROUTE_CHANNEL_CAPACITY,
+    GenericRouteHandle, GenericRouteRuntime,
 };
+#[cfg(test)]
+pub(crate) use generic::{GENERIC_FRAME_HEADER_BYTES, GENERIC_ROUTE_CHANNEL_CAPACITY};
 pub use profile::{
     ConnectionCapability, ConnectionProfile, ConnectionRouteSelector, Route, RouteCandidate,
     RouteTopology, RouteTransport,

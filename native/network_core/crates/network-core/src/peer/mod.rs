@@ -85,6 +85,7 @@ pub(crate) use direct_race::{
 pub(crate) use direct_race::{candidate_kind_for, connect_direct_or_generic};
 #[cfg(test)]
 pub(crate) use generic_race::OutboundGenericConnector;
+#[cfg(test)]
 pub(crate) use inbound::InboundConnectionAcceptor;
 #[cfg(test)]
 #[allow(unused_imports)]

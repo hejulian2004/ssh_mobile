@@ -178,6 +178,7 @@ impl OutboundGenericConnector {
         }
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn connect_tcp_route(
         endpoint: SocketAddr,
