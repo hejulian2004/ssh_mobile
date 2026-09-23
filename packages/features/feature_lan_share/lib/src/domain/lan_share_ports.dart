@@ -11,6 +11,117 @@ import 'lan_relay_ports.dart';
 
 export 'lan_relay_ports.dart';
 
+/// A current eligible local IPv4 address and its transient interface identity.
+///
+/// Interface indexes are snapshots only. Callers must not persist them.
+@immutable
+final class LanShareLocalIpv4Candidate {
+  const LanShareLocalIpv4Candidate({
+    required this.address,
+    required this.interfaceName,
+    required this.interfaceIndex,
+  });
+
+  final String address;
+  final String interfaceName;
+  final int interfaceIndex;
+
+  @override
+  bool operator ==(Object other) =>
+      other is LanShareLocalIpv4Candidate &&
+      address == other.address &&
+      interfaceName == other.interfaceName &&
+      interfaceIndex == other.interfaceIndex;
+
+  @override
+  int get hashCode => Object.hash(address, interfaceName, interfaceIndex);
+}
+
+/// Result of choosing a local IPv4 address for remote WebShare use.
+sealed class LanShareLocalAddressSelectionResult {
+  const LanShareLocalAddressSelectionResult();
+}
+
+/// A single current local address was selected.
+final class LanShareLocalAddressSelected
+    extends LanShareLocalAddressSelectionResult {
+  const LanShareLocalAddressSelected(this.candidate);
+
+  final LanShareLocalIpv4Candidate candidate;
+
+  @override
+  bool operator ==(Object other) =>
+      other is LanShareLocalAddressSelected && candidate == other.candidate;
+
+  @override
+  int get hashCode => candidate.hashCode;
+}
+
+/// The address cannot be inferred safely; the user must select one.
+final class LanShareLocalAddressAmbiguous
+    extends LanShareLocalAddressSelectionResult {
+  LanShareLocalAddressAmbiguous(List<LanShareLocalIpv4Candidate> candidates)
+    : candidates = List.unmodifiable(candidates);
+
+  final List<LanShareLocalIpv4Candidate> candidates;
+}
+
+/// No eligible local IPv4 address or required platform data is available.
+final class LanShareLocalAddressUnavailable
+    extends LanShareLocalAddressSelectionResult {
+  const LanShareLocalAddressUnavailable();
+}
+
+/// A previously selected override is no longer assigned to an eligible adapter.
+final class LanShareLocalAddressStaleOverride
+    extends LanShareLocalAddressSelectionResult {
+  const LanShareLocalAddressStaleOverride(this.address);
+
+  final String address;
+}
+
+/// App-owned platform selector for Automatic local IPv4 selection.
+abstract interface class LanShareLocalAddressSelectionPort {
+  Future<LanShareLocalAddressSelectionResult> selectPreferredIpv4(
+    List<LanShareLocalIpv4Candidate> candidates,
+  );
+}
+
+/// Platform-neutral Automatic selector: choose only when there is one option.
+final class LanShareSingleCandidateLocalAddressSelection
+    implements LanShareLocalAddressSelectionPort {
+  const LanShareSingleCandidateLocalAddressSelection();
+
+  @override
+  Future<LanShareLocalAddressSelectionResult> selectPreferredIpv4(
+    List<LanShareLocalIpv4Candidate> candidates,
+  ) async {
+    final ordered = sortLanShareLocalIpv4Candidates(candidates);
+    if (ordered.isEmpty) {
+      return const LanShareLocalAddressUnavailable();
+    }
+    if (ordered.length > 1) {
+      return LanShareLocalAddressAmbiguous(ordered);
+    }
+    return LanShareLocalAddressSelected(ordered.single);
+  }
+}
+
+/// Stable display ordering; this ordering is never used to choose an address.
+List<LanShareLocalIpv4Candidate> sortLanShareLocalIpv4Candidates(
+  Iterable<LanShareLocalIpv4Candidate> candidates,
+) {
+  final ordered = candidates.toList();
+  ordered.sort((left, right) {
+    final address = left.address.compareTo(right.address);
+    if (address != 0) return address;
+    final name = left.interfaceName.compareTo(right.interfaceName);
+    if (name != 0) return name;
+    return left.interfaceIndex.compareTo(right.interfaceIndex);
+  });
+  return List.unmodifiable(ordered);
+}
+
 /// LAN Share 支持的界面语言。
 enum LanShareLanguage { zh, en }
 
@@ -131,6 +242,9 @@ abstract interface class LanShareStrings {
   String get lanShareForgetDevice;
   String get lanShareInitializationFailed;
   String get lanShareInvalidAddress;
+  String get lanShareAddressAmbiguous;
+  String get lanShareAddressUnavailable;
+  String get lanShareAddressOverrideStale;
   String get lanShareNoDevices;
   String get lanShareNoDevicesRefreshHint;
   String get lanShareNoHistory;

@@ -18,8 +18,13 @@ import 'lan_storage_service.dart';
 import 'lan_transfer_protocol.dart';
 import 'lan_transfer_service.dart';
 import 'lan_web_share_request_handler.dart';
+import 'lan_local_address_selection.dart';
+import '../../domain/lan_share_ports.dart';
 
 part 'lan_web_share_server.dart';
+part 'lan_web_share_lifecycle.dart';
+part 'lan_discovery_advertising.dart';
+part 'lan_discovery_peers.dart';
 
 /// 负责 LAN 设备发现（mDNS 与 UDP 备用路径）以及 Web Share 服务。
 class LanDiscoveryService {
@@ -34,6 +39,13 @@ class LanDiscoveryService {
   final String currentDeviceId;
   String currentDeviceAlias;
   final LanMulticastLock multicastLock;
+  final LanShareLocalAddressSelectionPort localAddressSelectionPort;
+  final LanShareLocalIpv4CandidateSource localAddressCandidateSource;
+  late final LanShareLocalAddressResolver _localAddressResolver =
+      LanShareLocalAddressResolver(
+        candidateSource: localAddressCandidateSource,
+        selectionPort: localAddressSelectionPort,
+      );
 
   nsd.Registration? _registration;
   int? _advertisedPort;
@@ -83,27 +95,26 @@ class LanDiscoveryService {
 
   String? _customIp;
 
+  LanShareLocalAddressSelectionResult? _webShareAddressSelectionResult;
+
   /// 返回 WebShare URL 使用的可选 IP 覆盖值。
   String? get customIp => _customIp;
 
-  /// 更新 WebShare IP 覆盖值，不改变已绑定的服务。
-  void setCustomIp(String? ip) {
-    _customIp = ip;
-    if (_isWebShareActive && _webShareServer != null) {
-      final hostIp = ip ?? '127.0.0.1';
-      final currentUrl = Uri.tryParse(_webShareUrl ?? '');
-      if (currentUrl != null) {
-        _webShareUrl = currentUrl.replace(host: hostIp).toString();
-      }
-    }
-  }
+  /// Latest local address resolution result, retained for Feature-local UI.
+  LanShareLocalAddressSelectionResult? get webShareAddressSelectionResult =>
+      _webShareAddressSelectionResult;
 
-  /// 使用可选的平台组播锁创建发现服务。
+  /// 使用注入的地址 selector 和可选的平台组播锁创建发现服务。
   LanDiscoveryService({
     required this.currentDeviceId,
     required this.currentDeviceAlias,
+    required this.localAddressSelectionPort,
+    LanShareLocalIpv4CandidateSource? localAddressCandidateSource,
     LanMulticastLock? multicastLock,
-  }) : multicastLock = multicastLock ?? PlatformLanMulticastLock();
+  }) : localAddressCandidateSource =
+           localAddressCandidateSource ??
+           const DartLanShareLocalIpv4CandidateSource(),
+       multicastLock = multicastLock ?? PlatformLanMulticastLock();
 
   /// 动态更新当前设备别名；若正在广播则重新启动广播。
   Future<NetworkResult<void>> updateDeviceAlias(String newAlias) async {
@@ -126,176 +137,49 @@ class LanDiscoveryService {
     return const NetworkSuccess<void>(null);
   }
 
-  /// 移除 mDNS 设备标识中的显示后缀。
-  String _extractCleanId(String rawId) {
-    if (rawId.contains('(') && rawId.endsWith(')')) {
-      final start = rawId.lastIndexOf('(') + 1;
-      final end = rawId.length - 1;
-      if (start < end) {
-        return rawId.substring(start, end).trim();
-      }
-    }
-    return rawId;
-  }
+  /// 返回当前 eligible IPv4 candidates，interface index 仅供本次选择使用。
+  static Future<List<LanShareLocalIpv4Candidate>> getLocalIpv4Candidates() =>
+      const DartLanShareLocalIpv4CandidateSource().loadCandidates();
 
-  /// 移除 mDNS 显示别名中的标识后缀。
-  String _extractCleanAlias(String rawAlias) {
-    if (rawAlias.contains('(') && rawAlias.endsWith(')')) {
-      final start = rawAlias.lastIndexOf('(');
-      if (start > 0) {
-        return rawAlias.substring(0, start).trim();
-      }
-    }
-    return rawAlias;
-  }
-
-  /// 发布去重后的 discovery-only 对端列表。
-  Stream<List<LanDiscoveredPeer>> get discoveredPeersStream =>
-      _discoveredPeersController.stream;
-
-  /// 返回按最近观察时间排序的已发现对端。
-  List<LanDiscoveredPeer> get currentDiscoveredPeers {
-    final uniquePeers = <String, LanDiscoveredPeer>{};
-    final sorted = _peerMap.values.toList()
-      ..sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
-
-    for (final peer in sorted) {
-      final cleanId = _extractCleanId(peer.deviceId);
-      if (uniquePeers.containsKey(cleanId)) {
-        // 已存在时保留 lastSeen 更新的记录。
-        final existing = uniquePeers[cleanId]!;
-        if (peer.lastSeen.isAfter(existing.lastSeen)) {
-          uniquePeers[cleanId] = peer.copyWith(deviceId: cleanId);
-        }
-        continue;
-      }
-      uniquePeers[cleanId] = peer.copyWith(deviceId: cleanId);
-    }
-    return uniquePeers.values.toList(growable: false);
-  }
-
-  /// 判断接口是否属于不参与 LAN 发现的虚拟网络或 VPN。
-  static bool _isVirtualNetworkInterface(String name) {
-    final lowerName = name.toLowerCase();
-    const markers = <String>[
-      'docker',
-      'vethernet',
-      'vbox',
-      'vmnet',
-      'wireguard',
-      'wintun',
-      'tailscale',
-      'zerotier',
-      'hamachi',
-      'nordlynx',
-      'mullvad',
-      'vpn',
-      'tun',
-      'tap',
-      'utun',
-      'ppp',
-    ];
-    return markers.any(lowerName.contains);
-  }
-
-  /// 过滤虚拟网络接口（VPN、Docker、vEthernet）。
+  /// 返回可用于显示或复制的本机 IPv4 地址。
   static Future<List<String>> getLocalIpAddresses() async {
-    final addresses = <String>[];
     try {
-      final interfaces = await NetworkInterface.list(
-        includeLoopback: false,
-        type: InternetAddressType.IPv4,
-      );
-      for (final interface in interfaces) {
-        if (_isVirtualNetworkInterface(interface.name)) {
-          continue;
-        }
-        for (final addr in interface.addresses) {
-          if (!addr.isLoopback && !addr.address.startsWith('169.254.')) {
-            addresses.add(addr.address);
-          }
-        }
-      }
+      final candidates = await getLocalIpv4Candidates();
+      return candidates.map((candidate) => candidate.address).toList();
     } catch (e) {
       debugPrint('[LanDiscoveryService] Error listing network interfaces: $e');
+      return const [];
     }
-    return addresses;
   }
 
   /// 获取映射到网络接口名称的本地 IPv4 地址。
   static Future<Map<String, String>> getLocalIpInterfaces() async {
-    final map = <String, String>{};
     try {
-      final interfaces = await NetworkInterface.list(
-        includeLoopback: false,
-        type: InternetAddressType.IPv4,
-      );
-      for (final interface in interfaces) {
-        final name = interface.name;
-        if (_isVirtualNetworkInterface(name)) {
-          continue;
-        }
-        for (final addr in interface.addresses) {
-          if (!addr.isLoopback && !addr.address.startsWith('169.254.')) {
-            map[addr.address] = name;
-          }
-        }
-      }
+      final candidates = await getLocalIpv4Candidates();
+      return {
+        for (final candidate in candidates)
+          candidate.address: candidate.interfaceName,
+      };
     } catch (e) {
       debugPrint('[LanDiscoveryService] Error listing network interfaces: $e');
+      return const {};
     }
-    return map;
-  }
-
-  /// 启动 mDNS 注册，向附近对端广播本设备。
-  Future<NetworkResult<void>> startAdvertising({
-    int port = defaultPort,
-    int? nativePort,
-  }) {
-    if (_closing || _closed) {
-      return Future.value(
-        _closedFailure<void>(NetworkOperation.startAdvertising),
-      );
-    }
-    final generation = ++_advertisingGeneration;
-    return _enqueueAdvertisingLifecycle(() async {
-      if (_closing || _closed || generation != _advertisingGeneration) {
-        return _closedFailure<void>(NetworkOperation.startAdvertising);
-      }
-      try {
-        // Repeated starts are a restart, not an additional registration. Close
-        // the previous mDNS/UDP owners before creating the next generation.
-        if (_advertisedPort != null ||
-            _registration != null ||
-            _udpSocket != null) {
-          await performStopAdvertising();
-        }
-        await performStartAdvertising(port, nativePort: nativePort);
-        if (_closing || _closed || generation != _advertisingGeneration) {
-          await performStopAdvertising();
-          return _closedFailure<void>(NetworkOperation.startAdvertising);
-        }
-        _advertisedPort = port;
-        _advertisedNativePort = nativePort;
-        return const NetworkSuccess<void>(null);
-      } catch (error) {
-        return NetworkFailure(
-          const NetworkError(
-            code: NetworkErrorCode.ioError,
-            message: 'LAN advertising failed.',
-            operation: NetworkOperation.startAdvertising,
-          ),
-        );
-      }
-    });
   }
 
   /// 执行平台 mDNS/UDP 广播初始化。
   @protected
   Future<void> performStartAdvertising(int port, {int? nativePort}) async {
     try {
-      final ips = await getLocalIpAddresses();
-      final primaryIp = ips.isNotEmpty ? ips.first : '0.0.0.0';
+      String? selectedIp;
+      try {
+        final result = await _localAddressResolver.resolve();
+        if (result case LanShareLocalAddressSelected(:final candidate)) {
+          selectedIp = candidate.address;
+        }
+      } on Object {
+        // mDNS can still advertise its resolved service host when no unique
+        // TXT IPv4 can be selected; never publish a guessed or loopback IP.
+      }
       _registration = await nsd.register(
         nsd.Service(
           name: '$currentDeviceAlias ($currentDeviceId)',
@@ -305,7 +189,7 @@ class LanDiscoveryService {
             'id': utf8.encode(currentDeviceId),
             'alias': utf8.encode(currentDeviceAlias),
             'os': utf8.encode(Platform.operatingSystem),
-            'ip': utf8.encode(primaryIp),
+            if (selectedIp != null) 'ip': utf8.encode(selectedIp),
             if (nativePort != null)
               'nativePort': utf8.encode(nativePort.toString()),
           },
@@ -319,36 +203,6 @@ class LanDiscoveryService {
     }
 
     await _startUdpListener(port, nativePort: nativePort);
-  }
-
-  /// 停止 mDNS 注册。
-  Future<NetworkResult<void>> stopAdvertising() {
-    _advertisingGeneration++;
-    _advertisedPort = null;
-    _advertisedNativePort = null;
-    return _enqueueAdvertisingLifecycle(() async {
-      try {
-        await performStopAdvertising();
-        return const NetworkSuccess<void>(null);
-      } catch (error) {
-        return NetworkFailure(
-          const NetworkError(
-            code: NetworkErrorCode.ioError,
-            message: 'LAN advertising stop failed.',
-            operation: NetworkOperation.stopAdvertising,
-          ),
-        );
-      }
-    });
-  }
-
-  Future<T> _enqueueAdvertisingLifecycle<T>(Future<T> Function() operation) {
-    final next = _advertisingLifecycle.then((_) => operation());
-    _advertisingLifecycle = next.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace _) {},
-    );
-    return next;
   }
 
   /// 执行平台 mDNS/UDP 广播清理。
@@ -589,326 +443,6 @@ class LanDiscoveryService {
     return LanDeviceType.desktop;
   }
 
-  /// 发布当前 discovery-only 对端快照。
-  void _notifyPeersUpdated() {
-    if (!_closing && !_closed && !_discoveredPeersController.isClosed) {
-      _discoveredPeersController.add(currentDiscoveredPeers);
-    }
-  }
-
-  /// 启动过期发现记录的定期清理。
-  void _startDeviceCleanup() {
-    _deviceCleanupTimer?.cancel();
-    _deviceCleanupTimer = Timer.periodic(
-      _deviceCleanupInterval,
-      (_) => removeStaleDevices(),
-    );
-  }
-
-  /// 清理过期设备，同时保留当前可见的 mDNS 对端。
-  @visibleForTesting
-  int removeStaleDevices({DateTime? now, Duration ttl = devicePresenceTtl}) {
-    final cutoff = (now ?? DateTime.now()).subtract(ttl);
-    final activeNsdDeviceIds = <String>{};
-    final discovery = _discovery;
-    if (discovery != null) {
-      for (final service in discovery.services) {
-        try {
-          final txtId = service.txt?['id'];
-          final rawId = txtId != null ? utf8.decode(txtId) : service.name ?? '';
-          final id = _extractCleanId(rawId);
-          if (id.isNotEmpty) activeNsdDeviceIds.add(id);
-        } catch (_) {}
-      }
-    }
-    final before = _peerMap.length;
-    _peerMap.removeWhere(
-      (_, peer) =>
-          peer.lastSeen.isBefore(cutoff) &&
-          !activeNsdDeviceIds.contains(_extractCleanId(peer.deviceId)),
-    );
-    final removed = before - _peerMap.length;
-    if (removed > 0) _notifyPeersUpdated();
-    return removed;
-  }
-
-  /// UDP 备用 ping 数据包监听器。
-  /// 启动接收发现广播的 UDP 备用监听器。
-  Future<void> _startUdpListener(
-    int listeningHttpPort, {
-    int? nativePort,
-  }) async {
-    try {
-      final socket = await RawDatagramSocket.bind(
-        InternetAddress.anyIPv4,
-        udpDiscoveryPort,
-        reuseAddress: true,
-        reusePort: false,
-      );
-      if (_closing || _closed) {
-        socket.close();
-        return;
-      }
-      _udpSocket = socket;
-      socket.broadcastEnabled = true;
-      _udpSocketSubscription = socket.listen((event) {
-        if (!identical(_udpSocket, socket)) return;
-        if (event == RawSocketEvent.read) {
-          final datagram = socket.receive();
-          if (datagram == null) return;
-          try {
-            final messageStr = utf8.decode(datagram.data);
-            final json = jsonDecode(messageStr) as Map<String, dynamic>;
-
-            /// 注册一个通过 UDP 发现的对端，并发布设备快照。
-            void registerDiscoveredPeerFromDatagram(
-              String rawId,
-              Map<String, dynamic> json,
-              String hostIp,
-            ) {
-              final id = _extractCleanId(rawId);
-              if (id.isEmpty || id == currentDeviceId) return;
-              final cleanHostIp = hostIp.startsWith('::ffff:')
-                  ? hostIp.substring(7)
-                  : hostIp;
-              final peer = LanDiscoveredPeer(
-                deviceId: id,
-                alias: json['alias'] as String? ?? 'Device',
-                ip: cleanHostIp,
-                controlPort: (json['port'] as num?)?.toInt() ?? defaultPort,
-                advertisedNativePort: (json['nativePort'] as num?)?.toInt(),
-                deviceType: _guessDeviceType(json['os'] as String? ?? ''),
-                os: json['os'] as String? ?? 'Unknown',
-                lastSeen: DateTime.now(),
-              );
-              _peerMap[id] = peer;
-              _notifyPeersUpdated();
-            }
-
-            final type = json['type'] as String?;
-            if (type == 'PING') {
-              final senderId = json['id'] as String?;
-              if (senderId != null && senderId != currentDeviceId) {
-                _sendUdpPong(
-                  datagram.address,
-                  listeningHttpPort,
-                  nativePort: nativePort,
-                );
-                registerDiscoveredPeerFromDatagram(
-                  senderId,
-                  json,
-                  datagram.address.address,
-                );
-              }
-            } else if (type == 'PONG') {
-              final id = json['id'] as String?;
-              if (id != null && id != currentDeviceId) {
-                registerDiscoveredPeerFromDatagram(
-                  id,
-                  json,
-                  datagram.address.address,
-                );
-              }
-            } else if (type == 'BYE' ||
-                type == 'DISCONNECT' ||
-                type == 'OFFLINE') {
-              final id = json['id'] as String?;
-              if (id != null) {
-                final cleanId = _extractCleanId(id);
-                _peerMap.remove(cleanId);
-                _peerMap.remove(id);
-                _notifyPeersUpdated();
-              }
-            }
-          } catch (_) {}
-        }
-      });
-    } catch (e) {
-      debugPrint('[LanDiscoveryService] UDP listener error: $e');
-    }
-  }
-
-  /// 停止 UDP 发现监听器。
-  Future<void> _stopUdpListener() async {
-    final socket = _udpSocket;
-    final subscription = _udpSocketSubscription;
-    _udpSocket = null;
-    _udpSocketSubscription = null;
-    try {
-      await subscription?.cancel();
-    } finally {
-      socket?.close();
-    }
-  }
-
-  /// 向发现 ping 发送 UDP 响应。
-  void _sendUdpPong(
-    InternetAddress targetAddress,
-    int port, {
-    int? nativePort,
-  }) {
-    final socket = _udpSocket;
-    if (socket == null) return;
-    try {
-      final payload = jsonEncode({
-        'type': 'PONG',
-        'id': currentDeviceId,
-        'alias': currentDeviceAlias,
-        'port': port,
-        'nativePort': ?nativePort,
-        'os': Platform.operatingSystem,
-      });
-      final bytes = utf8.encode(payload);
-      socket.send(bytes, targetAddress, udpDiscoveryPort);
-    } catch (_) {}
-  }
-
-  /// 向已发现对端广播 V2 离线通知。
-  Future<void> _sendUdpDisconnect() async {
-    final socket = _udpSocket;
-    if (socket == null) return;
-    try {
-      final payload = jsonEncode({
-        'type': 'BYE',
-        'id': currentDeviceId,
-        'alias': currentDeviceAlias,
-        'os': Platform.operatingSystem,
-      });
-      final bytes = utf8.encode(payload);
-      socket.send(bytes, InternetAddress('255.255.255.255'), udpDiscoveryPort);
-
-      final localIps = await getLocalIpAddresses();
-      if (!identical(_udpSocket, socket)) return;
-      for (final ip in localIps) {
-        final subnetBroadcast = _calculateSubnetBroadcast(ip);
-        if (subnetBroadcast != '255.255.255.255') {
-          socket.send(
-            bytes,
-            InternetAddress(subnetBroadcast),
-            udpDiscoveryPort,
-          );
-        }
-      }
-      debugPrint('[LanDiscoveryService] UDP Disconnect/BYE broadcast sent');
-    } catch (e) {
-      debugPrint('[LanDiscoveryService] Failed to send UDP disconnect: $e');
-    }
-  }
-
-  /// 前 30 秒每秒快速扫描；30 秒内没有发现设备时自动停止。
-  /// 启动限速 UDP 发现广播循环。
-  void _startRateLimitedUdpBroadcast() {
-    _udpBroadcastCount = 0;
-    _udpBroadcastTimer?.cancel();
-    _sendUdpPing();
-
-    _scheduleNextUdpPing();
-  }
-
-  /// 根据扫描速率限制安排下一次 UDP 发现 ping。
-  void _scheduleNextUdpPing() {
-    if (!_isScanning || _closing || _closed) return;
-    _udpBroadcastCount++;
-
-    // 保持低频扫描，使热点或网络配置完成后加入的对端仍能出现，
-    // 不要求用户重新启动发现。
-    final int delaySeconds = _udpBroadcastCount < 10 ? 1 : 5;
-
-    _udpBroadcastTimer = Timer(Duration(seconds: delaySeconds), () {
-      if (_isScanning && !_closing && !_closed) {
-        _sendUdpPing();
-        _scheduleNextUdpPing();
-      }
-    });
-  }
-
-  /// 返回 [ip] 是否属于私有 IPv4 地址范围。
-  static bool _isPrivateIPv4(String ip) {
-    try {
-      final parts = ip.split('.');
-      if (parts.length != 4) return false;
-      final first = int.parse(parts[0]);
-      final second = int.parse(parts[1]);
-      if (first == 192 && second == 168) return true;
-      if (first == 10) return true;
-      if (first == 172 && second >= 16 && second <= 31) return true;
-      return false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /// 计算 UDP 备用路径使用的 /24 广播地址。
-  static String _calculateSubnetBroadcast(String ip) {
-    final parts = ip.split('.');
-    if (parts.length == 4) {
-      return '${parts[0]}.${parts[1]}.${parts[2]}.255';
-    }
-    return '255.255.255.255';
-  }
-
-  /// 向全局、子网和限速主机目标发送发现 ping。
-  Future<void> _sendUdpPing() async {
-    final socket = _udpSocket;
-    if (socket == null || !_isScanning || _closing || _closed) return;
-    try {
-      final payload = jsonEncode(
-        createUdpPingPayload(
-          deviceId: currentDeviceId,
-          alias: currentDeviceAlias,
-          os: Platform.operatingSystem,
-          port: _advertisedPort ?? defaultPort,
-          nativePort: _advertisedNativePort,
-        ),
-      );
-      final bytes = utf8.encode(payload);
-
-      // 1. 发送到全局广播地址。
-      socket.send(bytes, InternetAddress('255.255.255.255'), udpDiscoveryPort);
-
-      // 2. 发送到所有本地子网广播地址（热点 AP 模式必须支持）。
-      final localIps = await getLocalIpAddresses();
-      if (!identical(_udpSocket, socket) ||
-          !_isScanning ||
-          _closing ||
-          _closed) {
-        return;
-      }
-      for (final ip in localIps) {
-        final subnetBroadcast = _calculateSubnetBroadcast(ip);
-        if (subnetBroadcast != '255.255.255.255') {
-          socket.send(
-            bytes,
-            InternetAddress(subnetBroadcast),
-            udpDiscoveryPort,
-          );
-        }
-
-        // 3. 周期性的 /24 单播备用路径可帮助屏蔽广播的热点实现。
-        // 不要每秒重复发送。
-        final shouldProbeSubnet =
-            _udpBroadcastCount <= 1 || _udpBroadcastCount % 6 == 0;
-        if (shouldProbeSubnet && _isPrivateIPv4(ip)) {
-          final parts = ip.split('.');
-          if (parts.length == 4) {
-            final prefix = '${parts[0]}.${parts[1]}.${parts[2]}';
-            final selfHost = int.tryParse(parts[3]);
-            for (int i = 1; i <= 254; i++) {
-              if (i == selfHost) continue; // 跳过本机。
-              try {
-                socket.send(
-                  bytes,
-                  InternetAddress('$prefix.$i'),
-                  udpDiscoveryPort,
-                );
-              } catch (_) {}
-            }
-          }
-        }
-      }
-    } catch (_) {}
-  }
-
   /// 构建稳定的 V2 UDP 发现载荷。
   @visibleForTesting
   static Map<String, Object> createUdpPingPayload({
@@ -926,107 +460,6 @@ class LanDiscoveryService {
       'nativePort': ?nativePort,
       'os': os,
     };
-  }
-
-  /// 启动 Web Share 模式（为无 App 浏览器传输提供简洁 Web UI）。
-  Future<NetworkResult<String>> startWebShareServer({
-    int port = 53319,
-    required LanSecurityService securityService,
-    required LanStorageService storageService,
-    required LanTransferService transferService,
-  }) {
-    return _enqueueWebShareLifecycle(
-      () => _startWebShareServerResult(
-        port: port,
-        securityService: securityService,
-        storageService: storageService,
-        transferService: transferService,
-      ),
-    );
-  }
-
-  /// 启动 WebShare 实现，并将失败转换为 V2 结果。
-  Future<NetworkResult<String>> _startWebShareServerResult({
-    required int port,
-    required LanSecurityService securityService,
-    required LanStorageService storageService,
-    required LanTransferService transferService,
-  }) async {
-    if (_closing || _closed) {
-      return _closedFailure<String>(NetworkOperation.startWebShare);
-    }
-    try {
-      final url = await _LanWebShareServerOperations(this)._startWebShareServer(
-        port: port,
-        securityService: securityService,
-        storageService: storageService,
-        transferService: transferService,
-      );
-      if (_closing || _closed) {
-        await _LanWebShareServerOperations(this)._stopWebShareServer();
-        return _closedFailure<String>(NetworkOperation.startWebShare);
-      }
-      if (url == null || url.isEmpty) {
-        return NetworkFailure(
-          const NetworkError(
-            code: NetworkErrorCode.ioError,
-            message: 'WebShare did not provide an endpoint.',
-            operation: NetworkOperation.startWebShare,
-          ),
-        );
-      }
-      return NetworkSuccess(url);
-    } catch (error) {
-      return NetworkFailure(
-        NetworkError(
-          code: NetworkErrorCode.ioError,
-          message: 'WebShare start failed.',
-          operation: NetworkOperation.startWebShare,
-        ),
-      );
-    }
-  }
-
-  /// 停止 WebShare 服务并返回类型化结果。
-  Future<NetworkResult<void>> stopWebShareServer() async {
-    return _enqueueWebShareLifecycle(() async {
-      try {
-        await _LanWebShareServerOperations(this)._stopWebShareServer();
-        return const NetworkSuccess<void>(null);
-      } catch (error) {
-        return NetworkFailure(
-          const NetworkError(
-            code: NetworkErrorCode.ioError,
-            message: 'WebShare stop failed.',
-            operation: NetworkOperation.stopWebShare,
-          ),
-        );
-      }
-    });
-  }
-
-  Future<T> _enqueueWebShareLifecycle<T>(Future<T> Function() operation) {
-    final next = _webShareLifecycle.then((_) => operation());
-    _webShareLifecycle = next.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace _) {},
-    );
-    return next;
-  }
-
-  /// 新增或替换一个 discovery-only 对端观察。
-  void registerDiscoveredPeer(LanDiscoveredPeer peer) {
-    _peerMap[peer.deviceId] = peer;
-    _notifyPeersUpdated();
-  }
-
-  /// 根据标识移除一个动态 discovery observation。
-  void removeDiscoveredPeer(String deviceId) {
-    _peerMap.remove(deviceId);
-    _peerMap.removeWhere(
-      (key, peer) => _extractCleanId(peer.deviceId) == deviceId,
-    );
-    _notifyPeersUpdated();
   }
 
   NetworkFailure<T> _closedFailure<T>(NetworkOperation operation) {

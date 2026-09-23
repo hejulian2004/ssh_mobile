@@ -28,6 +28,7 @@ extension _LanWebShareServerOperations on LanDiscoveryService {
   /// 启动 WebShare，并尝试候选端口直到绑定成功。
   Future<String?> _startWebShareServer({
     int port = 53319,
+    required String hostIp,
     required LanSecurityService securityService,
     required LanStorageService storageService,
     required LanTransferService transferService,
@@ -90,12 +91,10 @@ extension _LanWebShareServerOperations on LanDiscoveryService {
       final certFingerprint = await securityService
           .getLocalCertificateFingerprint(currentDeviceId);
       final webShareToken = _generateWebShareToken();
-      final ips = await LanDiscoveryService.getLocalIpAddresses();
       if (_closing || _closed) {
         await bound.close(force: true);
         throw StateError('Web Share service is shutting down.');
       }
-      final hostIp = _customIp ?? (ips.isNotEmpty ? ips.first : '127.0.0.1');
       const scheme = 'https';
 
       _webShareToken = webShareToken;

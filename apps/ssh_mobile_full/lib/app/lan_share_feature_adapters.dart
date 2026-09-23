@@ -237,6 +237,13 @@ final class AppLanShareStrings implements lan.LanShareStrings {
   @override
   String get lanShareInvalidAddress => _strings.lanShareInvalidAddress;
   @override
+  String get lanShareAddressAmbiguous => _strings.lanShareAddressAmbiguous;
+  @override
+  String get lanShareAddressUnavailable => _strings.lanShareAddressUnavailable;
+  @override
+  String get lanShareAddressOverrideStale =>
+      _strings.lanShareAddressOverrideStale;
+  @override
   String get lanShareNoDevices => _strings.lanShareNoDevices;
   @override
   String get lanShareNoDevicesRefreshHint =>

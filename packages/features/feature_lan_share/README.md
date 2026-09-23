@@ -1,4 +1,4 @@
-最新更新时间：2026-09-12
+最新更新时间：2026-09-23
 
 # feature_lan_share
 
@@ -71,6 +71,25 @@ control HTTP、WSS Relay enrollment/编排、Web Share、传输历史和非秘�
   QUIC/TCP 基础设施；QUIC-free WSS-only 数据面路径推迟到后续协议能力切换（Wave 2），
   当前并不存在。`NetworkCapability.runtime` 只表示 native command-worker handle
   存在，不代表 WSS 数据面已独立配置。
+
+## 本地地址选择与配对路由
+
+- WebShare Automatic 只按 Feature 定义的地址选择 Port 选址，不依赖
+  `NetworkInterface.list()` 顺序。candidate 带有当前 IPv4、接口名和仅本次使用的
+  `interfaceIndex`；接口索引不持久化。显式 override 仅在地址仍属于当前 eligible
+  candidate 时有效，stale override fail closed，不静默退回 Automatic。
+- Windows route/interface API 和 FFI 由 App composition root 选择并注入，Feature
+  不检查 Windows 平台或依赖 Windows 类型。Windows 按接口聚合 IPv4 default routes，
+  使用 route metric + interface metric；同接口重复最低 routes 等价，跨接口并列或
+  被选接口有多个 IPv4 时要求手动选择。无 eligible route 时，仅一个候选可回退；
+  route 查询失败不执行回退。其他平台只在候选唯一时自动选择。
+- QR 永不发布 loopback。地址无法确定或 override 过期时只停止 WebShare HTTPS
+  session、清空 QR URL，LAN Control listener 保持运行。QR 字段保持
+  `deviceId`、`lanPort`、`nativePort`、`access` 和 `certFingerprint`；WebShare
+  HTTPS port、LAN Control HTTPS port 和 native transfer port 继续分开。
+- `LanPairingNavigationHost` 是唯一创建根配对路由的入口。Pairing request stream
+  和路由完成回调都通过单一 post-frame scheduler 打开路由；活动 pairing/chat
+  flow 内部导航仍由其页面管理。
 
 旧 `apps/ssh_mobile_full/lib/features/lan_share/**`、
 `apps/ssh_mobile_full/lib/services/lan_share/**`、V1 pairing/trust helpers 和 Relay

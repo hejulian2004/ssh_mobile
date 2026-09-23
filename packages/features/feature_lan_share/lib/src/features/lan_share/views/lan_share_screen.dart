@@ -13,6 +13,7 @@ import 'package:app_ui/app_ui.dart';
 import 'package:feature_lan_share/src/features/lan_share/viewmodels/lan_share_viewmodel.dart';
 import 'package:feature_lan_share/src/services/lan_share/lan_share_models.dart';
 import 'package:feature_lan_share/src/services/lan_share/lan_discovery_service.dart';
+import 'package:feature_lan_share/src/services/lan_share/lan_web_share_url.dart';
 import 'package:network_sdk/network_sdk.dart';
 import '../lan_share_feature_scope.dart';
 import 'lan_chat_screen.dart';
@@ -396,6 +397,12 @@ class _LanShareScreenState extends State<LanShareScreen>
                         final ipMap = snapshot.data ?? {};
                         final ips = ipMap.keys.toList();
                         final customIp = vm.customIp;
+                        final addressSelection =
+                            vm.webShareAddressSelectionResult;
+                        final automaticIp =
+                            addressSelection is LanShareLocalAddressSelected
+                            ? addressSelection.candidate.address
+                            : null;
                         final List<InlineSpan> spans = [
                           TextSpan(
                             text: label,
@@ -428,7 +435,8 @@ class _LanShareScreenState extends State<LanShareScreen>
                           for (int i = 0; i < ips.length; i++) {
                             final ip = ips[i];
                             final isSelected =
-                                customIp == ip || (customIp == null && i == 0);
+                                customIp == ip ||
+                                (customIp == null && automaticIp == ip);
                             spans.add(
                               TextSpan(
                                 text: ip,
