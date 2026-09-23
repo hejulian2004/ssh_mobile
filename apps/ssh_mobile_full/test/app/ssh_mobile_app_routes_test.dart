@@ -311,7 +311,9 @@ void main() {
 
       Future<void> expectAddRouteReusesHomeViewModel(IconData icon) async {
         await tapRailIconOnce(tester, icon);
-        await tester.tap(find.text(strings.addConnection));
+        final addAction = find.text(strings.addConnection).hitTestable();
+        expect(addAction, findsOneWidget);
+        await tester.tap(addAction);
         await tester.pump(const Duration(milliseconds: 400));
         expectRoute(tester, feature_connection.AddEditScreen);
 
