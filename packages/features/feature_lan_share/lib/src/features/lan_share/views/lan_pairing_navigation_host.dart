@@ -183,6 +183,9 @@ class _LanPairingNavigationHostState extends State<LanPairingNavigationHost> {
       if (widget.navigatorKey.currentState == null) return;
       _openActivePairing();
     });
+    // Stream events can arrive while the app is idle; registering a post-frame
+    // callback alone does not guarantee that another frame will be scheduled.
+    WidgetsBinding.instance.scheduleFrame();
   }
 
   void _openActivePairing() {
