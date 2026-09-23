@@ -1,8 +1,8 @@
-import 'dart:ui' show SemanticsAction;
-
 import 'package:connection_core/connection_core.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:feature_playbook/feature_playbook.dart' as feature_playbook;
+import 'package:feature_ai/feature_ai.dart' as feature_ai;
+import 'package:feature_connection/feature_connection.dart'
+    as feature_connection;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -60,6 +60,8 @@ void main() {
     int initialIndex = 0,
     Duration? settle,
     SettingsViewModel? settings,
+    bool pumpAdditionalFrame = true,
+    void Function(RouteSettings settings)? onRouteGenerated,
   }) async {
     await tester.pumpWidget(
       MultiProvider(
@@ -72,9 +74,12 @@ void main() {
         ],
         child: MaterialApp(
           theme: AppTheme.lightThemeFor(),
-          onGenerateRoute: (settings) => MaterialPageRoute<void>(
-            builder: (_) => Text('route ${settings.name}'),
-          ),
+          onGenerateRoute: (settings) {
+            onRouteGenerated?.call(settings);
+            return MaterialPageRoute<void>(
+              builder: (_) => Text('route ${settings.name}'),
+            );
+          },
           home: AppConnectionRouteScope(
             connectionRepository: storage.connectionRepository,
             credentialRepository: storage.credentialRepository,
@@ -92,7 +97,7 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
+    if (pumpAdditionalFrame) await tester.pump();
     if (settle != null) await tester.pump(settle);
     expect(tester.takeException(), isNull);
   }
@@ -112,6 +117,60 @@ void main() {
     }
     throw StateError('Home scaffold with a drawer was not found');
   }
+
+  testWidgets('activates only the selected home slot in the first frame', (
+    tester,
+  ) async {
+    await pumpHome(tester, pumpAdditionalFrame: false);
+
+    final stackFinder = find.byType(IndexedStack);
+    expect(stackFinder, findsOneWidget);
+    final stack = tester.widget<IndexedStack>(stackFinder);
+    expect(stack.index, 0);
+    expect(stack.children, hasLength(5));
+    expect(find.byType(PageView), findsNothing);
+    expect(find.byType(ServerListPane), findsOneWidget);
+    expect(find.byType(feature_ai.LlmChatScreen), findsNothing);
+
+    await disposeHome(tester);
+  });
+
+  testWidgets('empty-state add actions reuse the Home connection ViewModel', (
+    tester,
+  ) async {
+    RouteSettings? generatedRoute;
+    await pumpHome(
+      tester,
+      onRouteGenerated: (settings) => generatedRoute = settings,
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final homeViewModel = tester
+        .element(find.byType(HomeScreen))
+        .read<feature_connection.ConnectionViewModel>();
+    final strings = AppStrings(appSettings.language);
+
+    Future<void> expectEmptyStateAddReusesHomeViewModel(IconData icon) async {
+      final rail = find.byType(NavigationRail);
+      await tester.tap(find.descendant(of: rail, matching: find.byIcon(icon)));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text(strings.addConnection), findsOneWidget);
+      await tester.tap(find.text(strings.addConnection));
+      await tester.pump();
+
+      expect(generatedRoute?.name, '/add');
+      expect(generatedRoute?.arguments, same(homeViewModel));
+
+      tester.state<NavigatorState>(find.byType(Navigator)).pop();
+      await tester.pump();
+    }
+
+    await expectEmptyStateAddReusesHomeViewModel(Icons.folder_open_outlined);
+    await expectEmptyStateAddReusesHomeViewModel(Icons.monitor_heart_outlined);
+
+    await disposeHome(tester);
+  });
 
   testWidgets('desktop rail renders and follows the selected page', (
     tester,
@@ -137,7 +196,7 @@ void main() {
     );
     expect(find.byType(BottomNavigationBar), findsNothing);
 
-    final contentContext = tester.element(find.byType(PageView));
+    final contentContext = tester.element(find.byType(IndexedStack));
     const OpenSettingsNotification().dispatch(contentContext);
     await tester.pump(const Duration(milliseconds: 100));
     expect(drawerScaffold(tester).isDrawerOpen, isTrue);
@@ -185,16 +244,13 @@ void main() {
     await tester.pump();
     expect(find.byType(NavigationRail), findsNothing);
 
-    // Crossing the desktop breakpoint re-aligns the PageView offset in the
-    // post-frame callback.
+    // Crossing the desktop breakpoint must not require page-controller
+    // alignment; the selected index remains the single source of truth.
     tester.view.resetViewInsets();
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     tester.view.physicalSize = const Size(390, 844);
     await tester.pump();
     await tester.pump();
-    const feature_playbook.PlaybookAiNavigationNotification().dispatch(
-      contentContext,
-    );
 
     await disposeHome(tester);
   });
@@ -266,23 +322,8 @@ void main() {
       expect(find.byKey(ValueKey('home-nav-$index')), findsOneWidget);
     }
 
-    final semantics = tester.ensureSemantics();
-    tester.semantics.performAction(
-      find.semantics.byLabel(AppStrings(appSettings.language).sftp),
-      SemanticsAction.tap,
-    );
-    // Return to the server page before pumping so the SFTP page's optional
-    // runtime providers are never required by this shell-only test.
-    tester.semantics.performAction(
-      find.semantics.byLabel(AppStrings(appSettings.language).servers),
-      SemanticsAction.tap,
-    );
-    semantics.dispose();
-    await tester.pump(const Duration(milliseconds: 100));
-
-    await tester.tap(find.byKey(const ValueKey('home-nav-1')));
-    await tester.tap(find.byKey(const ValueKey('home-nav-0')));
-    await tester.pump(const Duration(milliseconds: 100));
+    final stack = tester.widget<IndexedStack>(find.byType(IndexedStack));
+    expect(stack.index, 0);
     expect(tester.takeException(), isNull);
 
     await disposeHome(tester);
@@ -566,18 +607,6 @@ void main() {
     final dynamic state = tester.state(find.byType(HomeScreen));
     state.updateState(() {});
     expect(state.settingsLabelAi(innerContext), 'AI');
-
-    const SwitchToAiTabNotification().dispatch(innerContext);
-    await tester.pump(const Duration(milliseconds: 100));
-
-    const feature_playbook.PlaybookAiNavigationNotification().dispatch(
-      innerContext,
-    );
-    await tester.pump(const Duration(milliseconds: 100));
-
-    final pageView = tester.widget<PageView>(find.byType(PageView));
-    pageView.onPageChanged?.call(1);
-    pageView.onPageChanged?.call(0);
 
     await disposeHome(tester);
   });

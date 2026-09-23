@@ -6,6 +6,7 @@
 // either an explicit case or rejected by the contribution assert, so that
 // branch stays intentionally uncovered.
 
+import 'package:connection_core/connection_core.dart';
 import 'package:feature_ai/feature_ai.dart' as feature_ai;
 import 'package:feature_connection/feature_connection.dart'
     as feature_connection;
@@ -13,10 +14,13 @@ import 'package:feature_mcp/feature_mcp.dart' as feature_mcp;
 import 'package:feature_playbook/feature_playbook.dart' as feature_playbook;
 import 'package:feature_rag/feature_rag.dart' as feature_rag;
 import 'package:feature_sftp/feature_sftp.dart' as feature_sftp;
+import 'package:feature_system_admin/feature_system_admin.dart'
+    as feature_system_admin;
 import 'package:feature_terminal/feature_terminal.dart' as feature_terminal;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
 import 'package:ssh_mobile/app/app_runtime.dart';
 import 'package:ssh_mobile/app/connection_feature_adapters.dart';
 import 'package:ssh_mobile/app/navigation/app_route_contributions.dart';
@@ -25,6 +29,7 @@ import 'package:ssh_mobile/app/ssh_mobile_app.dart';
 import 'package:ssh_mobile/app/terminal_feature_adapters.dart';
 import 'package:ssh_mobile/features/home/views/home_screen.dart';
 import 'package:ssh_mobile/features/startup/views/startup_screen.dart';
+import 'package:ssh_mobile/services/app_settings.dart';
 
 import 'support/app_runtime_test_support.dart';
 
@@ -114,6 +119,16 @@ void main() {
     // asserts foundation debug variables are unchanged, so restore the
     // synchronous callback the automated binding installs for widget tests.
     debugPrint = debugPrintSynchronously;
+  }
+
+  Future<void> tapRailIconOnce(WidgetTester tester, IconData icon) async {
+    final rail = find.byType(NavigationRail);
+    expect(rail, findsOneWidget);
+    final destination = find.descendant(of: rail, matching: find.byIcon(icon));
+    expect(destination, findsOneWidget);
+    final gesture = await tester.startGesture(tester.getCenter(destination));
+    await gesture.up();
+    await tester.pump();
   }
 
   testWidgets('mounts the shell and rejects unknown or invalid route args', (
@@ -219,6 +234,158 @@ void main() {
       );
       expectRoute(tester, feature_ai.AiSkillEditScreen);
       await popRoute(tester);
+
+      await disposeTree(tester);
+    });
+  });
+
+  testWidgets('home AI tab activates in the same rendered frame', (
+    tester,
+  ) async {
+    await withWindowsPlatform(tester, () async {
+      await pumpApp(tester);
+      await pushRoute(tester, AppShellRouteNames.performance);
+
+      await tapRailIconOnce(tester, Icons.psychology_outlined);
+
+      expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 2);
+      expect(tester.takeException(), isNull);
+      final aiFinder = find.byType(
+        feature_ai.LlmChatScreen,
+        skipOffstage: false,
+      );
+      expect(aiFinder, findsOneWidget);
+      expect(tester.widget<feature_ai.LlmChatScreen>(aiFinder).active, isTrue);
+
+      await tapRailIconOnce(tester, Icons.dns_outlined);
+      expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 0);
+      expect(aiFinder, findsOneWidget);
+      expect(tester.widget<feature_ai.LlmChatScreen>(aiFinder).active, isFalse);
+
+      await tapRailIconOnce(tester, Icons.psychology_outlined);
+      expect(tester.widget<feature_ai.LlmChatScreen>(aiFinder).active, isTrue);
+
+      await disposeTree(tester);
+    });
+  });
+
+  testWidgets('home enters no-connection states without feature shell flash', (
+    tester,
+  ) async {
+    await withWindowsPlatform(tester, () async {
+      await pumpApp(tester);
+      await pushRoute(tester, AppShellRouteNames.performance);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 500)),
+      );
+      await tester.pump();
+      final strings = AppStrings(runtime.appSettings.language);
+
+      await tapRailIconOnce(tester, Icons.folder_open_outlined);
+      expect(find.byType(feature_sftp.SftpScreen), findsNothing);
+      expect(find.text(strings.sftpEmptyTitle), findsOneWidget);
+
+      await tapRailIconOnce(tester, Icons.monitor_heart_outlined);
+      expect(find.byType(feature_system_admin.SystemAdminScreen), findsNothing);
+      expect(find.text(strings.systemOmAdmin), findsOneWidget);
+
+      await disposeTree(tester);
+    });
+  });
+
+  testWidgets('home empty-state add action reuses its connection ViewModel', (
+    tester,
+  ) async {
+    await withWindowsPlatform(tester, () async {
+      await pumpApp(tester);
+      await pushRoute(tester, AppShellRouteNames.performance);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 500)),
+      );
+      await tester.pump();
+
+      final homeViewModel = tester
+          .element(find.byType(HomeScreen))
+          .read<feature_connection.ConnectionViewModel>();
+      final strings = AppStrings(runtime.appSettings.language);
+
+      Future<void> expectAddRouteReusesHomeViewModel(IconData icon) async {
+        await tapRailIconOnce(tester, icon);
+        final addAction = find
+            .widgetWithText(FilledButton, strings.addConnection)
+            .hitTestable();
+        expect(addAction, findsOneWidget);
+        await tester.tap(addAction);
+        await tester.pumpAndSettle();
+        expectRoute(tester, feature_connection.AddEditScreen);
+
+        final addViewModel = tester
+            .element(find.byType(feature_connection.AddEditScreen))
+            .read<feature_connection.ConnectionViewModel>();
+        expect(identical(addViewModel, homeViewModel), isTrue);
+
+        await popRoute(tester);
+      }
+
+      await expectAddRouteReusesHomeViewModel(Icons.folder_open_outlined);
+      await expectAddRouteReusesHomeViewModel(Icons.monitor_heart_outlined);
+
+      await disposeTree(tester);
+    });
+  });
+
+  testWidgets('home retains server selection across distant tab switches', (
+    tester,
+  ) async {
+    await withWindowsPlatform(tester, () async {
+      await tester.runAsync(() async {
+        await runtime.connectionRepository.addConnection(
+          ConnectionConfig(
+            id: 'navigation-retention-server',
+            name: 'Navigation retention server',
+            host: 'navigation-retention.example.test',
+            username: 'tester',
+          ),
+        );
+      });
+      await pumpApp(tester);
+      await pushRoute(tester, AppShellRouteNames.performance);
+
+      await tapRailIconOnce(tester, Icons.dns_outlined);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 500)),
+      );
+      await tester.pump();
+      final card = find.byKey(
+        const ValueKey<String>('server-card-navigation-retention-server'),
+      );
+      expect(card, findsOneWidget);
+
+      await tester.longPress(card);
+      await tester.pump();
+      final checkbox = find.descendant(
+        of: card,
+        matching: find.byType(Checkbox),
+      );
+      expect(checkbox, findsOneWidget);
+      expect(tester.widget<Checkbox>(checkbox).value, isTrue);
+
+      await tapRailIconOnce(tester, Icons.monitor_heart_outlined);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tapRailIconOnce(tester, Icons.dns_outlined);
+      await tester.pump(const Duration(milliseconds: 400));
+
+      final returnedCard = find.byKey(
+        const ValueKey<String>('server-card-navigation-retention-server'),
+      );
+      expect(returnedCard, findsOneWidget);
+      final returnedCheckbox = find.descendant(
+        of: returnedCard,
+        matching: find.byType(Checkbox),
+      );
+      expect(returnedCheckbox, findsOneWidget);
+      expect(tester.widget<Checkbox>(returnedCheckbox).value, isTrue);
 
       await disposeTree(tester);
     });
