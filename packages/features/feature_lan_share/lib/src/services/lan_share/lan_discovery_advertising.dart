@@ -67,6 +67,56 @@ extension LanDiscoveryAdvertisingOperations on LanDiscoveryService {
     });
   }
 
+  Future<void> _performStartAdvertising(int port, {int? nativePort}) async {
+    try {
+      String? selectedIp;
+      try {
+        final result = await _localAddressResolver.resolve();
+        if (result case LanShareLocalAddressSelected(:final candidate)) {
+          selectedIp = candidate.address;
+        }
+      } on Object {
+        // mDNS can still advertise its resolved service host when no unique
+        // TXT IPv4 can be selected; never publish a guessed or loopback IP.
+      }
+      _registration = await nsd.register(
+        nsd.Service(
+          name: '$currentDeviceAlias ($currentDeviceId)',
+          type: LanDiscoveryService.serviceType,
+          port: port,
+          txt: {
+            'id': utf8.encode(currentDeviceId),
+            'alias': utf8.encode(currentDeviceAlias),
+            'os': utf8.encode(Platform.operatingSystem),
+            if (selectedIp != null) 'ip': utf8.encode(selectedIp),
+            if (nativePort != null)
+              'nativePort': utf8.encode(nativePort.toString()),
+          },
+        ),
+      );
+      debugPrint(
+        '[LanDiscoveryService] mDNS Advertising started on port $port',
+      );
+    } catch (e) {
+      debugPrint('[LanDiscoveryService] mDNS Advertising error: $e');
+    }
+
+    await _startUdpListener(port, nativePort: nativePort);
+  }
+
+  Future<void> _performStopAdvertising() async {
+    await _sendUdpDisconnect();
+    if (_registration != null) {
+      try {
+        await nsd.unregister(_registration!);
+        _registration = null;
+      } catch (e) {
+        debugPrint('[LanDiscoveryService] mDNS Unregister error: $e');
+      }
+    }
+    await _stopUdpListener();
+  }
+
   Future<T> _enqueueAdvertisingLifecycle<T>(Future<T> Function() operation) {
     final next = _advertisingLifecycle.then((_) => operation());
     _advertisingLifecycle = next.then<void>(
@@ -110,7 +160,9 @@ extension LanDiscoveryAdvertisingOperations on LanDiscoveryService {
               Map<String, dynamic> json,
               String hostIp,
             ) {
-              final id = _extractCleanId(rawId);
+              final id = LanDiscoveryPeerOperations(
+                this,
+              )._extractCleanId(rawId);
               if (id.isEmpty || id == currentDeviceId) return;
               final cleanHostIp = hostIp.startsWith('::ffff:')
                   ? hostIp.substring(7)
@@ -123,12 +175,14 @@ extension LanDiscoveryAdvertisingOperations on LanDiscoveryService {
                     (json['port'] as num?)?.toInt() ??
                     LanDiscoveryService.defaultPort,
                 advertisedNativePort: (json['nativePort'] as num?)?.toInt(),
-                deviceType: _guessDeviceType(json['os'] as String? ?? ''),
+                deviceType: LanDiscoveryPeerOperations(
+                  this,
+                )._guessDeviceType(json['os'] as String? ?? ''),
                 os: json['os'] as String? ?? 'Unknown',
                 lastSeen: DateTime.now(),
               );
               _peerMap[id] = peer;
-              _notifyPeersUpdated();
+              LanDiscoveryPeerOperations(this)._notifyPeersUpdated();
             }
 
             final type = json['type'] as String?;
@@ -160,10 +214,12 @@ extension LanDiscoveryAdvertisingOperations on LanDiscoveryService {
                 type == 'OFFLINE') {
               final id = json['id'] as String?;
               if (id != null) {
-                final cleanId = _extractCleanId(id);
+                final cleanId = LanDiscoveryPeerOperations(
+                  this,
+                )._extractCleanId(id);
                 _peerMap.remove(cleanId);
                 _peerMap.remove(id);
-                _notifyPeersUpdated();
+                LanDiscoveryPeerOperations(this)._notifyPeersUpdated();
               }
             }
           } catch (_) {}

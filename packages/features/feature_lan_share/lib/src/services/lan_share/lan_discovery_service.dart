@@ -137,6 +137,60 @@ class LanDiscoveryService {
     return const NetworkSuccess<void>(null);
   }
 
+  /// Publishes discovery-only peer snapshots.
+  Stream<List<LanDiscoveredPeer>> get discoveredPeersStream =>
+      LanDiscoveryPeerOperations(this).discoveredPeersStream;
+
+  /// Returns the current discovery-only peer snapshot.
+  List<LanDiscoveredPeer> get currentDiscoveredPeers =>
+      LanDiscoveryPeerOperations(this).currentDiscoveredPeers;
+
+  /// Removes discovery records that have exceeded their observation TTL.
+  @visibleForTesting
+  int removeStaleDevices({DateTime? now, Duration ttl = devicePresenceTtl}) =>
+      LanDiscoveryPeerOperations(this)._removeStaleDevices(now: now, ttl: ttl);
+
+  /// Adds or replaces a discovery-only peer observation.
+  void registerDiscoveredPeer(LanDiscoveredPeer peer) =>
+      LanDiscoveryPeerOperations(this)._registerDiscoveredPeer(peer);
+
+  /// Removes a discovery-only peer observation by device ID.
+  void removeDiscoveredPeer(String deviceId) =>
+      LanDiscoveryPeerOperations(this)._removeDiscoveredPeer(deviceId);
+
+  /// Starts mDNS/UDP advertising for the selected ports.
+  Future<NetworkResult<void>> startAdvertising({
+    int port = defaultPort,
+    int? nativePort,
+  }) => LanDiscoveryAdvertisingOperations(
+    this,
+  ).startAdvertising(port: port, nativePort: nativePort);
+
+  /// Stops mDNS/UDP advertising.
+  Future<NetworkResult<void>> stopAdvertising() =>
+      LanDiscoveryAdvertisingOperations(this).stopAdvertising();
+
+  /// Starts the isolated WebShare HTTPS session.
+  Future<NetworkResult<String>> startWebShareServer({
+    int port = 53319,
+    required LanSecurityService securityService,
+    required LanStorageService storageService,
+    required LanTransferService transferService,
+  }) => LanWebShareLifecycleOperations(this).startWebShareServer(
+    port: port,
+    securityService: securityService,
+    storageService: storageService,
+    transferService: transferService,
+  );
+
+  /// Updates and revalidates the active WebShare address override.
+  Future<NetworkResult<void>> updateWebShareAddressOverride(String? ip) =>
+      LanWebShareLifecycleOperations(this).updateWebShareAddressOverride(ip);
+
+  /// Stops only the WebShare HTTPS session.
+  Future<NetworkResult<void>> stopWebShareServer() =>
+      LanWebShareLifecycleOperations(this).stopWebShareServer();
+
   /// 返回当前 eligible IPv4 candidates，interface index 仅供本次选择使用。
   static Future<List<LanShareLocalIpv4Candidate>> getLocalIpv4Candidates() =>
       const DartLanShareLocalIpv4CandidateSource().loadCandidates();
@@ -168,57 +222,15 @@ class LanDiscoveryService {
 
   /// 执行平台 mDNS/UDP 广播初始化。
   @protected
-  Future<void> performStartAdvertising(int port, {int? nativePort}) async {
-    try {
-      String? selectedIp;
-      try {
-        final result = await _localAddressResolver.resolve();
-        if (result case LanShareLocalAddressSelected(:final candidate)) {
-          selectedIp = candidate.address;
-        }
-      } on Object {
-        // mDNS can still advertise its resolved service host when no unique
-        // TXT IPv4 can be selected; never publish a guessed or loopback IP.
-      }
-      _registration = await nsd.register(
-        nsd.Service(
-          name: '$currentDeviceAlias ($currentDeviceId)',
-          type: serviceType,
-          port: port,
-          txt: {
-            'id': utf8.encode(currentDeviceId),
-            'alias': utf8.encode(currentDeviceAlias),
-            'os': utf8.encode(Platform.operatingSystem),
-            if (selectedIp != null) 'ip': utf8.encode(selectedIp),
-            if (nativePort != null)
-              'nativePort': utf8.encode(nativePort.toString()),
-          },
-        ),
-      );
-      debugPrint(
-        '[LanDiscoveryService] mDNS Advertising started on port $port',
-      );
-    } catch (e) {
-      debugPrint('[LanDiscoveryService] mDNS Advertising error: $e');
-    }
-
-    await _startUdpListener(port, nativePort: nativePort);
-  }
+  Future<void> performStartAdvertising(int port, {int? nativePort}) =>
+      LanDiscoveryAdvertisingOperations(
+        this,
+      )._performStartAdvertising(port, nativePort: nativePort);
 
   /// 执行平台 mDNS/UDP 广播清理。
   @protected
-  Future<void> performStopAdvertising() async {
-    await _sendUdpDisconnect();
-    if (_registration != null) {
-      try {
-        await nsd.unregister(_registration!);
-        _registration = null;
-      } catch (e) {
-        debugPrint('[LanDiscoveryService] mDNS Unregister error: $e');
-      }
-    }
-    await _stopUdpListener();
-  }
+  Future<void> performStopAdvertising() =>
+      LanDiscoveryAdvertisingOperations(this)._performStopAdvertising();
 
   /// 启动主动发现（mDNS 与限速 UDP 广播备用路径）。
   Future<NetworkResult<void>> startDiscovery() async {
@@ -389,59 +401,6 @@ class LanDiscoveryService {
   @protected
   Future<void> performStopDiscovery(nsd.Discovery discovery) =>
       nsd.stopDiscovery(discovery);
-
-  /// 将一个 mDNS 服务记录转换为类型化 LAN 设备。
-  void _handleDiscoveredNsdService(nsd.Service service) {
-    final txt = service.txt ?? {};
-    final rawId = txt['id'] != null
-        ? utf8.decode(txt['id']!)
-        : service.name ?? '';
-    final id = _extractCleanId(rawId);
-    if (id.isEmpty || id == currentDeviceId) return;
-
-    final rawAlias = txt['alias'] != null
-        ? utf8.decode(txt['alias']!)
-        : service.name ?? 'Device';
-    final alias = _extractCleanAlias(rawAlias);
-    final os = txt['os'] != null ? utf8.decode(txt['os']!) : 'Unknown';
-    var hostIp =
-        service.host ?? (txt['ip'] != null ? utf8.decode(txt['ip']!) : '');
-    if (hostIp.startsWith('::ffff:')) {
-      hostIp = hostIp.substring(7);
-    }
-    final port = service.port ?? defaultPort;
-    final nativePort = int.tryParse(
-      txt['nativePort'] == null ? '' : utf8.decode(txt['nativePort']!),
-    );
-
-    if (hostIp.isEmpty) return;
-
-    final peer = LanDiscoveredPeer(
-      deviceId: id,
-      alias: alias,
-      ip: hostIp,
-      controlPort: port,
-      advertisedNativePort: nativePort,
-      deviceType: _guessDeviceType(os),
-      os: os,
-      lastSeen: DateTime.now(),
-    );
-
-    _peerMap[id] = peer;
-    _notifyPeersUpdated();
-  }
-
-  /// 将发现到的操作系统标签映射为功能使用的设备类别。
-  LanDeviceType _guessDeviceType(String os) {
-    final lower = os.toLowerCase();
-    if (lower.contains('android') || lower.contains('ios')) {
-      return LanDeviceType.mobile;
-    }
-    if (lower.contains('web')) {
-      return LanDeviceType.webBrowser;
-    }
-    return LanDeviceType.desktop;
-  }
 
   /// 构建稳定的 V2 UDP 发现载荷。
   @visibleForTesting

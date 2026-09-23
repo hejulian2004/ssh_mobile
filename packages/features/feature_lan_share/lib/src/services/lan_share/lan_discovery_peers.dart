@@ -3,6 +3,59 @@
 part of 'lan_discovery_service.dart';
 
 extension LanDiscoveryPeerOperations on LanDiscoveryService {
+  /// Converts a discovered mDNS record into a typed LAN peer.
+  void _handleDiscoveredNsdService(nsd.Service service) {
+    final txt = service.txt ?? {};
+    final rawId = txt['id'] != null
+        ? utf8.decode(txt['id']!)
+        : service.name ?? '';
+    final id = _extractCleanId(rawId);
+    if (id.isEmpty || id == currentDeviceId) return;
+
+    final rawAlias = txt['alias'] != null
+        ? utf8.decode(txt['alias']!)
+        : service.name ?? 'Device';
+    final alias = _extractCleanAlias(rawAlias);
+    final os = txt['os'] != null ? utf8.decode(txt['os']!) : 'Unknown';
+    var hostIp =
+        service.host ?? (txt['ip'] != null ? utf8.decode(txt['ip']!) : '');
+    if (hostIp.startsWith('::ffff:')) {
+      hostIp = hostIp.substring(7);
+    }
+    final port = service.port ?? LanDiscoveryService.defaultPort;
+    final nativePort = int.tryParse(
+      txt['nativePort'] == null ? '' : utf8.decode(txt['nativePort']!),
+    );
+
+    if (hostIp.isEmpty) return;
+
+    final peer = LanDiscoveredPeer(
+      deviceId: id,
+      alias: alias,
+      ip: hostIp,
+      controlPort: port,
+      advertisedNativePort: nativePort,
+      deviceType: _guessDeviceType(os),
+      os: os,
+      lastSeen: DateTime.now(),
+    );
+
+    _peerMap[id] = peer;
+    _notifyPeersUpdated();
+  }
+
+  /// Maps the observed operating system to the Feature device category.
+  LanDeviceType _guessDeviceType(String os) {
+    final lower = os.toLowerCase();
+    if (lower.contains('android') || lower.contains('ios')) {
+      return LanDeviceType.mobile;
+    }
+    if (lower.contains('web')) {
+      return LanDeviceType.webBrowser;
+    }
+    return LanDeviceType.desktop;
+  }
+
   /// 移除 mDNS 设备标识中的显示后缀。
   String _extractCleanId(String rawId) {
     if (rawId.contains('(') && rawId.endsWith(')')) {
@@ -68,8 +121,7 @@ extension LanDiscoveryPeerOperations on LanDiscoveryService {
   }
 
   /// 清理过期设备，同时保留当前可见的 mDNS 对端。
-  @visibleForTesting
-  int removeStaleDevices({
+  int _removeStaleDevices({
     DateTime? now,
     Duration ttl = LanDiscoveryService.devicePresenceTtl,
   }) {
@@ -98,13 +150,13 @@ extension LanDiscoveryPeerOperations on LanDiscoveryService {
   }
 
   /// 新增或替换一个 discovery-only 对端观察。
-  void registerDiscoveredPeer(LanDiscoveredPeer peer) {
+  void _registerDiscoveredPeer(LanDiscoveredPeer peer) {
     _peerMap[peer.deviceId] = peer;
     _notifyPeersUpdated();
   }
 
   /// 根据标识移除一个动态 discovery observation。
-  void removeDiscoveredPeer(String deviceId) {
+  void _removeDiscoveredPeer(String deviceId) {
     _peerMap.remove(deviceId);
     _peerMap.removeWhere(
       (key, peer) => _extractCleanId(peer.deviceId) == deviceId,

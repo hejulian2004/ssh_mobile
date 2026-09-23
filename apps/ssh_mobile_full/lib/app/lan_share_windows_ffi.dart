@@ -4,30 +4,48 @@ import 'package:ffi/ffi.dart';
 
 import 'lan_share_windows_route_models.dart';
 
+typedef LanShareGetIpForwardTable2Native =
+    int Function(int family, Pointer<Pointer<Uint8>> table);
+typedef LanShareGetIpInterfaceEntryNative =
+    int Function(Pointer<LanShareMibIpInterfaceRow> row);
+typedef LanShareFreeMibTableNative = void Function(Pointer<Void> table);
+
 /// Minimal local IP Helper bindings for APIs not guaranteed by win32's
 /// curated Dart surface. No generated package bindings are modified.
 final class FfiLanShareWindowsIpHelperApi
     implements LanShareWindowsIpHelperApi {
-  FfiLanShareWindowsIpHelperApi({DynamicLibrary? library})
-    : _providedLibrary = library;
+  FfiLanShareWindowsIpHelperApi({
+    DynamicLibrary? library,
+    LanShareGetIpForwardTable2Native? getIpForwardTable2,
+    LanShareGetIpInterfaceEntryNative? getIpInterfaceEntry,
+    LanShareFreeMibTableNative? freeMibTable,
+  }) : _providedLibrary = library,
+       _getIpForwardTable2Override = getIpForwardTable2,
+       _getIpInterfaceEntryOverride = getIpInterfaceEntry,
+       _freeMibTableOverride = freeMibTable;
 
   final DynamicLibrary? _providedLibrary;
+  final LanShareGetIpForwardTable2Native? _getIpForwardTable2Override;
+  final LanShareGetIpInterfaceEntryNative? _getIpInterfaceEntryOverride;
+  final LanShareFreeMibTableNative? _freeMibTableOverride;
   late final DynamicLibrary _library =
       _providedLibrary ?? DynamicLibrary.open('iphlpapi.dll');
 
-  late final int Function(int family, Pointer<Pointer<Uint8>> table)
-  _getIpForwardTable2 = _library
-      .lookupFunction<
+  late final LanShareGetIpForwardTable2Native _getIpForwardTable2 =
+      _getIpForwardTable2Override ??
+      _library.lookupFunction<
         Uint32 Function(Uint16, Pointer<Pointer<Uint8>>),
         int Function(int, Pointer<Pointer<Uint8>>)
       >('GetIpForwardTable2');
-  late final int Function(Pointer<_MibIpInterfaceRow>) _getIpInterfaceEntry =
+  late final LanShareGetIpInterfaceEntryNative _getIpInterfaceEntry =
+      _getIpInterfaceEntryOverride ??
       _library.lookupFunction<
-        Uint32 Function(Pointer<_MibIpInterfaceRow>),
-        int Function(Pointer<_MibIpInterfaceRow>)
+        Uint32 Function(Pointer<LanShareMibIpInterfaceRow>),
+        int Function(Pointer<LanShareMibIpInterfaceRow>)
       >('GetIpInterfaceEntry');
-  late final void Function(Pointer<Void>) _freeMibTable = _library
-      .lookupFunction<
+  late final LanShareFreeMibTableNative _freeMibTable =
+      _freeMibTableOverride ??
+      _library.lookupFunction<
         Void Function(Pointer<Void>),
         void Function(Pointer<Void>)
       >('FreeMibTable');
@@ -65,8 +83,8 @@ final class FfiLanShareWindowsIpHelperApi
     Pointer<Uint8> table,
   ) {
     final count = table.cast<Uint32>().value;
-    final rowsStart = (table + sizeOf<_MibIpForwardTableHeader>())
-        .cast<_MibIpForwardRow2>();
+    final rowsStart = (table + sizeOf<LanShareMibIpForwardTableHeader>())
+        .cast<LanShareMibIpForwardRow2>();
     final rows = <LanShareWindowsRouteRow>[];
     for (var index = 0; index < count; index++) {
       final row = (rowsStart + index).ref;
@@ -89,7 +107,7 @@ final class FfiLanShareWindowsIpHelperApi
 
   @override
   int getIpv4InterfaceMetric(int interfaceIndex) {
-    final row = calloc<_MibIpInterfaceRow>();
+    final row = calloc<LanShareMibIpInterfaceRow>();
     try {
       row.ref
         ..family = _afInet
@@ -129,7 +147,7 @@ final class _FfiLanShareWindowsForwardTableLease
 
 const int _afInet = 2;
 
-final class _MibIpForwardTableHeader extends Struct {
+final class LanShareMibIpForwardTableHeader extends Struct {
   @Uint32()
   external int numEntries;
 
@@ -137,7 +155,7 @@ final class _MibIpForwardTableHeader extends Struct {
   external int alignmentPadding;
 }
 
-final class _SockaddrIn extends Struct {
+final class LanShareSockaddrIn extends Struct {
   @Uint16()
   external int family;
 
@@ -151,7 +169,7 @@ final class _SockaddrIn extends Struct {
   external Array<Uint8> zero;
 }
 
-final class _SockaddrIn6 extends Struct {
+final class LanShareSockaddrIn6 extends Struct {
   @Uint16()
   external int family;
 
@@ -168,32 +186,32 @@ final class _SockaddrIn6 extends Struct {
   external int scopeId;
 }
 
-final class _SockaddrInet extends Union {
-  external _SockaddrIn ipv4;
+final class LanShareSockaddrInet extends Union {
+  external LanShareSockaddrIn ipv4;
 
-  external _SockaddrIn6 ipv6;
+  external LanShareSockaddrIn6 ipv6;
 
   @Uint32()
   external int alignment;
 }
 
-final class _IpAddressPrefix extends Struct {
-  external _SockaddrInet prefix;
+final class LanShareIpAddressPrefix extends Struct {
+  external LanShareSockaddrInet prefix;
 
   @Uint8()
   external int prefixLength;
 }
 
-final class _MibIpForwardRow2 extends Struct {
+final class LanShareMibIpForwardRow2 extends Struct {
   @Uint64()
   external int interfaceLuid;
 
   @Uint32()
   external int interfaceIndex;
 
-  external _IpAddressPrefix destinationPrefix;
+  external LanShareIpAddressPrefix destinationPrefix;
 
-  external _SockaddrInet nextHop;
+  external LanShareSockaddrInet nextHop;
 
   @Uint8()
   external int sitePrefixLength;
@@ -229,7 +247,7 @@ final class _MibIpForwardRow2 extends Struct {
   external int origin;
 }
 
-final class _MibIpInterfaceRow extends Struct {
+final class LanShareMibIpInterfaceRow extends Struct {
   @Uint16()
   external int family;
 
