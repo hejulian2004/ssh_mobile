@@ -118,6 +118,88 @@ async fn upsert_v2_requires_a_direct_route_and_records_authorization() {
         .expect("authorization record");
     assert!(authorization.direct);
     assert!(!authorization.relay);
+    assert!(runtime.peers.read().await.contains_key("direct-only"));
+    assert!(runtime
+        .trusted_peer_keys
+        .read()
+        .await
+        .contains_key("direct-only"));
+    assert!(!runtime.peers.read().await.contains_key("relay-only"));
+    assert!(!runtime
+        .peer_route_authorizations
+        .read()
+        .await
+        .contains_key("relay-only"));
+}
+
+#[tokio::test]
+async fn upsert_v2_publishes_authorization_with_the_peer() {
+    let runtime = state();
+    let peer_id = "atomic-peer";
+    let supervisor = runtime
+        .peer_supervisors
+        .get_or_create(peer_id)
+        .expect("supervisor");
+    assert!(!supervisor.is_configured());
+
+    // Hold the policy lock so publication stops before any map insert.
+    // Registration marks the supervisor configured before taking this lock.
+    let authorization_gate = runtime.peer_route_authorizations.write().await;
+    let task = tokio::spawn({
+        let runtime = Arc::clone(&runtime);
+        async move {
+            dispatch_peer(
+                runtime,
+                "atomic-register",
+                peer_config(peer_id, true, true),
+            )
+            .await
+        }
+    });
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !supervisor.is_configured() {
+        assert!(
+            deadline > std::time::Instant::now(),
+            "registration did not reach route publication"
+        );
+        tokio::task::yield_now().await;
+    }
+    tokio::task::yield_now().await;
+
+    assert!(
+        !runtime.peers.read().await.contains_key(peer_id),
+        "peer config became visible before its route authorization"
+    );
+    assert!(
+        !runtime
+            .trusted_peer_keys
+            .read()
+            .await
+            .contains_key(peer_id),
+        "trusted key became visible before its route authorization"
+    );
+    assert!(!authorization_gate.contains_key(peer_id));
+    drop(authorization_gate);
+
+    task.await
+        .expect("registration task")
+        .expect("registration");
+    assert!(runtime.peers.read().await.contains_key(peer_id));
+    assert!(runtime
+        .trusted_peer_keys
+        .read()
+        .await
+        .contains_key(peer_id));
+    let authorization = runtime
+        .peer_route_authorizations
+        .read()
+        .await
+        .get(peer_id)
+        .copied()
+        .expect("authorization");
+    assert!(authorization.direct);
+    assert!(authorization.relay);
 }
 
 #[tokio::test]

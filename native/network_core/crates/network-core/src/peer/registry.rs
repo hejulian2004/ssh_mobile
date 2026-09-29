@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 
 use crate::crypto_handshake::SessionCryptoMaterial;
 use crate::events::{emit_peer_state, protocol_error};
-use crate::runtime::{ConnectionAdmissionLease, PeerConfig, RuntimeState};
+use crate::runtime::{ConnectionAdmissionLease, PeerConfig, PeerRouteAuthorization, RuntimeState};
 
 /// Installs the fresh Noise root for a Session admission（§18 1:1）. The root is
 /// always new per connection; there is no ContinueExisting path. Responder
@@ -41,14 +41,17 @@ pub(crate) async fn upsert_peer(
     state: &RuntimeState,
     command: UpsertPeerCommand,
 ) -> Result<(), ProtocolError> {
-    upsert_peer_with_policy(state, command, network_protocol::E2eePolicy::Required).await
+    upsert_peer_with_policy(state, command, network_protocol::E2eePolicy::Required, None)
+        .await
+        .map(|_| ())
 }
 
 pub(crate) async fn upsert_peer_with_policy(
     state: &RuntimeState,
     command: UpsertPeerCommand,
     e2ee_policy: network_protocol::E2eePolicy,
-) -> Result<(), ProtocolError> {
+    route_authorization: Option<PeerRouteAuthorization>,
+) -> Result<Option<PeerRouteAuthorization>, ProtocolError> {
     if command.peer_id.is_empty() || command.peer_id.len() > 128 {
         return Err(protocol_error(
             NetworkErrorCode::InvalidArgument,
@@ -89,7 +92,18 @@ pub(crate) async fn upsert_peer_with_policy(
     // transport-network v2：upsert 只保存配置 endpoint 与可信密钥；对端候选不再存
     // 全局 path_manager（§12/§29）。每次 connect 前由 ConnectivityAttemptCoordinator 经 Resolve
     // 获取权威 Discovery，本地配置 endpoint 作为 Direct 候选追加。
-    state.peers.write().await.insert(
+    //
+    // Acceptors fail closed when the policy row is missing. Take every publish
+    // lock before the first insert, and do not await between them: a concurrent
+    // inbound must see neither the peer nor a peer whose policy is still absent.
+    let mut authorizations = state.peer_route_authorizations.write().await;
+    let mut peers = state.peers.write().await;
+    let mut trusted_peer_keys = state.trusted_peer_keys.write().await;
+    let previous = authorizations.get(&command.peer_id).copied();
+    if let Some(authorization) = route_authorization {
+        authorizations.insert(command.peer_id.clone(), authorization);
+    }
+    peers.insert(
         command.peer_id.clone(),
         PeerConfig {
             endpoint,
@@ -98,12 +112,8 @@ pub(crate) async fn upsert_peer_with_policy(
             e2ee_policy,
         },
     );
-    state
-        .trusted_peer_keys
-        .write()
-        .await
-        .insert(command.peer_id, identity_public_key);
-    Ok(())
+    trusted_peer_keys.insert(command.peer_id, identity_public_key);
+    Ok(previous)
 }
 
 /// 停止活跃对端任务，并发布类型化断开状态。

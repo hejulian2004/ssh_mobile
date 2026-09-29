@@ -1881,6 +1881,7 @@ async fn peer_upsert_and_disconnect_preserve_identity_and_route_boundaries() {
             e2e_public_key: vec![2; 32],
         },
         network_protocol::E2eePolicy::Disabled,
+        None,
     )
     .await
     .expect("valid peer configuration");
