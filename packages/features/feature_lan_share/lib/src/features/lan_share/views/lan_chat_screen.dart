@@ -14,11 +14,13 @@ import 'lan_text_selection_screen.dart';
 class LanChatScreen extends StatefulWidget {
   final String targetDeviceId;
   final String initialAlias;
+  final LanShareScreenSharePort? screenSharePort;
 
   const LanChatScreen({
     super.key,
     required this.targetDeviceId,
     required this.initialAlias,
+    this.screenSharePort,
   });
 
   @override
@@ -31,6 +33,7 @@ class _LanChatScreenState extends State<LanChatScreen> {
 
   bool _isPaired = false;
   bool _isCheckingPairing = true;
+  LanShareScreenSharePort? _screenSharePort;
 
   @override
   void initState() {
@@ -39,6 +42,20 @@ class _LanChatScreenState extends State<LanChatScreen> {
       if (!mounted) return;
       _refreshPairing(context.read<LanShareViewModel>());
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _screenSharePort ??= widget.screenSharePort ?? _tryReadScreenSharePort();
+  }
+
+  LanShareScreenSharePort? _tryReadScreenSharePort() {
+    try {
+      return context.read<LanShareScreenSharePort>();
+    } on ProviderNotFoundException {
+      return null;
+    }
   }
 
   Future<void> _refreshPairing(LanShareViewModel vm) async {
@@ -224,6 +241,32 @@ class _LanChatScreenState extends State<LanChatScreen> {
     );
   }
 
+  Widget? _screenShareAction(BuildContext context, LanShareStrings strings) {
+    final port = _screenSharePort;
+    if (port == null || !port.canShareWith(widget.targetDeviceId)) {
+      return null;
+    }
+    return IconButton(
+      tooltip: strings.isEnglish ? 'Share screen' : '共享屏幕',
+      icon: const Icon(Icons.screen_share_outlined),
+      onPressed: () => _startScreenShare(context, port),
+    );
+  }
+
+  Future<void> _startScreenShare(
+    BuildContext context,
+    LanShareScreenSharePort port,
+  ) async {
+    try {
+      await port.startScreenShare(widget.targetDeviceId);
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('$error')));
+    }
+  }
+
   void _showE2ENotSupportedError(
     BuildContext context,
     LanShareStrings strings,
@@ -344,7 +387,9 @@ class _LanChatScreenState extends State<LanChatScreen> {
                               ],
                             ),
                           ),
-
+                          if (_screenShareAction(context, strings)
+                              case final action?)
+                            action,
                           PopupMenuButton<String>(
                             icon: const Icon(Icons.more_vert_rounded),
                             onSelected: (action) async {

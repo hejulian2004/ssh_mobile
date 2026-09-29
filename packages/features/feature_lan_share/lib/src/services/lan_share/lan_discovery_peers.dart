@@ -149,6 +149,32 @@ extension LanDiscoveryPeerOperations on LanDiscoveryService {
     return removed;
   }
 
+  /// 刷新已有发现记录的 lastSeen。未知设备不会被创建。
+  bool _touchDiscoveredPeer(String deviceId, {DateTime? now}) {
+    if (_closing || _closed) return false;
+    final cleanId = _extractCleanId(deviceId.trim());
+    if (cleanId.isEmpty) return false;
+    String? matchKey;
+    LanDiscoveredPeer? match;
+    for (final entry in _peerMap.entries) {
+      if (_extractCleanId(entry.key) == cleanId ||
+          _extractCleanId(entry.value.deviceId) == cleanId) {
+        matchKey = entry.key;
+        match = entry.value;
+        break;
+      }
+    }
+    if (matchKey == null || match == null) return false;
+    final updated = match.copyWith(
+      deviceId: cleanId,
+      lastSeen: now ?? DateTime.now(),
+    );
+    if (matchKey != cleanId) _peerMap.remove(matchKey);
+    _peerMap[cleanId] = updated;
+    _notifyPeersUpdated();
+    return true;
+  }
+
   /// 新增或替换一个 discovery-only 对端观察。
   void _registerDiscoveredPeer(LanDiscoveredPeer peer) {
     _peerMap[peer.deviceId] = peer;

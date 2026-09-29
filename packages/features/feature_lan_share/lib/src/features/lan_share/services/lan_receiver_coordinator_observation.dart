@@ -92,9 +92,12 @@ extension LanReceiverCoordinatorObservation on LanReceiverCoordinator {
         );
         return;
       }
-      // This callback carries one peer, not a discovery snapshot. Updating it
-      // through the snapshot API would invalidate every other active endpoint.
-      await peerRegistry.observeDiscoveredEndpoint(peer);
+      // The handshake event has no native port. Observing that incomplete
+      // peer clears a direct endpoint the discovery record still advertises.
+      final endpointPeer = _endpointPeerForPairing(peer);
+      if (endpointPeer != null) {
+        await peerRegistry.observeDiscoveredEndpoint(endpointPeer);
+      }
     } on Object catch (error, stackTrace) {
       logger.warning(
         'Native paired peer synchronization failed',
@@ -131,6 +134,18 @@ extension LanReceiverCoordinatorObservation on LanReceiverCoordinator {
     }
   }
 
+  /// 已有发现记录优先。没有 native 端口的事件不能拿来更新数据面。
+  LanDiscoveredPeer? _endpointPeerForPairing(LanDiscoveredPeer event) {
+    final peers = _discoveryService?.currentDiscoveredPeers;
+    if (peers != null) {
+      for (final candidate in peers) {
+        if (candidate.deviceId != event.deviceId) continue;
+        return _hasAdvertisedDirectEndpoint(candidate) ? candidate : null;
+      }
+    }
+    return _hasAdvertisedDirectEndpoint(event) ? event : null;
+  }
+
   /// 取消接收器持有的 LAN 事件订阅。
   Future<void> _cancelReceiverSubscriptions() async {
     await _pairingInviteSubscription?.cancel();
@@ -153,4 +168,12 @@ extension LanReceiverCoordinatorObservation on LanReceiverCoordinator {
     _nativeTransferCoordinator = null;
     await _relayCoordinator?.detachFacade();
   }
+}
+
+bool _hasAdvertisedDirectEndpoint(LanDiscoveredPeer peer) {
+  final port = peer.advertisedNativePort;
+  return port != null &&
+      port >= 1 &&
+      port <= 65535 &&
+      peer.ip.trim().isNotEmpty;
 }

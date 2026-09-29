@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../domain/lan_share_ports.dart';
+import '../../../services/lan_share/lan_pairing_reciprocal.dart';
 import '../../../services/lan_share/lan_share_models.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'package:app_ui/app_ui.dart';
@@ -48,7 +49,9 @@ class _LanPairingScreenState extends State<LanPairingScreen>
   late bool _isIncomingRequest;
   late String _targetDeviceId;
   late String _targetAlias;
+  LanPairingDirectionNotice? _directionNotice;
   StreamSubscription? _handshakeSubscription;
+  StreamSubscription<LanPairingDirectionNotice>? _directionSubscription;
   StreamSubscription<LanPairingRequest>? _pairingRequestSubscription;
 
   /// 订阅配对更新并启动本地 PIN 倒计时。
@@ -64,15 +67,20 @@ class _LanPairingScreenState extends State<LanPairingScreen>
     )..repeat();
     // Load or generate the local PIN
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _refreshLocalPin();
-
       final vm = context.read<LanShareViewModel>();
+      _directionNotice = vm.transferService.pairingDirectionFor(
+        _targetDeviceId,
+      );
+      _refreshLocalPin();
       _handshakeSubscription = vm.transferService.handshakeSuccessPeerStream
           .listen((peer) {
             if (peer.deviceId == _targetDeviceId && mounted) {
               _openChat();
             }
           });
+      _directionSubscription = vm.transferService.pairingDirectionStream.listen(
+        _applyDirectionNotice,
+      );
       _pairingRequestSubscription = vm.pairingRequestStream.listen(
         _handlePairingRequest,
       );
@@ -90,6 +98,22 @@ class _LanPairingScreenState extends State<LanPairingScreen>
     _targetDeviceId = widget.targetDeviceId;
     _targetAlias = widget.initialAlias;
     _isIncomingRequest = widget.isIncomingRequest;
+    if (oldWidget.targetDeviceId != widget.targetDeviceId) {
+      _directionNotice = context
+          .read<LanShareViewModel>()
+          .transferService
+          .pairingDirectionFor(widget.targetDeviceId);
+    }
+  }
+
+  /// 记录对端的 PIN 进度，并保留已经输入的 PIN。
+  void _applyDirectionNotice(LanPairingDirectionNotice notice) {
+    if (!mounted || notice.peerId != _targetDeviceId) return;
+    setState(() {
+      _directionNotice = notice.outboundVerified || notice.inboundVerified
+          ? notice
+          : null;
+    });
   }
 
   /// 将匹配的配对请求应用到当前页面状态。
@@ -154,6 +178,7 @@ class _LanPairingScreenState extends State<LanPairingScreen>
   void dispose() {
     _countdownTimer?.cancel();
     _handshakeSubscription?.cancel();
+    _directionSubscription?.cancel();
     _pairingRequestSubscription?.cancel();
     _radarController.dispose();
     _pinController.dispose();
@@ -193,14 +218,22 @@ class _LanPairingScreenState extends State<LanPairingScreen>
         isInitiator: !_isIncomingRequest,
       );
       if (!mounted) return;
-      if (result is NetworkSuccess<void>) {
+      if (result is NetworkSuccess<LanPairingHandshakeProgress> &&
+          result.data == LanPairingHandshakeProgress.paired) {
         _openChat();
-      } else {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = strings.lanSharePinMismatch;
-        });
+        return;
       }
+      setState(() {
+        _isLoading = false;
+        if (result is NetworkSuccess<LanPairingHandshakeProgress>) {
+          _errorMessage = null;
+          _directionNotice =
+              vm.transferService.pairingDirectionFor(_targetDeviceId) ??
+              _directionNotice;
+        } else {
+          _errorMessage = strings.lanSharePinMismatch;
+        }
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -303,6 +336,21 @@ class _LanPairingScreenState extends State<LanPairingScreen>
                     color: colors.onSurface.withValues(alpha: 0.6),
                   ),
                 ),
+                if (pairingDirectionHint(
+                      _directionNotice,
+                      english: strings.isEnglish,
+                    )
+                    case final hint?) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    hint,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colors.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 20),
 
                 // Local PIN display card

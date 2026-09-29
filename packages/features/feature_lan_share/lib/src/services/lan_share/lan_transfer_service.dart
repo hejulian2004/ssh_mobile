@@ -12,6 +12,7 @@ import 'package:flutter/foundation.dart';
 import 'lan_security_service.dart';
 import 'lan_network_models.dart';
 import 'lan_pairing_crypto.dart';
+import 'lan_pairing_reciprocal.dart';
 import 'lan_share_models.dart';
 import 'lan_storage_service.dart';
 import 'lan_transfer_protocol.dart';
@@ -60,6 +61,8 @@ class LanTransferService {
   final Map<String, Future<NetworkResult<void>>> _webSocketConnectAttempts = {};
   final Set<Future<void>> _requestOperations = {};
   final Map<String, _PendingPairingHandshake> _pendingPairingHandshakes = {};
+  final LanReciprocalPairingGate _reciprocalPairing =
+      LanReciprocalPairingGate();
   final _connectionStateController =
       StreamController<LanConnectionStateChanged>.broadcast();
 
@@ -77,6 +80,10 @@ class LanTransferService {
       StreamController<LanDiscoveredPeer>.broadcast();
   final _pairingInviteController =
       StreamController<LanPairingRequest>.broadcast();
+  final _observedPeerController =
+      StreamController<LanDiscoveredPeer>.broadcast();
+  final _pairingDirectionController =
+      StreamController<LanPairingDirectionNotice>.broadcast();
 
   /// 使用安全与存储依赖创建 LAN 传输服务。
   LanTransferService({
@@ -115,6 +122,23 @@ class LanTransferService {
   /// 发布收到的配对邀请。
   Stream<LanPairingRequest> get pairingInviteStream =>
       _pairingInviteController.stream;
+
+  /// 发布握手证明观察到的对端，供发现表刷新 lastSeen。
+  Stream<LanDiscoveredPeer> get observedPeerStream =>
+      _observedPeerController.stream;
+
+  /// 发布某一方向 PIN 已验证、但信任尚未提交的进度。
+  Stream<LanPairingDirectionNotice> get pairingDirectionStream =>
+      _pairingDirectionController.stream;
+
+  /// 返回 [peerId] 当前未过期的双向 PIN 进度。
+  LanPairingDirectionNotice? pairingDirectionFor(String peerId) {
+    return _reciprocalPairing.noticeFor(peerId);
+  }
+
+  /// 是否仍有未过期的单向配对证明，需要保活发现记录。
+  bool hasPendingPairing(String peerId) =>
+      _reciprocalPairing.hasPending(peerId);
 
   /// 返回已绑定监听端口；绑定前返回默认端口。
   int get activePort => _server?.port ?? defaultHttpPort;
@@ -325,6 +349,7 @@ class LanTransferService {
             'code': _httpErrorCode(error.statusCode).wireValue,
             'message': error.message,
             'operation': _operationForPath(path).wireName,
+            if (error.discardPairingProofs) 'discardPairingProofs': true,
             if (request.headers.value('x-device-id') case final peerId?
                 when peerId.isNotEmpty)
               'peer_id': peerId,
@@ -948,6 +973,67 @@ class LanTransferService {
     _emit(_messageProgressController, message);
   }
 
+  /// 丢弃 [peerId] 的双向证明，并通知界面清除等待提示。
+  void _discardReciprocalPairing(String peerId) {
+    _reciprocalPairing.discard(peerId);
+    _emit(
+      _pairingDirectionController,
+      LanPairingDirectionNotice(
+        peerId: peerId,
+        outboundVerified: false,
+        inboundVerified: false,
+      ),
+    );
+  }
+
+  LanDiscoveredPeer _peerFromPairingProof(LanPairingDirectionProof proof) {
+    return LanDiscoveredPeer(
+      deviceId: proof.peerDeviceId,
+      alias: proof.alias,
+      ip: proof.ip,
+      controlPort: proof.controlPort,
+      deviceType: _guessDeviceType(proof.os),
+      os: proof.os,
+      lastSeen: DateTime.now(),
+    );
+  }
+
+  void _emitObservedPeer(LanPairingDirectionProof proof) {
+    _emit(_observedPeerController, _peerFromPairingProof(proof));
+  }
+
+  /// Persists trust only for a committed reciprocal update.
+  ///
+  /// Waiting leaves the trust store unchanged. The observed peer is emitted
+  /// before handshake success so discovery is registered first.
+  Future<LanPairingHandshakeProgress?> _applyReciprocalUpdate({
+    required LanReciprocalPairingUpdate update,
+    required LanPairingDirectionProof observed,
+  }) async {
+    _emit(_pairingDirectionController, update.notice);
+    switch (update.decision) {
+      case LanReciprocalPairingDecision.rejected:
+        return null;
+      case LanReciprocalPairingDecision.waiting:
+        _emitObservedPeer(observed);
+        return LanPairingHandshakeProgress.waitingForPeer;
+      case LanReciprocalPairingDecision.committed:
+        final proof = update.commitProof;
+        if (proof == null) return null;
+        await securityService.savePeerTrustRecord(
+          deviceId: proof.peerDeviceId,
+          certificateFingerprint: proof.certificateFingerprint,
+          inboundAccessToken: proof.inboundAccessToken,
+          outboundAccessToken: proof.outboundAccessToken,
+          x25519PublicKey: proof.x25519PublicKey,
+          networkIdentityPublicKey: proof.networkIdentityPublicKey,
+        );
+        _emitObservedPeer(proof);
+        _emit(_handshakeSuccessController, _peerFromPairingProof(proof));
+        return LanPairingHandshakeProgress.paired;
+    }
+  }
+
   /// 只在服务未进入关闭阶段时发布事件。
   void _emit<T>(StreamController<T> controller, T event) {
     if (_closing || _closed || controller.isClosed) return;
@@ -975,6 +1061,7 @@ class LanTransferService {
     _webSocketConnectAttempts.clear();
     _requestOperations.clear();
     _pendingPairingHandshakes.clear();
+    _reciprocalPairing.clear();
     await Future.wait([
       _incomingMessageController.close(),
       _messageProgressController.close(),
@@ -982,6 +1069,8 @@ class LanTransferService {
       _handshakeSuccessController.close(),
       _announcedPeerController.close(),
       _pairingInviteController.close(),
+      _observedPeerController.close(),
+      _pairingDirectionController.close(),
       _connectionStateController.close(),
     ]);
     _closed = true;

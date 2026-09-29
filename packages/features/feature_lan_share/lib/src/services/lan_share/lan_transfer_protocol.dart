@@ -16,10 +16,18 @@ abstract final class LanControlProtocol {
 /// LAN HTTP 边界异常，供服务端将安全诊断转换为统一 JSON 响应。
 class LanHttpException implements Exception {
   /// 使用 HTTP 状态码和安全诊断创建异常。
-  const LanHttpException(this.statusCode, this.message);
+  ///
+  /// [discardPairingProofs] 只在双方都应该丢掉未完成证明时为真。
+  /// 过期的 confirm 不是这种情况：对端仍留着另一方向的证明。
+  const LanHttpException(
+    this.statusCode,
+    this.message, {
+    this.discardPairingProofs = false,
+  });
 
   final int statusCode;
   final String message;
+  final bool discardPairingProofs;
 }
 
 /// 校验有界 LAN 控制请求。

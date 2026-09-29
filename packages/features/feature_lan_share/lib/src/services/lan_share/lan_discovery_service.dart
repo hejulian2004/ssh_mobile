@@ -154,6 +154,10 @@ class LanDiscoveryService {
   void registerDiscoveredPeer(LanDiscoveredPeer peer) =>
       LanDiscoveryPeerOperations(this)._registerDiscoveredPeer(peer);
 
+  /// Refreshes lastSeen for an existing discovery row. Unknown peers are not created.
+  bool touchDiscoveredPeer(String deviceId, {DateTime? now}) =>
+      LanDiscoveryPeerOperations(this)._touchDiscoveredPeer(deviceId, now: now);
+
   /// Removes a discovery-only peer observation by device ID.
   void removeDiscoveredPeer(String deviceId) =>
       LanDiscoveryPeerOperations(this)._removeDiscoveredPeer(deviceId);

@@ -31,6 +31,11 @@ export 'src/services/lan_share/lan_local_address_selection.dart';
 export 'src/services/lan_share/lan_web_share_url.dart';
 export 'src/services/lan_share/lan_peer_trust.dart';
 export 'src/services/lan_share/lan_pairing_crypto.dart';
+export 'src/services/lan_share/lan_pairing_reciprocal.dart'
+    show
+        LanPairingHandshakeProgress,
+        LanPairingDirectionNotice,
+        pairingDirectionHint;
 export 'src/services/lan_share/lan_multicast_lock.dart';
 export 'src/services/lan_share/lan_discovery_service.dart';
 export 'src/services/lan_share/lan_security_service.dart';

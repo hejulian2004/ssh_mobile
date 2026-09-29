@@ -22,8 +22,9 @@ even when AppRuntime creates the facade.
 
 ## Screen-share flow
 
-The Full App exposes screen sharing as a secondary action on trusted online LAN
-peer cards and as a global incoming request host. Outgoing flow selects an
+The Full App exposes screen sharing as a secondary action in the device chat
+header for a trusted online LAN peer, and as a global incoming request host.
+Outgoing flow selects an
 App-issued route-scoped source token, creates a valid 32-character lowercase
 hex Realtime ID, waits only for Negotiating identity, then lets the Feature
 send REQUEST. Incoming Dart metadata is published only after native pairs an

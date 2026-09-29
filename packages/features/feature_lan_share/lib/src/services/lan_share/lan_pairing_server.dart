@@ -359,10 +359,7 @@ extension _LanPairingServerOperations on LanTransferService {
       pending.sessionSecrets,
       clientProof,
     )) {
-      throw const LanHttpException(
-        HttpStatus.unauthorized,
-        'LAN pairing authentication failed.',
-      );
+      _failPairingAuthentication(senderDeviceId);
     }
 
     final credentialAssociatedData = LanPairingCrypto.credentialAssociatedData(
@@ -384,20 +381,14 @@ extension _LanPairingServerOperations on LanTransferService {
       }
       senderInboundAccessToken = token;
     } catch (_) {
-      throw const LanHttpException(
-        HttpStatus.unauthorized,
-        'LAN pairing authentication failed.',
-      );
+      _failPairingAuthentication(senderDeviceId);
     }
 
     if (!LanPairingCrypto.verifyAccessTokenHash(
       senderInboundAccessToken,
       pending.senderInboundAccessTokenHash,
     )) {
-      throw const LanHttpException(
-        HttpStatus.unauthorized,
-        'LAN pairing authentication failed.',
-      );
+      _failPairingAuthentication(senderDeviceId);
     }
 
     _protocolGuard.checkPairingNonce(senderDeviceId, nonce);
@@ -431,34 +422,43 @@ extension _LanPairingServerOperations on LanTransferService {
       associatedData: associatedData,
     );
 
-    // Persist only after every authenticated input and the response credential
-    // have been prepared successfully.  A rejected/failed handshake cannot
-    // leave a half-paired token or key behind.
-    try {
-      await securityService.savePeerTrustRecord(
-        deviceId: senderDeviceId,
-        certificateFingerprint: pending.senderCertFingerprint,
-        inboundAccessToken: accessToken,
-        outboundAccessToken: senderInboundAccessToken,
-        x25519PublicKey: pending.senderX25519PublicKey,
-        networkIdentityPublicKey: pending.senderNetworkIdentityPublicKey,
-      );
-    } on StateError {
-      throw const LanHttpException(
-        HttpStatus.conflict,
-        'The device certificate changed. Unpair the device before re-pairing.',
-      );
-    }
-    final peer = LanDiscoveredPeer(
-      deviceId: senderDeviceId,
+    // One verified PIN is held in memory. Trust is written only when the
+    // opposite direction proves the same certificate and public keys.
+    final proof = LanPairingDirectionProof(
+      peerDeviceId: senderDeviceId,
+      initiatorDeviceId: senderDeviceId,
+      certificateFingerprint: pending.senderCertFingerprint,
+      x25519PublicKey: pending.senderX25519PublicKey,
+      networkIdentityPublicKey: pending.senderNetworkIdentityPublicKey,
+      inboundAccessToken: accessToken,
+      outboundAccessToken: senderInboundAccessToken,
       alias: pending.alias,
       ip: remoteAddress,
       controlPort: pending.port,
-      deviceType: _guessDeviceType(pending.os),
       os: pending.os,
-      lastSeen: DateTime.now(),
+      notedAt: DateTime.now(),
     );
-    _emit(_handshakeSuccessController, peer);
+    final update = _reciprocalPairing.noteInbound(proof);
+    try {
+      final progress = await _applyReciprocalUpdate(
+        update: update,
+        observed: proof,
+      );
+      if (progress == null) {
+        throw const LanHttpException(
+          HttpStatus.unauthorized,
+          'LAN pairing authentication failed.',
+          discardPairingProofs: true,
+        );
+      }
+    } on StateError {
+      _discardReciprocalPairing(senderDeviceId);
+      throw const LanHttpException(
+        HttpStatus.conflict,
+        'The device certificate changed. Unpair the device before re-pairing.',
+        discardPairingProofs: true,
+      );
+    }
 
     request.response.statusCode = HttpStatus.ok;
     request.response.headers.contentType = ContentType.json;
@@ -470,6 +470,16 @@ extension _LanPairingServerOperations on LanTransferService {
       }),
     );
     await request.response.close();
+  }
+
+  /// 确认阶段的 PIN/身份失败会清掉该对端的待提交证明，再返回 401。
+  Never _failPairingAuthentication(String peerId) {
+    _discardReciprocalPairing(peerId);
+    throw const LanHttpException(
+      HttpStatus.unauthorized,
+      'LAN pairing authentication failed.',
+      discardPairingProofs: true,
+    );
   }
 
   /// 从配对 JSON 读取并清理一个字符串字段。
