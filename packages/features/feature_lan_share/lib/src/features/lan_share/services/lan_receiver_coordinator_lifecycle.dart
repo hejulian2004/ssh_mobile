@@ -110,6 +110,7 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
           LanDiscoveryService(
             currentDeviceId: deviceId,
             currentDeviceAlias: deviceAlias,
+            localAddressSelectionPort: localAddressSelectionPort,
           );
       // Network identity belongs to App Scope and is needed by LAN security
       // even when this Feature's listener/runtime activation is disabled.

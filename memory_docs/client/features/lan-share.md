@@ -1,4 +1,4 @@
-> Last updated: 2026-08-30
+> Last updated: 2026-09-23
 
 # LAN Share Feature Memory
 
@@ -26,6 +26,9 @@ explicit/configured, not an import or App-start side effect.
   request navigation and never establish trust. Pairing is reciprocal and
   role-independent: both PIN directions verify, simultaneous invitations merge,
   and role changes preserve typed input.
+- `LanPairingNavigationHost` is the sole path that opens root pairing routes.
+  Pairing-stream and route-completion callbacks enter one post-frame scheduler;
+  navigation inside an active pairing/chat flow remains owned by those pages.
 - LAN Control V2 is breaking-only: no old schema/storage migration, V1/V2
   dual-stack, deprecated wrapper, or HTTP binary fallback. A non-current schema
   is cleared and requires pairing again. Trust, Discovery, Reachability, Route,
@@ -51,6 +54,28 @@ explicit/configured, not an import or App-start side effect.
   metadata.
 
 ## Transfer and lifecycle invariants
+
+- WebShare QR Automatic uses the Feature-defined local IPv4 selection Port, never
+  interface enumeration order. Candidates contain address, interface name, and
+  transient `NetworkInterface.index`; indexes are not persisted. An explicit
+  override is valid only while present in the current eligible candidate set;
+  stale overrides fail closed without falling back to Automatic.
+- The App composition root injects the selector through `LanShareModule` and
+  `LanReceiverCoordinator`. Windows route/interface API and FFI stay in the
+  App-owned Dart adapter; every successfully returned route table is released
+  exactly once with `FreeMibTable`, and native failures become Feature-local
+  unavailable state. Windows groups IPv4 default-route rows by interface and
+  compares route metric + interface metric; duplicate lowest routes on one
+  interface are equivalent, while cross-interface ties or multiple candidates
+  on the selected interface require manual selection. With no eligible route,
+  only a sole candidate is a valid fallback. A route-query failure is unavailable,
+  not evidence that no default route exists. Other platforms auto-select only a
+  sole candidate; sorted order is for display only.
+- A QR URL never advertises loopback. If address resolution fails or an override
+  becomes stale, stop only the WebShare HTTPS session and clear its QR URL; keep
+  the separate LAN Control listener running. Preserve all five QR fields:
+  `deviceId`, `lanPort`, `nativePort`, `access`, and `certFingerprint`. WebShare
+  HTTPS, LAN Control HTTPS, and native transfer ports remain distinct.
 
 - Native/WebShare metadata is consumed once before the first async body read;
   pending+active leases share one capacity budget, replay/reuse cannot create an

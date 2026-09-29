@@ -45,6 +45,8 @@ final class LanReceiverCoordinator extends ChangeNotifier {
     required this.bootstrapClient,
     required this.historyRepository,
     required this.networkRuntime,
+    this.localAddressSelectionPort =
+        const LanShareSingleCandidateLocalAddressSelection(),
     LanPeerTrustStore? peerTrustStore,
     this.initializeNetwork = true,
     this.transferServiceOverride,
@@ -76,6 +78,9 @@ final class LanReceiverCoordinator extends ChangeNotifier {
 
   /// App Scope 唯一网络运行时，用于按需准备 native runtime Capability。
   final NetworkRuntime networkRuntime;
+
+  /// App-selected route-aware Automatic local IPv4 selector.
+  final LanShareLocalAddressSelectionPort localAddressSelectionPort;
 
   /// Module-owned atomic trust store. The Coordinator only consumes it and
   /// never treats discovery/reachability as trust.

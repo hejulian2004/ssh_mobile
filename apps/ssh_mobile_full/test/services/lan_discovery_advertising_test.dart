@@ -14,6 +14,8 @@ class _RecordingLanDiscoveryService extends LanDiscoveryService {
     : super(
         currentDeviceId: 'local-device',
         currentDeviceAlias: 'Original alias',
+        localAddressSelectionPort:
+            const LanShareSingleCandidateLocalAddressSelection(),
       );
 
   @override
@@ -56,6 +58,8 @@ class _ControllableLanDiscoveryService extends LanDiscoveryService {
     : super(
         currentDeviceId: 'local-device',
         currentDeviceAlias: 'Local device',
+        localAddressSelectionPort:
+            const LanShareSingleCandidateLocalAddressSelection(),
         multicastLock: multicastLock,
       );
 

@@ -749,6 +749,14 @@ class AppStrings {
   String get lanShareConnect => _en ? 'Connect' : '连接';
   String get lanShareScanQrCode => _en ? 'Scan QR Code' : '扫码连接';
   String get lanShareInvalidAddress => _en ? 'Invalid IP address' : '无效的 IP 地址';
+  String get lanShareAddressAmbiguous => _en
+      ? 'Multiple LAN addresses are available. Select one manually.'
+      : '检测到多个局域网地址，请手动选择。';
+  String get lanShareAddressUnavailable =>
+      _en ? 'No usable LAN address is currently available.' : '当前没有可用的局域网地址。';
+  String get lanShareAddressOverrideStale => _en
+      ? 'The selected IP is no longer assigned to this device.'
+      : '所选 IP 已不属于本机网络接口，请重新选择。';
   String get lanShareCameraPermissionDenied =>
       _en ? 'Camera permission denied' : '无法访问相机，请授予相机权限';
   String get lanShareDeviceList => _en ? 'Devices' : '设备列表';

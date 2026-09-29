@@ -126,6 +126,8 @@ void main() {
     final service = LanDiscoveryService(
       currentDeviceId: 'local',
       currentDeviceAlias: 'Local',
+      localAddressSelectionPort:
+          const LanShareSingleCandidateLocalAddressSelection(),
       multicastLock: _FakeMulticastLock(),
     );
     addTearDown(service.close);

@@ -147,9 +147,15 @@ void main() {
       expect(tester.takeException(), isNull);
 
       coordinator.publishPairingRequest(_request('session-1'));
+      // The stream callback schedules navigation after the current frame.
+      // Pump bounded frames without settling the pairing screen's radar animation.
+      for (var frame = 0; frame < 5; frame++) {
+        if (navigatorKey.currentState!.canPop()) break;
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      // The scheduler pushes after a frame; build the newly-added route.
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 400));
 
       expect(tester.takeException(), isNull);
       expect(navigatorKey.currentState!.canPop(), isTrue);

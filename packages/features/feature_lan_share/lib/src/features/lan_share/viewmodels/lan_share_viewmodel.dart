@@ -963,10 +963,27 @@ class LanShareViewModel extends ChangeNotifier {
   /// 返回可选的 WebShare IP 覆盖值。
   String? get customIp => discoveryService.customIp;
 
-  /// 设置可选的 WebShare IP 覆盖值。
-  void setCustomIp(String? ip) {
-    discoveryService.setCustomIp(ip);
+  /// 当前 WebShare 本地地址选择状态，供 Feature UI 显示本地化原因。
+  LanShareLocalAddressSelectionResult? get webShareAddressSelectionResult =>
+      discoveryService.webShareAddressSelectionResult;
+
+  /// 当前地址选择失败的本地化提示；成功或尚未解析时为 null。
+  String? get webShareAddressSelectionMessage =>
+      switch (webShareAddressSelectionResult) {
+        LanShareLocalAddressAmbiguous() =>
+          appSettings.strings.lanShareAddressAmbiguous,
+        LanShareLocalAddressUnavailable() =>
+          appSettings.strings.lanShareAddressUnavailable,
+        LanShareLocalAddressStaleOverride() =>
+          appSettings.strings.lanShareAddressOverrideStale,
+        _ => null,
+      };
+
+  /// Validates an address override and applies it to an active WebShare URL.
+  Future<NetworkResult<void>> updateWebShareAddressOverride(String? ip) async {
+    final result = await discoveryService.updateWebShareAddressOverride(ip);
     if (!_disposed) notifyListeners();
+    return result;
   }
 
   /// 将变更后的应用设置应用到活动发现服务。

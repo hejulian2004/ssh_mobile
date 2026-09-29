@@ -241,6 +241,7 @@ void main() {
 
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 400));
 
       final screen = tester.widget<LanPairingScreen>(
         find.byType(LanPairingScreen),
@@ -254,6 +255,206 @@ void main() {
       await viewModel.close();
     },
   );
+
+  testWidgets('manual dialog pop and pairing request share one turn', (
+    tester,
+  ) async {
+    FlutterSecureStorage.setMockInitialValues({});
+    final viewModel = _FakeLanShareViewModel();
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final appSettings = AppSettings();
+    final settings = AppLanShareSettingsAdapter(appSettings);
+    addTearDown(() async {
+      settings.dispose();
+      appSettings.dispose();
+      await viewModel.close();
+    });
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ListenableProvider<LanShareViewModel>.value(value: viewModel),
+          ListenableProvider<LanShareSettingsPort>.value(value: settings),
+        ],
+        child: MaterialApp(
+          navigatorKey: navigatorKey,
+          builder: (context, child) => LanPairingNavigationHost(
+            navigatorKey: navigatorKey,
+            child: child ?? const SizedBox.shrink(),
+          ),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                key: const ValueKey('open-manual-dialog'),
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (dialogContext) => AlertDialog(
+                    content: TextButton(
+                      key: const ValueKey('manual-connect'),
+                      onPressed: () {
+                        Navigator.pop(dialogContext);
+                        viewModel.emit(
+                          _request(
+                            deviceId: 'peer-manual',
+                            sessionId: 'manual-session',
+                            isIncoming: true,
+                          ),
+                        );
+                      },
+                      child: const Text('Connect'),
+                    ),
+                  ),
+                ),
+                child: const Text('Manual'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('open-manual-dialog')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('manual-connect')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(LanPairingScreen, skipOffstage: false), findsOneWidget);
+    expect(find.byType(LanPairingScreen), findsOneWidget);
+    expect(
+      tester.widget<LanPairingScreen>(find.byType(LanPairingScreen)).sessionId,
+      'manual-session',
+    );
+  });
+
+  testWidgets('scanner route pop and pairing request share one turn', (
+    tester,
+  ) async {
+    FlutterSecureStorage.setMockInitialValues({});
+    final viewModel = _FakeLanShareViewModel();
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final appSettings = AppSettings();
+    final settings = AppLanShareSettingsAdapter(appSettings);
+    addTearDown(() async {
+      settings.dispose();
+      appSettings.dispose();
+      await viewModel.close();
+    });
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ListenableProvider<LanShareViewModel>.value(value: viewModel),
+          ListenableProvider<LanShareSettingsPort>.value(value: settings),
+        ],
+        child: MaterialApp(
+          navigatorKey: navigatorKey,
+          builder: (context, child) => LanPairingNavigationHost(
+            navigatorKey: navigatorKey,
+            child: child ?? const SizedBox.shrink(),
+          ),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                key: const ValueKey('open-scanner'),
+                onPressed: () => Navigator.push<void>(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const LanQrScannerScreen(),
+                  ),
+                ),
+                child: const Text('Scan'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('open-scanner')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(LanQrScannerScreen), findsOneWidget);
+    navigatorKey.currentState!.pop<void>();
+    viewModel.emit(
+      _request(deviceId: 'peer-qr', sessionId: 'qr-session', isIncoming: true),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(LanPairingScreen, skipOffstage: false), findsOneWidget);
+    expect(find.byType(LanPairingScreen), findsOneWidget);
+    expect(
+      tester.widget<LanPairingScreen>(find.byType(LanPairingScreen)).sessionId,
+      'qr-session',
+    );
+  });
+
+  testWidgets('mergeable requests emitted in one turn open one route', (
+    tester,
+  ) async {
+    FlutterSecureStorage.setMockInitialValues({});
+    final viewModel = _FakeLanShareViewModel();
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final appSettings = AppSettings();
+    final settings = AppLanShareSettingsAdapter(appSettings);
+    addTearDown(() async {
+      settings.dispose();
+      appSettings.dispose();
+      await viewModel.close();
+    });
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ListenableProvider<LanShareViewModel>.value(value: viewModel),
+          ListenableProvider<LanShareSettingsPort>.value(value: settings),
+        ],
+        child: MaterialApp(
+          navigatorKey: navigatorKey,
+          builder: (context, child) => LanPairingNavigationHost(
+            navigatorKey: navigatorKey,
+            child: child ?? const SizedBox.shrink(),
+          ),
+          home: const Scaffold(body: Text('Home')),
+        ),
+      ),
+    );
+
+    viewModel.emit(
+      _request(
+        deviceId: 'peer-a',
+        sessionId: 'outgoing-session',
+        isIncoming: false,
+      ),
+    );
+    viewModel.emit(
+      _request(
+        deviceId: 'peer-a',
+        sessionId: 'incoming-session',
+        isIncoming: true,
+        alias: 'Merged peer',
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(LanPairingScreen, skipOffstage: false), findsOneWidget);
+    expect(find.byType(LanPairingScreen), findsOneWidget);
+    final screen = tester.widget<LanPairingScreen>(
+      find.byType(LanPairingScreen),
+    );
+    expect(screen.sessionId, 'outgoing-session');
+    expect(screen.isIncomingRequest, isTrue);
+    expect(screen.initialAlias, 'Merged peer');
+  });
 
   testWidgets('reciprocal invitation preserves a PIN already being typed', (
     tester,
@@ -294,6 +495,7 @@ void main() {
     );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 400));
     await tester.enterText(find.byType(TextField), '123456');
 
     viewModel.emit(

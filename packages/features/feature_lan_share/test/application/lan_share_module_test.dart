@@ -18,6 +18,7 @@ void main() {
       final database = LanShareDatabase.forTesting(NativeDatabase.memory());
       final networkAccess = _FakeNetworkAccessPort();
       final networkRuntime = _FakeNetworkRuntime();
+      const addressSelector = LanShareSingleCandidateLocalAddressSelection();
       final module = LanShareModule(
         receiverEnabled: false,
         databaseFactory: () => database,
@@ -30,6 +31,7 @@ void main() {
           LanShareDataProtectionPort: _FakeDataProtection(),
           LanShareNetworkIdentityPort: _FakeIdentity(),
           LanShareNetworkAccessPort: networkAccess,
+          LanShareLocalAddressSelectionPort: addressSelector,
           BootstrapClient: _FakeBootstrapClient(),
           NetworkRuntime: networkRuntime,
         }),
@@ -37,6 +39,10 @@ void main() {
       await module.initialize();
       expect(module.state, ModuleState.initialized);
       expect(module.database, same(database));
+      expect(
+        module.coordinator.localAddressSelectionPort,
+        same(addressSelector),
+      );
 
       await module.activate();
       expect(module.state, ModuleState.active);
