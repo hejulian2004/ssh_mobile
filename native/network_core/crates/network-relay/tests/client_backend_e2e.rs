@@ -9,10 +9,15 @@
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use ed25519_dalek::{Signer, SigningKey};
+use network_protocol::{
+    ScreenShareConsentDecision, ScreenShareConsentPurpose, ScreenShareConsentV2,
+    ScreenShareMediaKind,
+};
 use network_relay::v2::{
     CandidateBundle, ControlEvent, DataEvent, DiscoverySnapshot, RealtimeSignalKind,
     RelayControlClient, RelayDataClient, ResolveStatus, RuntimeEpoch, TransportCapability,
 };
+use prost::Message;
 use rand::RngCore;
 use serde_json::{json, Value};
 use std::io;
@@ -198,6 +203,45 @@ async fn real_clients_complete_control_and_reservation_data_flow() {
     let signal = next_realtime_signal(&mut events_b).await;
     assert_eq!(signal.realtime_id, "e2e-realtime");
     assert_eq!(signal.payload, signal_payload);
+
+    let issued_at_ms = unix_time_ms() as u64;
+    let screen_share_consent = ScreenShareConsentV2 {
+        schema_version: 2,
+        operation_id: format!("e2e-screen-share-{}", unique_suffix()),
+        realtime_id: "e2e-screen-share".into(),
+        issued_at_ms,
+        expires_at_ms: issued_at_ms + 120_000,
+        decision: ScreenShareConsentDecision::Request as i32,
+        sender_peer_id: device_a.device_id.clone(),
+        purpose: ScreenShareConsentPurpose::ScreenShare as i32,
+        media: ScreenShareMediaKind::ScreenVideo as i32,
+        requires_acceptance: true,
+        action_revision: 1,
+        shared_session_instance_id: format!("e2e-screen-instance-{}", unique_suffix()),
+    };
+    let screen_share_payload = screen_share_consent.encode_to_vec();
+    control_a
+        .signal_webrtc_wire_kind(
+            "e2e-screen-share",
+            &device_b.device_id,
+            6,
+            1,
+            &screen_share_payload,
+        )
+        .await
+        .expect("screen-share consent forwarding");
+    let screen_share_signal = next_realtime_signal(&mut events_b).await;
+    assert_eq!(screen_share_signal.realtime_id, "e2e-screen-share");
+    assert_eq!(screen_share_signal.target_device_id, device_b.device_id);
+    assert_eq!(screen_share_signal.kind, 6);
+    assert_eq!(screen_share_signal.revision, 1);
+    assert_eq!(screen_share_signal.source_device_id, device_a.device_id);
+    assert_eq!(screen_share_signal.payload, screen_share_payload);
+    assert_eq!(
+        ScreenShareConsentV2::decode(screen_share_signal.payload.as_slice())
+            .expect("decode forwarded screen-share consent"),
+        screen_share_consent
+    );
 
     let reservation = control_a
         .reserve_relay(&attempt_id, &device_b.device_id, 30)
