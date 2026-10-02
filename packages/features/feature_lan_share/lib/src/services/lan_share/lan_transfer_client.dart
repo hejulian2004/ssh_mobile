@@ -38,6 +38,12 @@ class _AcceptedPairingOffer {
   });
 }
 
+final class _HandshakeConfirmStarted implements Exception {
+  const _HandshakeConfirmStarted(this.cause);
+
+  final Object cause;
+}
+
 bool _constantTimeBytesEqual(List<int> left, List<int> right) {
   if (left.length != right.length) return false;
   var difference = 0;
@@ -212,7 +218,10 @@ extension LanTransferClientApi on LanTransferService {
   }
 
   /// 发送 V2 握手请求，并校验配对 PIN 响应。
-  Future<NetworkResult<void>> sendHandshake(
+  ///
+  /// 单方向成功返回 [LanPairingHandshakeProgress.waitingForPeer]，
+  /// 双方证明指向同一对端后才返回 [LanPairingHandshakeProgress.paired]。
+  Future<NetworkResult<LanPairingHandshakeProgress>> sendHandshake(
     LanDiscoveredPeer device,
     String pin,
     String localAlias, {
@@ -228,6 +237,15 @@ extension LanTransferClientApi on LanTransferService {
           isInitiator: isInitiator,
         );
         return result;
+      } on _HandshakeConfirmStarted catch (started) {
+        // The peer may already have stored this attempt's tokens.
+        return NetworkFailure(
+          lanNetworkError(
+            started.cause,
+            operation: NetworkOperation.sendHandshake,
+            peerId: device.deviceId,
+          ),
+        );
       } catch (e) {
         lastError = lanNetworkError(
           e,
@@ -255,7 +273,7 @@ extension LanTransferClientApi on LanTransferService {
   }
 
   /// 执行一次 V2 配对握手尝试。
-  Future<NetworkResult<void>> _sendHandshakeAttempt(
+  Future<NetworkResult<LanPairingHandshakeProgress>> _sendHandshakeAttempt(
     LanDiscoveredPeer device,
     String pin,
     String localAlias, {
@@ -444,6 +462,7 @@ extension LanTransferClientApi on LanTransferService {
       peerDeviceId: device.deviceId,
       expectedFingerprint: acceptedOffer.certFingerprint,
     );
+    var confirmSent = false;
     try {
       final request = await confirmClient
           .postUrl(url)
@@ -477,11 +496,17 @@ extension LanTransferClientApi on LanTransferService {
           ),
         }),
       );
+      confirmSent = true;
       final response = await request.close().timeout(
         const Duration(seconds: 4),
       );
       final json = await readBoundedJsonResponse(response);
       if (response.statusCode != HttpStatus.ok) {
+        // Only an explicit proof failure drops the opposite direction.
+        // A stale confirm leaves that proof in place on the peer.
+        if (json['discardPairingProofs'] == true) {
+          _discardReciprocalPairing(device.deviceId);
+        }
         throw lanHttpException(
           statusCode: response.statusCode,
           body: json,
@@ -531,18 +556,54 @@ extension LanTransferClientApi on LanTransferService {
           )) {
         throw const FormatException('LAN pairing identity changed');
       }
-      // The only durable write in the handshake is one complete V2 trust
-      // record.  In particular, no token or key is persisted before the
-      // remote proof, credential binding, and static identities all pass.
-      await securityService.savePeerTrustRecord(
-        deviceId: device.deviceId,
+      // Tokens stay in memory until the opposite PIN direction verifies the
+      // same peer. Network timeouts above do not reach this write.
+      final proof = LanPairingDirectionProof(
+        peerDeviceId: device.deviceId,
+        initiatorDeviceId: currentDeviceId,
         certificateFingerprint: acceptedOffer.certFingerprint,
-        inboundAccessToken: localInboundAccessToken,
-        outboundAccessToken: validatedCredential.accessToken,
         x25519PublicKey: validatedCredential.x25519PublicKey,
         networkIdentityPublicKey: validatedCredential.networkIdentityPublicKey,
+        inboundAccessToken: localInboundAccessToken,
+        outboundAccessToken: validatedCredential.accessToken,
+        alias: device.alias,
+        ip: device.ip,
+        controlPort: device.controlPort,
+        os: device.os,
+        notedAt: DateTime.now(),
       );
-      return const NetworkSuccess<void>(null);
+      final update = _reciprocalPairing.noteOutbound(proof);
+      try {
+        final progress = await _applyReciprocalUpdate(
+          update: update,
+          observed: proof,
+        );
+        if (progress == null) {
+          return NetworkFailure(
+            NetworkError(
+              code: NetworkErrorCode.authenticationFailed,
+              message: 'LAN pairing authentication failed.',
+              operation: NetworkOperation.sendHandshake,
+              peerId: device.deviceId,
+            ),
+          );
+        }
+        return NetworkSuccess(progress);
+      } on StateError {
+        _discardReciprocalPairing(device.deviceId);
+        return NetworkFailure(
+          NetworkError(
+            code: NetworkErrorCode.identityConflict,
+            message:
+                'The device certificate changed. Unpair the device before re-pairing.',
+            operation: NetworkOperation.sendHandshake,
+            peerId: device.deviceId,
+          ),
+        );
+      }
+    } catch (error) {
+      if (confirmSent) throw _HandshakeConfirmStarted(error);
+      rethrow;
     } finally {
       confirmClient.close();
     }

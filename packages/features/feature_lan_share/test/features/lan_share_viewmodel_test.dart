@@ -440,6 +440,82 @@ void main() {
       expect(await historyDao.getAllRecords(), isEmpty);
     },
   );
+
+  test('pairing observation keeps the advertised native endpoint', () async {
+    final discovery = LanDiscoveryService(
+      currentDeviceId: 'test-device',
+      currentDeviceAlias: 'Test Device',
+      localAddressSelectionPort:
+          const LanShareSingleCandidateLocalAddressSelection(),
+    );
+    final transfer = FakeLanTransferService();
+    final settings = FakeLanShareSettings();
+    final viewModel = LanShareViewModel(
+      discoveryService: discovery,
+      securityService: FakeLanSecurityService(),
+      storageService: FakeLanStorageService(),
+      transferService: transfer,
+      historyDao: FakeLanHistoryDao(),
+      appSettings: settings,
+      dataProtection: FakeLanShareDataProtection(),
+      logger: FakeLanShareLogger(),
+      ownsRuntime: false,
+    );
+    addTearDown(() async {
+      viewModel.dispose();
+      settings.dispose();
+      await transfer.close();
+      await discovery.close();
+    });
+
+    final seen = DateTime.utc(2026, 1, 1);
+    discovery.registerDiscoveredPeer(
+      LanDiscoveredPeer(
+        deviceId: 'peer-1',
+        alias: 'Windows PC',
+        ip: '192.168.1.20',
+        controlPort: 53317,
+        advertisedNativePort: 43123,
+        os: 'windows',
+        lastSeen: seen,
+      ),
+    );
+    await viewModel.initialize();
+
+    transfer.emitObservedPeer(
+      LanDiscoveredPeer(
+        deviceId: 'peer-1',
+        alias: 'Windows PC',
+        ip: '10.0.0.8',
+        controlPort: 53317,
+        os: 'windows',
+        lastSeen: seen,
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    final peer = discovery.currentDiscoveredPeers.single;
+    expect(peer.ip, '192.168.1.20');
+    expect(peer.advertisedNativePort, 43123);
+    expect(peer.lastSeen.isAfter(seen), isTrue);
+
+    transfer.emitObservedPeer(
+      LanDiscoveredPeer(
+        deviceId: 'peer-2',
+        alias: 'New Phone',
+        ip: '192.168.1.30',
+        controlPort: 53317,
+        os: 'android',
+        lastSeen: seen,
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    final created = discovery.currentDiscoveredPeers.singleWhere(
+      (candidate) => candidate.deviceId == 'peer-2',
+    );
+    expect(created.ip, '192.168.1.30');
+    expect(created.advertisedNativePort, isNull);
+  });
 }
 
 final class _MissingKeySecurityService extends Fake

@@ -48,6 +48,13 @@ class _FakeTransferService extends Fake implements LanTransferService {
   @override
   Stream<LanDiscoveredPeer> get handshakeSuccessPeerStream =>
       const Stream.empty();
+
+  @override
+  Stream<LanPairingDirectionNotice> get pairingDirectionStream =>
+      const Stream.empty();
+
+  @override
+  LanPairingDirectionNotice? pairingDirectionFor(String peerId) => null;
 }
 
 class _FakeLanShareViewModel extends Fake implements LanShareViewModel {

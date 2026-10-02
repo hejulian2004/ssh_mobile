@@ -448,6 +448,13 @@ final class FakeLanDiscoveryService extends Fake
   bool get isScanning => false;
 
   @override
+  bool touchDiscoveredPeer(String deviceId, {DateTime? now}) => false;
+
+  @override
+  LanShareLocalAddressSelectionResult? get webShareAddressSelectionResult =>
+      null;
+
+  @override
   Stream<List<LanDiscoveredPeer>> get discoveredPeersStream =>
       _discoveredPeersController.stream;
 
@@ -525,6 +532,8 @@ final class FakeLanTransferService extends Fake implements LanTransferService {
       StreamController<LanDiscoveredPeer>.broadcast();
   final StreamController<LanDiscoveredPeer> _handshakeSuccessController =
       StreamController<LanDiscoveredPeer>.broadcast();
+  final StreamController<LanDiscoveredPeer> _observedPeerController =
+      StreamController<LanDiscoveredPeer>.broadcast();
   int _port = LanTransferService.defaultHttpPort;
   bool _listening = false;
   final NetworkResult<int>? startListeningResult;
@@ -551,6 +560,23 @@ final class FakeLanTransferService extends Fake implements LanTransferService {
   @override
   Stream<LanDiscoveredPeer> get handshakeSuccessPeerStream =>
       _handshakeSuccessController.stream;
+
+  @override
+  Stream<LanDiscoveredPeer> get observedPeerStream =>
+      _observedPeerController.stream;
+
+  void emitObservedPeer(LanDiscoveredPeer peer) =>
+      _observedPeerController.add(peer);
+
+  @override
+  Stream<LanPairingDirectionNotice> get pairingDirectionStream =>
+      const Stream.empty();
+
+  @override
+  LanPairingDirectionNotice? pairingDirectionFor(String peerId) => null;
+
+  @override
+  bool hasPendingPairing(String peerId) => false;
 
   @override
   Stream<LanMessage> get incomingMessageStream => const Stream.empty();
@@ -605,6 +631,7 @@ final class FakeLanTransferService extends Fake implements LanTransferService {
       if (!_announcedPeerController.isClosed) _announcedPeerController.close(),
       if (!_handshakeSuccessController.isClosed)
         _handshakeSuccessController.close(),
+      if (!_observedPeerController.isClosed) _observedPeerController.close(),
     ]);
   }
 

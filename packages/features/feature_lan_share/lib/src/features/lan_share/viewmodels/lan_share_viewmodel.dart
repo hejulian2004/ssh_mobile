@@ -17,6 +17,7 @@ import '../../../services/lan_share/lan_peer_trust.dart';
 import '../../../services/lan_share/lan_share_models.dart';
 import '../../../services/lan_share/lan_storage_service.dart';
 import '../../../services/lan_share/lan_native_transfer_coordinator.dart';
+import '../../../services/lan_share/lan_pairing_reciprocal.dart';
 import '../../../services/lan_share/lan_transfer_service.dart';
 import 'package:network_sdk/network_sdk.dart';
 
@@ -48,6 +49,7 @@ class LanShareViewModel extends ChangeNotifier {
   StreamSubscription? _historyDbSubscription;
   StreamSubscription? _announcedPeerSubscription;
   StreamSubscription? _pairingInviteSubscription;
+  StreamSubscription? _observedPeerSubscription;
   StreamSubscription? _connectionStateSubscription;
   StreamSubscription<List<LanPeerTrustRecord>>? _trustSubscription;
   StreamSubscription? _routeStateSubscription;
@@ -268,6 +270,9 @@ class LanShareViewModel extends ChangeNotifier {
       if (peer != null) registerDiscoveredPeer(peer);
       _publishPairingRequest(request);
     });
+    _observedPeerSubscription = transferService.observedPeerStream.listen(
+      _notePairingObservation,
+    );
     _progressSubscription = transferService.messageProgressStream.listen((msg) {
       _trackBackgroundOperation(
         _enqueueMessagePersistence(
@@ -396,6 +401,7 @@ class LanShareViewModel extends ChangeNotifier {
       _historyDbSubscription,
       _announcedPeerSubscription,
       _pairingInviteSubscription,
+      _observedPeerSubscription,
       _connectionStateSubscription,
       _trustSubscription,
       _routeStateSubscription,
@@ -419,6 +425,7 @@ class LanShareViewModel extends ChangeNotifier {
     _historyDbSubscription = null;
     _announcedPeerSubscription = null;
     _pairingInviteSubscription = null;
+    _observedPeerSubscription = null;
     _connectionStateSubscription = null;
     _trustSubscription = null;
     _keepAliveTimer?.cancel();
@@ -817,8 +824,8 @@ class LanShareViewModel extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  /// 执行 V2 配对认证；成功响应已原子提交完整 trust record。
-  Future<NetworkResult<void>> authenticateDevice(
+  /// 执行 V2 配对认证。只有双方 PIN 都验证后才提交 trust record。
+  Future<NetworkResult<LanPairingHandshakeProgress>> authenticateDevice(
     LanDiscoveredPeer device,
     String pin, {
     bool isInitiator = true,
@@ -829,7 +836,9 @@ class LanShareViewModel extends ChangeNotifier {
       appSettings.lanDeviceAlias,
       isInitiator: isInitiator,
     );
-    if (result is NetworkSuccess<void> && !_disposed) {
+    if (result is NetworkSuccess<LanPairingHandshakeProgress> &&
+        result.data == LanPairingHandshakeProgress.paired &&
+        !_disposed) {
       notifyListeners();
     }
     return result;
@@ -943,14 +952,31 @@ class LanShareViewModel extends ChangeNotifier {
 
   Future<void> _refreshPeerConnections(int generation) async {
     for (final device in List<LanDiscoveredPeer>.of(_devices)) {
+      if (transferService.hasPendingPairing(device.deviceId)) {
+        discoveryService.touchDiscoveredPeer(device.deviceId);
+      }
       final paired = await isDevicePaired(device.deviceId);
       if (_disposed || !_isInitialized || generation != _lifecycleGeneration) {
         return;
       }
-      if (paired && !transferService.isWebSocketConnected(device.deviceId)) {
-        await transferService.connectWebSocket(device);
+      if (!paired) continue;
+      final connected = await transferService.connectWebSocket(device);
+      if (_disposed || !_isInitialized || generation != _lifecycleGeneration) {
+        return;
+      }
+      if (connected is NetworkSuccess<void>) {
+        discoveryService.touchDiscoveredPeer(device.deviceId);
       }
     }
+  }
+
+  /// 握手证明只刷新已有发现记录的 lastSeen。
+  ///
+  /// 证明里没有 native 端口，直接替换会把二维码登记的数据面地址清掉。
+  void _notePairingObservation(LanDiscoveredPeer peer) {
+    if (_disposed) return;
+    if (discoveryService.touchDiscoveredPeer(peer.deviceId)) return;
+    registerDiscoveredPeer(peer);
   }
 
   /// 注册手动解析的对端并刷新监听器。

@@ -34,10 +34,8 @@ extension _LanShareDialogActions on _LanShareScreenState {
                 if (!state.isTrusted) {
                   final pairingResult = await vm.requestPairing(dev);
                   if (!mounted) return;
-                  if (pairingResult is NetworkFailure) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(strings.lanShareOffline)),
-                    );
+                  if (pairingResult is NetworkFailure<void>) {
+                    _showRequestFailure(context, pairingResult, strings);
                   }
                   return;
                 }
@@ -183,12 +181,24 @@ extension _LanShareDialogActions on _LanShareScreenState {
     LanShareStrings strings,
   ) async {
     final result = await vm.requestPairing(device);
-    if (result is NetworkFailure && context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(strings.lanShareOffline)));
+    if (result is NetworkFailure<void> && context.mounted) {
+      _showRequestFailure(context, result, strings);
     }
     return result;
+  }
+
+  /// 展示配对或连接请求返回的具体失败原因。
+  void _showRequestFailure(
+    BuildContext context,
+    NetworkFailure<void> failure,
+    LanShareStrings strings,
+  ) {
+    final message = failure.error.message.trim();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message.isEmpty ? strings.lanShareOffline : message),
+      ),
+    );
   }
 
   /// 展示手动输入设备 IP、端口或 HTTPS WebShare 链接的对话框。
