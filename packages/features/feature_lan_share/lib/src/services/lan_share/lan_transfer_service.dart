@@ -20,6 +20,7 @@ import 'package:network_sdk/network_sdk.dart';
 
 part 'lan_transfer_client.dart';
 part 'lan_pairing_server.dart';
+part 'lan_pairing_confirm.dart';
 
 /// Manages LAN HTTPS control metadata, WebSocket and RECALL signals.
 ///
