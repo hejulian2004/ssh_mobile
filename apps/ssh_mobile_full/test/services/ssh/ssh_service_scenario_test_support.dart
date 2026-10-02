@@ -111,9 +111,7 @@ final class SshServiceScenarioHarness {
         lastError = error;
         lastStackTrace = stackTrace;
         if (attempt < 4) {
-          await Future<void>.delayed(
-            Duration(milliseconds: 10 << attempt),
-          );
+          await Future<void>.delayed(Duration(milliseconds: 10 << attempt));
         }
       }
     }
