@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 import '../utils/startup_instrumentation.dart';
 import '../services/telemetry/app_crash_telemetry_bridge.dart';
@@ -29,9 +29,15 @@ final class AppBootstrap {
         WidgetsFlutterBinding.ensureInitialized();
         StartupInstrumentation.instance.recordMainStart();
 
-        runtime = await (runtimeFactory ?? AppRuntimeFactory.create)();
+        // Schedule Runtime construction after runApp. The bootstrap shell can
+        // therefore paint the first Flutter frame before the App Scope starts
+        // opening databases, secure storage, and native capabilities.
+        final runtimeFuture = Future<AppRuntime>(
+          () => (runtimeFactory ?? AppRuntimeFactory.create)(),
+        );
         StartupInstrumentation.instance.recordRunAppStart();
-        (startApp ?? runApp)(SshMobileApp(runtime: runtime));
+        (startApp ?? runApp)(_AppBootstrapShell(runtimeFuture: runtimeFuture));
+        runtime = await runtimeFuture;
       },
       (error, stackTrace) {
         final currentRuntime = runtime;
@@ -58,6 +64,102 @@ final class AppBootstrap {
           debugPrint('Uncaught zone error before AppRuntime logging');
         }
       },
+    );
+  }
+}
+
+/// Paints a stable Flutter frame while the App Scope is being assembled.
+///
+/// The Runtime remains the only owner of the production App Shell resources;
+/// this widget only holds the pending Future and transfers the completed
+/// Runtime to [SshMobileApp]. If the host tears down the shell before Runtime
+/// creation finishes, the late Runtime is disposed here so construction cannot
+/// leak resources after the widget tree is gone.
+final class _AppBootstrapShell extends StatefulWidget {
+  const _AppBootstrapShell({required this.runtimeFuture});
+
+  final Future<AppRuntime> runtimeFuture;
+
+  @override
+  State<_AppBootstrapShell> createState() => _AppBootstrapShellState();
+}
+
+final class _AppBootstrapShellState extends State<_AppBootstrapShell> {
+  AppRuntime? _runtime;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_resolveRuntime());
+  }
+
+  Future<void> _resolveRuntime() async {
+    try {
+      final runtime = await widget.runtimeFuture;
+      if (!mounted) {
+        unawaited(runtime.dispose());
+        return;
+      }
+      setState(() => _runtime = runtime);
+    } catch (error) {
+      if (mounted) setState(() => _error = error);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final runtime = _runtime;
+    if (runtime != null) return SshMobileApp(runtime: runtime);
+    if (_error != null) return const _AppBootstrapFailureScreen();
+    return const _AppBootstrapLoadingScreen();
+  }
+}
+
+/// A deliberately small first-frame surface; it must not depend on App Scope.
+final class _AppBootstrapLoadingScreen extends StatelessWidget {
+  const _AppBootstrapLoadingScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        key: ValueKey<String>('app-bootstrap-loading'),
+        backgroundColor: Color(0xFF0D1117),
+        body: Center(
+          child: SizedBox.square(
+            dimension: 28,
+            child: CircularProgressIndicator(
+              color: Color(0xFFB7C3FF),
+              strokeWidth: 2.5,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Keeps a failed bootstrap visible without exposing exception details.
+final class _AppBootstrapFailureScreen extends StatelessWidget {
+  const _AppBootstrapFailureScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        key: ValueKey<String>('app-bootstrap-failed'),
+        backgroundColor: Color(0xFF0D1117),
+        body: Center(
+          child: Icon(
+            Icons.error_outline_rounded,
+            color: Color(0xFFFFB4AB),
+            size: 32,
+          ),
+        ),
+      ),
     );
   }
 }

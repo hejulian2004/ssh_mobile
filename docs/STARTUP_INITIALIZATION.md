@@ -1,4 +1,4 @@
-> 最新更新时间：2026-08-25
+> 最新更新时间：2026-10-02
 
 # 应用启动按需初始化架构 (On-demand Startup Initialization Architecture)
 
@@ -14,6 +14,10 @@
   `NetworkIdentityBundle` 则必须在 AppRuntime composition root 中先加载/创建，随后
   exactly-once 配置共享 `NetworkRuntime`/`NetworkFacade`，避免 LAN/SSH/Realtime 各自
   建立 identity 或 native runtime。
+- `AppBootstrap` 先挂载不依赖 Runtime 的轻量首帧壳，再异步等待完整
+  `AppRuntimeFactory` 装配；Runtime 提交后才切换到 `SshMobileApp`。这样数据库、Secure
+  Storage、native capability 和 Telemetry 的启动 I/O 不会让 Android 原生 LaunchTheme
+  长时间停留在黑屏；装配失败只显示不泄漏异常细节的启动失败态。
 
 ### 2. ConnectionViewModel 与 SshService 解耦 (`ConnectionRuntimeActions`)
 - `ConnectionViewModel` 构造函数仅依赖 `ConnectionRepository`。

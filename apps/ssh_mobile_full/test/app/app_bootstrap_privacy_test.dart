@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
 import 'package:ssh_mobile/app/app_bootstrap.dart';
 import 'package:ssh_mobile/app/app_runtime.dart';
-import 'package:ssh_mobile/app/ssh_mobile_app.dart';
 
 import 'support/app_runtime_test_support.dart';
 
@@ -66,7 +65,7 @@ void main() {
           startApp: (app) => startedApp = app,
         );
 
-        expect(startedApp, isA<SshMobileApp>());
+        expect(startedApp, isA<Widget>());
       } finally {
         debugDefaultTargetPlatformOverride = previousPlatform;
       }
