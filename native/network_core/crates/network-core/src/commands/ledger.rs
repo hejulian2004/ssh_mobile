@@ -242,13 +242,8 @@ async fn dispatch_command_payload(
                 ));
             }
             let peer_id = config.peer_id.clone();
-            let previous = state
-                .peer_route_authorizations
-                .read()
-                .await
-                .get(&peer_id)
-                .copied();
-            let result = peer::upsert_peer_with_policy(
+            let revoke_relay = !config.allow_relay;
+            match peer::upsert_peer_with_policy(
                 &state,
                 network_protocol::UpsertPeerCommand {
                     peer_id: config.peer_id,
@@ -257,25 +252,24 @@ async fn dispatch_command_payload(
                     e2e_public_key: config.e2e_public_key,
                 },
                 e2ee_policy,
+                Some(crate::runtime::PeerRouteAuthorization {
+                    direct: config.allow_direct,
+                    relay: config.allow_relay,
+                }),
             )
-            .await;
-            if result.is_ok() {
-                state.peer_route_authorizations.write().await.insert(
-                    peer_id.clone(),
-                    crate::runtime::PeerRouteAuthorization {
-                        direct: config.allow_direct,
-                        relay: config.allow_relay,
-                    },
-                );
-                if previous.is_some_and(|authorization| authorization.relay) && !config.allow_relay
-                {
-                    // Revoking Relay authorization must retire a live Relay
-                    // carrier, but it must not tear down an independent
-                    // Direct path that remains authorized.
-                    close_peer_relay_path(&state, &peer_id).await;
+            .await
+            {
+                Ok(previous) => {
+                    if previous.is_some_and(|authorization| authorization.relay) && revoke_relay {
+                        // Revoking Relay authorization must retire a live Relay
+                        // carrier, but it must not tear down an independent
+                        // Direct path that remains authorized.
+                        close_peer_relay_path(&state, &peer_id).await;
+                    }
+                    Ok(())
                 }
+                Err(error) => Err(error),
             }
-            result
         }
         Some(network_command::Payload::ConnectPeer(connect)) => {
             let class = decode_communication_class(connect.communication_class);

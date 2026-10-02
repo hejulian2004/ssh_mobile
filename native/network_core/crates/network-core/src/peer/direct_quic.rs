@@ -175,7 +175,10 @@ pub(crate) async fn connect_direct_with_crypto(
                 &crypto.remote_session_binding,
             )
             .await;
-        connection.close(VarInt::from_u32(0), b"candidate lacks requested capability");
+        connection.close(
+            VarInt::from_u32(0),
+            b"session was replaced before route publication",
+        );
         return Err(protocol_error_with_peer(
             NetworkErrorCode::NoRoute,
             "QUIC candidate Session was replaced before route publication",
