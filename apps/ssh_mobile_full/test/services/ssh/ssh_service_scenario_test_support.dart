@@ -95,8 +95,29 @@ final class SshServiceScenarioHarness {
     if (previousPath != null) {
       PathProviderPlatform.instance = previousPath;
     }
-    await _supportDir.delete(recursive: true);
     debugDefaultTargetPlatformOverride = null;
+    await _deleteSupportDirectory();
+  }
+
+  Future<void> _deleteSupportDirectory() async {
+    Object? lastError;
+    StackTrace? lastStackTrace;
+    for (var attempt = 0; attempt < 5; attempt++) {
+      try {
+        if (!await _supportDir.exists()) return;
+        await _supportDir.delete(recursive: true);
+        return;
+      } catch (error, stackTrace) {
+        lastError = error;
+        lastStackTrace = stackTrace;
+        if (attempt < 4) {
+          await Future<void>.delayed(
+            Duration(milliseconds: 10 << attempt),
+          );
+        }
+      }
+    }
+    Error.throwWithStackTrace(lastError!, lastStackTrace!);
   }
 
   Future<void> waitForConnecting(String sessionId) => waitUntil(
