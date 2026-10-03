@@ -35,8 +35,16 @@ final class AppBootstrap {
         final runtimeFuture = Future<AppRuntime>(
           () => (runtimeFactory ?? AppRuntimeFactory.create)(),
         );
+        final shellRuntimeFuture = runtimeFuture
+            .then<_AppBootstrapRuntimeResult>(
+              _AppBootstrapRuntimeResult.success,
+              onError: (Object error, StackTrace _) =>
+                  _AppBootstrapRuntimeResult.failure(error),
+            );
         StartupInstrumentation.instance.recordRunAppStart();
-        (startApp ?? runApp)(_AppBootstrapShell(runtimeFuture: runtimeFuture));
+        (startApp ?? runApp)(
+          _AppBootstrapShell(runtimeFuture: shellRuntimeFuture),
+        );
         runtime = await runtimeFuture;
       },
       (error, stackTrace) {
@@ -68,6 +76,15 @@ final class AppBootstrap {
   }
 }
 
+final class _AppBootstrapRuntimeResult {
+  const _AppBootstrapRuntimeResult.success(this.runtime) : error = null;
+
+  const _AppBootstrapRuntimeResult.failure(this.error) : runtime = null;
+
+  final AppRuntime? runtime;
+  final Object? error;
+}
+
 /// Paints a stable Flutter frame while the App Scope is being assembled.
 ///
 /// The Runtime remains the only owner of the production App Shell resources;
@@ -78,7 +95,7 @@ final class AppBootstrap {
 final class _AppBootstrapShell extends StatefulWidget {
   const _AppBootstrapShell({required this.runtimeFuture});
 
-  final Future<AppRuntime> runtimeFuture;
+  final Future<_AppBootstrapRuntimeResult> runtimeFuture;
 
   @override
   State<_AppBootstrapShell> createState() => _AppBootstrapShellState();
@@ -95,16 +112,18 @@ final class _AppBootstrapShellState extends State<_AppBootstrapShell> {
   }
 
   Future<void> _resolveRuntime() async {
-    try {
-      final runtime = await widget.runtimeFuture;
-      if (!mounted) {
-        unawaited(runtime.dispose());
-        return;
-      }
-      setState(() => _runtime = runtime);
-    } catch (error) {
-      if (mounted) setState(() => _error = error);
+    final result = await widget.runtimeFuture;
+    if (!mounted) {
+      final runtime = result.runtime;
+      if (runtime != null) unawaited(runtime.dispose());
+      return;
     }
+    final error = result.error;
+    if (error != null) {
+      setState(() => _error = error);
+      return;
+    }
+    setState(() => _runtime = result.runtime);
   }
 
   @override

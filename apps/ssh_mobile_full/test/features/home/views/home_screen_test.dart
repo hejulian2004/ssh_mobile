@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:connection_core/connection_core.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:feature_ai/feature_ai.dart' as feature_ai;
@@ -14,6 +16,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:ssh_mobile/app/connection_route_scope.dart';
 import 'package:ssh_mobile/app/connection_runtime_adapters.dart';
+import 'package:ssh_mobile/app/sftp_feature_adapters.dart';
 import 'package:ssh_mobile/features/home/views/home_screen.dart';
 import 'package:ssh_mobile/features/settings/viewmodels/settings_viewmodel.dart';
 import 'package:ssh_mobile/services/app_log_service.dart';
@@ -60,6 +63,7 @@ void main() {
     int initialIndex = 0,
     Duration? settle,
     SettingsViewModel? settings,
+    feature_connection.ConnectionViewModel? connectionViewModel,
     bool pumpAdditionalFrame = true,
     void Function(RouteSettings settings)? onRouteGenerated,
   }) async {
@@ -92,6 +96,7 @@ void main() {
               hostKeyRepository: storage.hostKeyRepository,
               logger: AppLogService.instance,
             ),
+            viewModel: connectionViewModel,
             child: HomeScreen(initialIndex: initialIndex),
           ),
         ),
@@ -171,6 +176,55 @@ void main() {
 
     await disposeHome(tester);
   });
+
+  testWidgets(
+    'does not mount a feature shell while the connection catalog refreshes',
+    (tester) async {
+      final repository = _ControlledConnectionRepository([
+        ConnectionConfig(
+          id: 'refreshing-server',
+          name: 'Refreshing server',
+          host: 'refreshing.example.test',
+          username: 'tester',
+        ),
+      ]);
+      final viewModel = feature_connection.ConnectionViewModel(
+        connectionRepository: repository,
+        credentialRepository: storage.credentialRepository,
+        hostKeyRepository: storage.hostKeyRepository,
+        runtimePort: AppConnectionRuntimeAdapter(
+          sshServiceFactory: () => sshService,
+        ),
+        verificationPort: AppConnectionVerificationAdapter(
+          credentialRepository: storage.credentialRepository,
+          hostKeyRepository: storage.hostKeyRepository,
+          logger: AppLogService.instance,
+        ),
+      );
+      addTearDown(viewModel.dispose);
+      await viewModel.fetchConnections();
+
+      repository.deferNextLoad();
+      final refresh = viewModel.fetchConnections();
+      expect(viewModel.isLoading, isTrue);
+
+      await pumpHome(tester, connectionViewModel: viewModel);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationRail),
+          matching: find.byIcon(Icons.folder_open_outlined),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byType(AppSftpModuleScope), findsNothing);
+      expect(find.byType(AppLoadingIndicator), findsOneWidget);
+
+      await disposeHome(tester);
+      repository.completePendingLoad();
+      await refresh;
+    },
+  );
 
   testWidgets('desktop rail renders and follows the selected page', (
     tester,
@@ -610,6 +664,77 @@ void main() {
 
     await disposeHome(tester);
   });
+}
+
+final class _ControlledConnectionRepository implements ConnectionRepository {
+  _ControlledConnectionRepository(Iterable<ConnectionConfig> connections)
+    : _connections = connections.map((item) => item.copyWith()).toList();
+
+  final List<ConnectionConfig> _connections;
+  Completer<List<ConnectionConfig>>? _pendingLoad;
+
+  @override
+  List<ConnectionConfig> get connections => List.unmodifiable(_connections);
+
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<List<ConnectionConfig>> loadConnections() {
+    final pending = _pendingLoad;
+    if (pending != null) return pending.future;
+    return Future.value(connections);
+  }
+
+  @override
+  Future<void> addConnection(ConnectionConfig config) async {
+    _connections.add(config.copyWith());
+  }
+
+  @override
+  Future<void> updateConnection(ConnectionConfig config) async {
+    final index = _connections.indexWhere((item) => item.id == config.id);
+    if (index < 0) throw StateError('Connection not found: ${config.id}');
+    _connections[index] = config.copyWith();
+  }
+
+  @override
+  Future<void> deleteConnection(String id) async {
+    _connections.removeWhere((item) => item.id == id);
+  }
+
+  @override
+  Future<void> deleteConnections(List<String> ids) async {
+    _connections.removeWhere((item) => ids.contains(item.id));
+  }
+
+  @override
+  Future<void> reorderConnections(int oldIndex, int newIndex) async {
+    final item = _connections.removeAt(oldIndex);
+    _connections.insert(newIndex.clamp(0, _connections.length), item);
+  }
+
+  @override
+  ConnectionConfig? getConnection(String id) {
+    for (final connection in _connections) {
+      if (connection.id == id) return connection;
+    }
+    return null;
+  }
+
+  void deferNextLoad() {
+    if (_pendingLoad != null) {
+      throw StateError('A connection load is already pending');
+    }
+    _pendingLoad = Completer<List<ConnectionConfig>>();
+  }
+
+  void completePendingLoad() {
+    final pending = _pendingLoad;
+    if (pending == null) throw StateError('No connection load is pending');
+    _pendingLoad = null;
+    pending.complete(connections);
+  }
 }
 
 final class _HomeFilePicker extends FilePickerPlatform {

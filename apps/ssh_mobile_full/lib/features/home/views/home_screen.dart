@@ -539,7 +539,10 @@ class _HomeScreenState extends State<HomeScreen> {
     required bool hasConnections,
     required bool isLoadingConnections,
   }) {
-    if (!hasConnections && (index == _sftpPage || index == _adminPage)) {
+    final connectionCatalogUnavailable =
+        isLoadingConnections || !hasConnections;
+    if (connectionCatalogUnavailable &&
+        (index == _sftpPage || index == _adminPage)) {
       return isLoadingConnections
           ? _buildConnectionCatalogLoadingState()
           : _buildNoConnectionsState(context, index, strings);
