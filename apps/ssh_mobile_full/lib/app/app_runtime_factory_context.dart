@@ -127,8 +127,15 @@ final class _AppRuntimeFactoryContext {
       logger.info('Application bootstrap started');
 
       await _prepareCoreResources();
-      await _prepareFeatureModules();
-      await _prepareNetworkResources();
+      // Feature database opening and native network setup are independent
+      // composition phases. Overlap them after Core is ready so the runtime
+      // handoff does not pay both I/O costs serially. Each phase still owns
+      // its own resources and the shared cleanup stack remains the rollback
+      // barrier if either phase fails.
+      await Future.wait<void>([
+        _prepareFeatureModules(),
+        _prepareNetworkResources(),
+      ]);
       await _prepareTelemetryResources();
 
       final runtime = _buildRuntime();

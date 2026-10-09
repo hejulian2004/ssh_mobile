@@ -215,7 +215,14 @@ extension _AppRuntimeFactoryTelemetry on _AppRuntimeFactoryContext {
       telemetryConnectivityMonitor.dispose,
       priority: _CleanupPriority.adapter,
     );
-    await telemetryConnectivityMonitor.start();
+    // Connectivity recovery is not required to render the App Shell. Start
+    // it with the existing post-commit initializer barrier so the platform
+    // connectivity query cannot extend Runtime construction or first use.
+    pendingInitialization.add(
+      start: (_) => telemetryConnectivityMonitor.start(),
+      cancel: telemetryConnectivityMonitor.dispose,
+      description: 'Telemetry connectivity monitor initialization failed',
+    );
   }
 }
 

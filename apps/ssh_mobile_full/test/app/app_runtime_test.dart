@@ -49,6 +49,11 @@ void main() {
         expect(network.openCommandGatewayCalls, 1);
         expect(network.gateway.commands, hasLength(1));
         expect(runtime.sshService, isNotNull);
+        expect(
+          runtime.sshService.initialized,
+          isFalse,
+          reason: 'SSH background bridge must remain lazy until first use',
+        );
         expect(runtime.sshSessionManager, isA<AppTerminalSshSessionManager>());
         final terminalManager =
             runtime.sshSessionManager as AppTerminalSshSessionManager;

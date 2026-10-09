@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
 import 'package:ssh_mobile/app/app_bootstrap.dart';
@@ -7,6 +8,36 @@ import 'package:ssh_mobile/app/app_runtime.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('defers Runtime construction until after the first frame', (
+    tester,
+  ) async {
+    final previousDebugPrint = debugPrint;
+    debugPrint = (String? _, {int? wrapWidth}) {};
+    var factoryStarted = false;
+    try {
+      final bootstrap = AppBootstrap.run(
+        runtimeFactory: () {
+          factoryStarted = true;
+          return Future<AppRuntime>.error(StateError('deferred-runtime'));
+        },
+      );
+
+      expect(factoryStarted, isFalse);
+      await tester.pump();
+      expect(factoryStarted, isTrue);
+
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey<String>('app-bootstrap-failed')),
+        findsOneWidget,
+      );
+      unawaited(bootstrap);
+      await tester.pumpWidget(const SizedBox.shrink());
+    } finally {
+      debugPrint = previousDebugPrint;
+    }
+  });
 
   testWidgets('paints a bootstrap frame before Runtime is ready', (
     tester,
