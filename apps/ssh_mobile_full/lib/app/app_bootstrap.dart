@@ -31,17 +31,21 @@ final class AppBootstrap {
 
         // A Future alone only moves construction out of this synchronous
         // callback; it can still run before Flutter paints the first frame.
-        // Keep the production path behind an explicit frame barrier so opening
-        // databases, secure storage, and native capabilities cannot compete
-        // with the first layout/raster pass. Injected startApp callbacks are
-        // used by non-widget tests and retain their synchronous test contract.
+        // Register the production barrier synchronously, before runApp, so a
+        // host cannot consume the first frame before the callback is attached.
+        // Injected startApp callbacks are used by non-widget tests and retain
+        // their synchronous test contract.
         final deferRuntimeUntilFirstFrame = startApp == null;
-        final runtimeFuture = Future<AppRuntime>(() async {
-          if (deferRuntimeUntilFirstFrame) {
-            await _waitForFirstFrame();
-          }
-          return (runtimeFactory ?? AppRuntimeFactory.create)();
-        });
+        final firstFrameBarrier = deferRuntimeUntilFirstFrame
+            ? _waitForFirstFrame()
+            : null;
+        final createRuntime = runtimeFactory ?? AppRuntimeFactory.create;
+        final runtimeFuture = deferRuntimeUntilFirstFrame
+            ? () async {
+                await firstFrameBarrier;
+                return createRuntime();
+              }()
+            : Future<AppRuntime>(createRuntime);
         final shellRuntimeFuture = runtimeFuture
             .then<_AppBootstrapRuntimeResult>(
               _AppBootstrapRuntimeResult.success,

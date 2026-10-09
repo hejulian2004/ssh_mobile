@@ -15,17 +15,25 @@ void main() {
     final previousDebugPrint = debugPrint;
     debugPrint = (String? _, {int? wrapWidth}) {};
     var factoryStarted = false;
+    var firstFramePainted = false;
+    var factoryStartedAfterFirstFrame = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      firstFramePainted = true;
+    });
     try {
       final bootstrap = AppBootstrap.run(
         runtimeFactory: () {
           factoryStarted = true;
+          factoryStartedAfterFirstFrame = firstFramePainted;
           return Future<AppRuntime>.error(StateError('deferred-runtime'));
         },
       );
 
-      expect(factoryStarted, isFalse);
       await tester.pump();
+      // The post-frame callback completes the barrier before the first frame
+      // pump returns, so Runtime construction can start only after that frame.
       expect(factoryStarted, isTrue);
+      expect(factoryStartedAfterFirstFrame, isTrue);
 
       await tester.pump();
       expect(
