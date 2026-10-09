@@ -1,4 +1,4 @@
-> Last updated: 2026-09-04
+> Last updated: 2026-10-09
 
 # Memory Map
 
@@ -34,7 +34,7 @@ regression/performance work.
 
 | Target or behavior | Add |
 | --- | --- |
-| `apps/ssh_mobile_full/**`, `apps/ssh_mobile_terminal/**`, `packages/core/**`, `packages/features/**` | Client default + nearest App/Feature contract |
+| `apps/ssh_mobile_full/**`, `apps/ssh_mobile_ssh/**`, `apps/ssh_mobile_network/**`, `apps/ssh_mobile_terminal/**`, `packages/core/**`, `packages/features/**` | Client default + nearest App/Feature contract |
 | `packages/infrastructure/ssh_core/**` | Client default; architecture for Manager/Pool/Lease/public-contract changes |
 | App Shell/startup/navigation/settings/logging/backup/platform | Client; [startup design](../../../../docs/STARTUP_INITIALIZATION.md) when startup changes |
 | AI/Agent/Skills/LLM/tools/App AI adapters | [AI Memory](../../../../memory_docs/client/features/ai.md) + AI contract |

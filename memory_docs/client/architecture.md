@@ -1,4 +1,4 @@
-> Last updated: 2026-09-12
+> Last updated: 2026-10-09
 
 # Client Architecture
 
@@ -11,6 +11,12 @@ one `NetworkRuntime` once per App process, and creates one shared
 `NetworkFacade`. LAN, SSH, SFTP, Realtime, and Relay borrow it; Features may
 release subscriptions and HTTP/Discovery/Transfer resources but never stop,
 destroy, or reconfigure the runtime/facade.
+
+`apps/ssh_mobile_network/` is a separate composition root for the Network
+Transfer page. It owns one `NetworkRuntime`, its LAN settings, identity, and
+data protection, and hosts `feature_lan_share`. It does not create a
+`NetworkFacade`, because the only production `SessionClient` remains in the
+Full App. The Full App composition root is unchanged.
 
 Stable boundaries:
 

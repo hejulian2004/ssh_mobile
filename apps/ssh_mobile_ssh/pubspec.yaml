@@ -1,0 +1,38 @@
+name: ssh_mobile_ssh
+description: SSH-only app for direct TCP SSH sessions.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.12.0 <4.0.0'
+  flutter: '>=3.44.0'
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  app_core:
+    path: ../../packages/core/app_core
+  app_ui:
+    path: ../../packages/core/app_ui
+  connection_core:
+    path: ../../packages/core/connection_core
+  dartssh2: ^2.22.5
+  feature_connection:
+    path: ../../packages/features/feature_connection
+  feature_terminal:
+    path: ../../packages/features/feature_terminal
+  provider: ^6.1.5+1
+  shadcn_ui: ^0.56.1
+  ssh_core:
+    path: ../../packages/infrastructure/ssh_core
+
+dev_dependencies:
+  drift: ^2.34.3
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

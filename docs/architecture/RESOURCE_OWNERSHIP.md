@@ -1,4 +1,4 @@
-最新更新时间：2026-09-12
+最新更新时间：2026-10-09
 
 # 资源 Owner 审计
 
@@ -71,6 +71,10 @@
 - LAN Trust、Discovery endpoint、Route availability 和 Relay enrollment/authorization
   不共享一个生命周期状态。Discovery/route loss 只失效动态 endpoint；只有显式
   unpair 才删除 Trust 并调用 `NetworkFacade.removePeer`。
+- `apps/ssh_mobile_network/` 是独立组合根。它拥有自己的 NetworkRuntime、LAN 设置、
+  身份和数据保护密钥，并让 `LanShareModule` 拥有该 App 的 `lan_share.db`。
+  它不创建 NetworkFacade。退出顺序是路由、LAN Module、NetworkRuntime、Logger。
+  Feature 不释放 App 的 NetworkRuntime。
 - Drift Repository 不关闭数据库；数据库只由表中对应 Module 或 AppRuntime 关闭。
 - Route Scope 的异步 Module dispose 必须在 Scope 销毁路径触发；ViewModel、
   Controller、Timer 和 Subscription 不得逃逸到 AppRuntime。

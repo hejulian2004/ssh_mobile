@@ -27,11 +27,10 @@ extension _AppRuntimeFactoryModules on _AppRuntimeFactoryContext {
     );
     terminalSshManager = AppTerminalSshSessionManager(sshService);
     cleanup.add(terminalSshManager.close, priority: _CleanupPriority.ssh);
-    pendingInitialization.add(
-      start: (_) => sshService.ensureInitialized(),
-      cancel: sshService.close,
-      description: 'SSH service initialization failed',
-    );
+    // SSH owns a lazy lifecycle: connection/terminal actions call
+    // ensureInitialized() immediately before their first use. Starting the
+    // background event bridge and tmux restoration here only adds cold-start
+    // work for users who never open an SSH session.
 
     playbookSettingsAdapter = AppPlaybookSettingsAdapter(appSettings);
     cleanup.add(

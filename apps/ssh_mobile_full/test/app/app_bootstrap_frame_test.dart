@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
 import 'package:ssh_mobile/app/app_bootstrap.dart';
@@ -7,6 +8,44 @@ import 'package:ssh_mobile/app/app_runtime.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('defers Runtime construction until after the first frame', (
+    tester,
+  ) async {
+    final previousDebugPrint = debugPrint;
+    debugPrint = (String? _, {int? wrapWidth}) {};
+    var factoryStarted = false;
+    var firstFramePainted = false;
+    var factoryStartedAfterFirstFrame = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      firstFramePainted = true;
+    });
+    try {
+      final bootstrap = AppBootstrap.run(
+        runtimeFactory: () {
+          factoryStarted = true;
+          factoryStartedAfterFirstFrame = firstFramePainted;
+          return Future<AppRuntime>.error(StateError('deferred-runtime'));
+        },
+      );
+
+      await tester.pump();
+      // The post-frame callback completes the barrier before the first frame
+      // pump returns, so Runtime construction can start only after that frame.
+      expect(factoryStarted, isTrue);
+      expect(factoryStartedAfterFirstFrame, isTrue);
+
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey<String>('app-bootstrap-failed')),
+        findsOneWidget,
+      );
+      unawaited(bootstrap);
+      await tester.pumpWidget(const SizedBox.shrink());
+    } finally {
+      debugPrint = previousDebugPrint;
+    }
+  });
 
   testWidgets('paints a bootstrap frame before Runtime is ready', (
     tester,

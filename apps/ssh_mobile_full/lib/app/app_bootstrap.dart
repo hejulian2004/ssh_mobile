@@ -29,12 +29,23 @@ final class AppBootstrap {
         WidgetsFlutterBinding.ensureInitialized();
         StartupInstrumentation.instance.recordMainStart();
 
-        // Schedule Runtime construction after runApp. The bootstrap shell can
-        // therefore paint the first Flutter frame before the App Scope starts
-        // opening databases, secure storage, and native capabilities.
-        final runtimeFuture = Future<AppRuntime>(
-          () => (runtimeFactory ?? AppRuntimeFactory.create)(),
-        );
+        // A Future alone only moves construction out of this synchronous
+        // callback; it can still run before Flutter paints the first frame.
+        // Register the production barrier synchronously, before runApp, so a
+        // host cannot consume the first frame before the callback is attached.
+        // Injected startApp callbacks are used by non-widget tests and retain
+        // their synchronous test contract.
+        final deferRuntimeUntilFirstFrame = startApp == null;
+        final firstFrameBarrier = deferRuntimeUntilFirstFrame
+            ? _waitForFirstFrame()
+            : null;
+        final createRuntime = runtimeFactory ?? AppRuntimeFactory.create;
+        final runtimeFuture = deferRuntimeUntilFirstFrame
+            ? () async {
+                await firstFrameBarrier;
+                return createRuntime();
+              }()
+            : Future<AppRuntime>(createRuntime);
         final shellRuntimeFuture = runtimeFuture
             .then<_AppBootstrapRuntimeResult>(
               _AppBootstrapRuntimeResult.success,
@@ -73,6 +84,14 @@ final class AppBootstrap {
         }
       },
     );
+  }
+
+  static Future<void> _waitForFirstFrame() {
+    final completer = Completer<void>();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!completer.isCompleted) completer.complete();
+    });
+    return completer.future;
   }
 }
 

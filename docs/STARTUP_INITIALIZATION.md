@@ -1,4 +1,4 @@
-> 最新更新时间：2026-10-02
+> 最新更新时间：2026-10-09
 
 # 应用启动按需初始化架构 (On-demand Startup Initialization Architecture)
 
@@ -18,6 +18,8 @@
   `AppRuntimeFactory` 装配；Runtime 提交后才切换到 `SshMobileApp`。这样数据库、Secure
   Storage、native capability 和 Telemetry 的启动 I/O 不会让 Android 原生 LaunchTheme
   长时间停留在黑屏；装配失败只显示不泄漏异常细节的启动失败态。
+- 生产路径在首个 Flutter frame 的 post-frame 回调之后才启动 Runtime 装配，避免
+  首次 layout/raster 与数据库、Secure Storage、native capability 争用 UI 线程。
 
 ### 2. ConnectionViewModel 与 SshService 解耦 (`ConnectionRuntimeActions`)
 - `ConnectionViewModel` 构造函数仅依赖 `ConnectionRepository`。
@@ -53,3 +55,7 @@
   3 秒屏障等待收敛；超时后关闭诊断入口，迟到错误不得访问已经释放的 Logger。
 - 正常 `AppRuntime.dispose()` 仍先等待已提交 initializer，再按 Adapter → Module →
   Realtime → SFTP → SSH → Network → Database → Logger 逆序释放。
+- Feature 数据库装配与 Network native capability 配置在 Core 完成后并行执行；SSH
+  后台事件桥和 tmux 恢复不再登记为启动 initializer，而由首次 SSH/Terminal 使用触发。
+- Telemetry connectivity recovery 也在 Runtime 提交后后台启动，不阻塞首帧或 Runtime
+  交接。
