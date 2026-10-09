@@ -1,4 +1,4 @@
-> Last updated: 2026-08-31
+> Last updated: 2026-10-09
 
 <p align="center">
   <img src="apps/ssh_mobile_full/assets/app_icon_1024.png" alt="SSH Mobile icon" width="112" />
@@ -511,6 +511,12 @@ flowchart LR
 - `apps/ssh_mobile_full/lib/main.dart`: thin application entry point; the App Shell and
   dependency composition live under `apps/ssh_mobile_full/lib/app/` (`AppBootstrap`,
   `AppRuntimeFactory`, `AppRuntime`, and `SshMobileApp`).
+- `apps/ssh_mobile_ssh/`: SSH-only App Shell. It composes connection editing
+  and terminal sessions over direct TCP through `ssh_core`, and does not
+  create a network runtime.
+- `apps/ssh_mobile_network/`: Network Transfer App Shell. It hosts the LAN
+  share page, owns one `NetworkRuntime`, and does not load SSH features or
+  create a `NetworkFacade`.
 - `apps/ssh_mobile_terminal/`: Terminal-only App Shell dependency crop. It declares
   only `app_core`, `app_ui`, `connection_core`, `network_transport`, `ssh_core`,
   and `feature_terminal`; it does not initialize or route

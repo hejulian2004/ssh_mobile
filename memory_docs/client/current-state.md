@@ -1,8 +1,14 @@
-> Last updated: 2026-09-12
+> Last updated: 2026-10-09
 
 # Client Current State
 
-`apps/ssh_mobile_full/` is the complete maintained application;
+`apps/ssh_mobile_full/` is the complete maintained application and stays the
+full composition root. `apps/ssh_mobile_ssh/` is a direct TCP SSH app.
+`apps/ssh_mobile_network/` hosts the Network Transfer page through
+`feature_lan_share` and owns that app's `NetworkRuntime`, LAN identity, and
+data-protection key. It does not construct a `NetworkFacade`: the production
+`SessionClient` remains `NativeNetworkService` in `apps/ssh_mobile_full/`.
+Native file transfer and the relay data plane therefore stay on the Full App.
 `apps/ssh_mobile_terminal/` validates the minimal Terminal-only dependency crop.
 Owners are Core (app/UI/Telemetry/Connection), Features (Connection, Terminal,
 SFTP, Monitoring, System Administration, LAN Share, Playbook, RAG, MCP, AI,

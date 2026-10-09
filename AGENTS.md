@@ -1,4 +1,4 @@
-> Last updated: 2026-08-31
+> Last updated: 2026-10-09
 
 # Repository Bootstrap
 
@@ -33,8 +33,8 @@ are in [Skill & Memory Maintenance](docs/agent/skill-memory-maintenance.md).
 Each App/Package Workspace Member keeps a `README.md` and `AGENTS.md`: README
 owns responsibility, public API, dependencies, storage, lifecycle owner, and
 validation entry points; AGENTS owns edit scope, forbidden dependencies,
-API/storage/release constraints, and required checks. Keep all 21 local
-contracts; Memory is not a replacement.
+API/storage/release constraints, and required checks. Keep every Workspace
+Member local contract; Memory is not a replacement.
 
 ## Non-negotiable boundaries
 

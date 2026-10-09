@@ -1,4 +1,4 @@
-> Last updated: 2026-09-12
+> Last updated: 2026-10-09
 
 # Client Overview
 
@@ -6,6 +6,10 @@ Client contains the Flutter Apps, Core/Feature packages, and App-scoped SSH
 infrastructure:
 
 - `apps/ssh_mobile_full/`: complete product and composition root;
+- `apps/ssh_mobile_ssh/`: direct TCP SSH slice with connection editing and
+  terminal sessions, and no network runtime;
+- `apps/ssh_mobile_network/`: Network Transfer page composed from
+  `feature_lan_share`, with its own runtime and no SSH features;
 - `apps/ssh_mobile_terminal/`: restricted Terminal-only slice;
 - `packages/core/`: shared contracts/UI, Telemetry runtime
   (`app_core/lib/src/telemetry/`), and Connection ownership;

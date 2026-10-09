@@ -6,6 +6,8 @@ environment:
 
 workspace:
   - apps/ssh_mobile_full
+  - apps/ssh_mobile_network
+  - apps/ssh_mobile_ssh
   - apps/ssh_mobile_terminal
   - packages/core/app_core
   - packages/core/app_ui
