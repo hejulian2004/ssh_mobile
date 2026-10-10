@@ -137,6 +137,35 @@ void main() {
     },
   );
 
+  test(
+    'sendFile reconciles the persisted peer before the first native connect',
+    () async {
+      final fixture = await _Fixture.create(
+        trusted: true,
+        relayAuthorized: true,
+      );
+      addTearDown(fixture.dispose);
+      fixture.policyPort.onReconcile = () {
+        expect(fixture.facade.connectCalls, 0);
+      };
+      final directory = await Directory.systemTemp.createTemp('lan-v2-source-');
+      addTearDown(() => directory.delete(recursive: true));
+      final file = File('${directory.path}/payload.bin')
+        ..writeAsStringSync('hello');
+
+      final result = await fixture.coordinator.sendFile(
+        peerId: 'peer-a',
+        transferId: 'tx-reconcile-before-connect',
+        filePath: file.path,
+        discovery: null,
+      );
+
+      expect(result, isA<SdkSuccess<SdkTransferSession>>());
+      expect(fixture.policyPort.reconciledPeerIds, <String>['peer-a']);
+      expect(fixture.facade.connectCalls, 1);
+    },
+  );
+
   test('trusted offline peer with relay=false returns noRoute', () async {
     final fixture = await _Fixture.create(
       trusted: true,
@@ -798,6 +827,8 @@ final class _RecordingPolicyPort implements LanNativePeerPolicyPort {
   final Set<String> blockedPeers = {};
   bool failInvalidate = false;
   FutureOr<void> Function()? onInvalidate;
+  FutureOr<void> Function()? onReconcile;
+  final List<String> reconciledPeerIds = <String>[];
 
   @override
   Future<NetworkResult<LanPeerPolicySnapshot>> getPeerPolicy(
@@ -860,6 +891,8 @@ final class _RecordingPolicyPort implements LanNativePeerPolicyPort {
   Future<NetworkResult<void>> reconcilePersistedTrust(
     LanPeerTrustRecord record,
   ) async {
+    reconciledPeerIds.add(record.deviceId);
+    if (onReconcile != null) await onReconcile!();
     return const NetworkSuccess(null);
   }
 }

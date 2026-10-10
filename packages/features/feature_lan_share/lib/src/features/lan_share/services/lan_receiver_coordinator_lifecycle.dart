@@ -142,7 +142,11 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
             networkIdentityPublicKeyProvider: () async => identity.publicKey,
             nativeTransferPortProvider: () =>
                 networkRuntime.diagnostics.boundLocalPort,
+            onPairingCommitted: _registerNewlyPairedPeer,
           );
+      final configuredTransfer = transfer;
+      configuredTransfer.onPairingCommitted ??= _registerNewlyPairedPeer;
+      transfer = configuredTransfer;
 
       _discoveryService = discovery;
       _securityService = security;

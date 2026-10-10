@@ -125,6 +125,16 @@ final class LanNativeTransferCoordinator {
     }
     final trust = policy.trust!;
 
+    // Pairing and runtime generations are independent. A peer can have a
+    // durable trust record while the current native generation has not yet
+    // received its registration (for example when the user starts a
+    // transfer immediately after pairing). Reconcile before any route or
+    // connect attempt so QUIC authentication never races registration.
+    final reconcileResult = await _policyPort.reconcilePersistedTrust(trust);
+    if (reconcileResult is NetworkFailure<void>) {
+      return NetworkFailure<TransferSession>(reconcileResult.error);
+    }
+
     if (discovery != null) {
       final capability = await _fetchCapabilities(discovery, trust);
       if (capability is NetworkFailure<_NativeCapability>) {

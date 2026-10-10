@@ -27,6 +27,7 @@ impl QuicEndpointManager {
         path_manager: Arc<PathManager>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let socket = std::net::UdpSocket::bind(bind_addr)?;
+        socket.set_nonblocking(true)?;
         Self::from_bound_socket(socket, path_manager)
     }
 
@@ -36,6 +37,11 @@ impl QuicEndpointManager {
         socket: std::net::UdpSocket,
         path_manager: Arc<PathManager>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Tokio's `UdpSocket::from_std` requires a nonblocking descriptor. The
+        // native runtime already supplies one after STUN/candidate gathering,
+        // but this public constructor also accepts caller-owned sockets (and
+        // tests commonly pass a freshly bound blocking socket).
+        socket.set_nonblocking(true)?;
         let cert = rcgen::generate_simple_self_signed(vec!["ssh-mobile".to_string()])?;
         let cert_der = cert.cert.der().to_vec();
         let key_der = cert.key_pair.serialize_der();

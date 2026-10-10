@@ -542,6 +542,9 @@ final class FakeLanTransferService extends Fake implements LanTransferService {
   final List<LanMessage> messages = <LanMessage>[];
 
   @override
+  Future<void> Function(LanDiscoveredPeer peer)? onPairingCommitted;
+
+  @override
   String get currentDeviceId => 'test-device';
 
   @override

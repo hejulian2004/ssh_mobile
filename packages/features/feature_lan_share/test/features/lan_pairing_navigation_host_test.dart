@@ -166,6 +166,7 @@ void main() {
       expect(screen.sessionId, 'session-1');
       expect(screen.isIncomingRequest, isTrue);
       expect(screen.initialAlias, 'Peer peer-a');
+      expect(screen.initialPeer?.controlPort, 53317);
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();

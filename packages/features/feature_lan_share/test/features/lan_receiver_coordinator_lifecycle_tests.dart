@@ -209,18 +209,18 @@ void _registerReceiverLifecycleTests() {
     );
 
     await coordinator.ensureInitialized();
-    transfer.emitHandshakeSuccess(
-      LanDiscoveredPeer(
-        deviceId: 'peer-a',
-        alias: 'Peer A',
-        ip: '192.0.2.5',
-        controlPort: 53317,
-        deviceType: LanDeviceType.desktop,
-        os: 'test',
-        lastSeen: DateTime.utc(2026),
-      ),
+    final pairedPeer = LanDiscoveredPeer(
+      deviceId: 'peer-a',
+      alias: 'Peer A',
+      ip: '192.0.2.5',
+      controlPort: 53317,
+      deviceType: LanDeviceType.desktop,
+      os: 'test',
+      lastSeen: DateTime.utc(2026),
     );
-    await Future<void>.delayed(const Duration(milliseconds: 10));
+    final pairingCallback = transfer.onPairingCommitted;
+    expect(pairingCallback, isNotNull);
+    await pairingCallback!(pairedPeer);
 
     expect(networkService.registerPeerCalls, 2);
     expect(networkService.lastPeerConfig?.endpointAddress, isEmpty);

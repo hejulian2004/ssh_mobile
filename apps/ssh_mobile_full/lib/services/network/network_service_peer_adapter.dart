@@ -89,8 +89,22 @@ final class _NetworkPeerAdapter {
       peerId: peerId,
     );
     if (result is NetworkFailure<void>) {
+      // Native may publish the terminal peer failure immediately before the
+      // command rejection. Preserve that typed authentication/route error;
+      // otherwise the command layer's generic rejection hides the reason the
+      // user needs to fix pairing.
+      PeerStateChanged? terminalEvent;
+      try {
+        terminalEvent = await terminalState.future.timeout(
+          const Duration(milliseconds: 250),
+        );
+      } on TimeoutException {
+        // No terminal peer event: retain the command-level failure below.
+      }
       await subscription.cancel();
       traceRegistry?.releasePeerTrace(peerId: peerId, traceId: traceId);
+      final terminalError = terminalEvent?.error;
+      if (terminalError != null) return _networkFailure(terminalError);
       return result;
     }
     PeerStateChanged? terminalEvent;

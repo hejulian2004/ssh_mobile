@@ -4,7 +4,9 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_sdk/network_sdk.dart';
+import 'package:network_transport/network_transport.dart';
 import 'package:ssh_mobile/services/network/network_service.dart';
+import 'package:ssh_mobile/services/network/network_protocol_v2_codec.dart';
 import 'package:ssh_mobile/services/telemetry/telemetry_span.dart';
 
 import 'transfer_transport_test_support.dart';
@@ -103,6 +105,25 @@ void main() {
       },
     );
 
+    test(
+      'connect preserves a terminal authentication error when command is rejected',
+      () async {
+        final gateway = _AuthenticationFailureGateway();
+        final service = NativeNetworkService.fromGateway(gateway);
+        addTearDown(() async {
+          await service.dispose();
+          await gateway.close();
+        });
+
+        final result = await service.connect('peer-auth');
+
+        expect(result, isA<NetworkFailure<void>>());
+        final failure = result as NetworkFailure<void>;
+        expect(failure.error.code, NetworkErrorCode.authenticationFailed);
+        expect(failure.error.message, 'QUIC identity authentication failed');
+      },
+    );
+
     test('connect timeout releases the exact peer trace', () async {
       final gateway = TransferFakeCommandGateway();
       final traces = TelemetryTraceRegistry();
@@ -130,4 +151,57 @@ void main() {
       expect(traces.traceForPeer('peer-timeout'), isNull);
     });
   });
+}
+
+final class _AuthenticationFailureGateway implements NetworkCommandGateway {
+  _AuthenticationFailureGateway()
+    : _codec = const NetworkProtocolV2Codec(),
+      _events = StreamController<Uint8List>.broadcast();
+
+  final NetworkProtocolV2Codec _codec;
+  final StreamController<Uint8List> _events;
+
+  @override
+  Stream<Uint8List> get events => _events.stream;
+
+  @override
+  TransportOperationStatus sendCommand(Uint8List command) {
+    final commandId = _codec.commandId(command);
+    scheduleMicrotask(() {
+      if (_events.isClosed) return;
+      final authenticationError = <int>[
+        ...transferVarintField(
+          1,
+          NetworkErrorCode.authenticationFailed.wireValue,
+        ),
+        ...transferBytesField(
+          2,
+          utf8.encode('QUIC identity authentication failed'),
+        ),
+        ...transferBytesField(
+          3,
+          utf8.encode(NetworkOperation.connect.wireName),
+        ),
+        ...transferBytesField(4, utf8.encode('peer-auth')),
+      ];
+      _events.add(
+        transferEventFrame(10, <int>[
+          ...transferBytesField(1, utf8.encode('peer-auth')),
+          ...transferVarintField(2, PeerConnectionState.failed.wireValue),
+          ...transferVarintField(3, NetworkRouteType.quicDirect.wireValue),
+          ...transferBytesField(4, authenticationError),
+        ]),
+      );
+      _events.add(
+        transferEventFrame(13, <int>[
+          ...transferBytesField(1, utf8.encode(commandId)),
+          ...transferVarintField(2, 0),
+          ...transferBytesField(3, authenticationError),
+        ]),
+      );
+    });
+    return TransportOperationStatus.success;
+  }
+
+  Future<void> close() => _events.close();
 }

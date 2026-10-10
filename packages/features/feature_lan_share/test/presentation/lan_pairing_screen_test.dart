@@ -73,6 +73,54 @@ void main() {
     expect(find.byType(LanPairingScreen), findsNothing);
   });
 
+  testWidgets('network timeout is not shown as an incorrect PIN', (
+    tester,
+  ) async {
+    final harness = _PairingHarness();
+    harness.viewModel.nextResult = const NetworkFailure(
+      NetworkError(
+        code: NetworkErrorCode.timeout,
+        message: 'LAN operation timed out.',
+        operation: NetworkOperation.sendHandshake,
+      ),
+    );
+    addTearDown(harness.dispose);
+    await harness.pump(tester);
+
+    await tester.enterText(find.byType(TextField), '123456');
+    final button = find.widgetWithText(ElevatedButton, '确认配对');
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pump();
+
+    expect(
+      find.text(
+        'Pairing timed out. Check that both devices are on the same Wi-Fi.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Incorrect PIN code'), findsNothing);
+  });
+
+  testWidgets(
+    'pairing uses the active invitation endpoint before discovery catches up',
+    (tester) async {
+      final harness = _PairingHarness();
+      harness.viewModel.exposePeerState = false;
+      addTearDown(harness.dispose);
+
+      await harness.pump(tester, initialPeer: _peer);
+      await tester.enterText(find.byType(TextField), '123456');
+      final button = find.widgetWithText(ElevatedButton, '确认配对');
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await tester.pump();
+
+      expect(harness.viewModel.authCalls, 1);
+      expect(find.byType(LanPairingScreen), findsOneWidget);
+    },
+  );
+
   testWidgets('handshake success opens chat for the waiting device', (
     tester,
   ) async {
@@ -109,7 +157,10 @@ final class _PairingHarness {
   late final _ScriptedTransfer transfer;
   late final _ScriptedViewModel viewModel;
 
-  Future<void> pump(WidgetTester tester) async {
+  Future<void> pump(
+    WidgetTester tester, {
+    LanDiscoveredPeer? initialPeer,
+  }) async {
     await tester.pumpWidget(
       MultiProvider(
         providers: [
@@ -121,6 +172,7 @@ final class _PairingHarness {
             targetDeviceId: 'peer-1',
             initialAlias: 'Windows PC',
             sessionId: 'session-1',
+            initialPeer: initialPeer,
           ),
         ),
       ),
@@ -158,6 +210,7 @@ final class _ScriptedTransfer extends Fake implements LanTransferService {
 
   void emitHandshake(LanDiscoveredPeer peer) => _handshake.add(peer);
 
+  @override
   Future<void> close() async {
     await _handshake.close();
     await _directions.close();
@@ -171,6 +224,7 @@ final class _ScriptedViewModel extends Fake implements LanShareViewModel {
   final Set<VoidCallback> _listeners = {};
   final FakeLanDiscoveryService discovery = FakeLanDiscoveryService();
   int authCalls = 0;
+  bool exposePeerState = true;
   NetworkResult<LanPairingHandshakeProgress> nextResult = const NetworkSuccess(
     LanPairingHandshakeProgress.waitingForPeer,
   );
@@ -192,6 +246,7 @@ final class _ScriptedViewModel extends Fake implements LanShareViewModel {
 
   @override
   LanPeerViewState? peerStateFor(String deviceId) {
+    if (!exposePeerState) return null;
     return LanPeerViewState(discovery: _peer);
   }
 

@@ -44,6 +44,12 @@ class LanTransferService {
   final LanStorageService storageService;
   final Future<Uint8List> Function()? networkIdentityPublicKeyProvider;
   final int? Function()? nativeTransferPortProvider;
+
+  /// Runs after reciprocal PIN verification has committed trust and before
+  /// the pairing-success event is published. The receiver coordinator uses
+  /// this hook to register the peer in Native Network V2 before the UI can
+  /// start a data-plane transfer.
+  Future<void> Function(LanDiscoveredPeer peer)? onPairingCommitted;
   late final LanTransferProtocolGuard _protocolGuard;
 
   HttpServer? _server;
@@ -93,6 +99,7 @@ class LanTransferService {
     required this.storageService,
     this.networkIdentityPublicKeyProvider,
     this.nativeTransferPortProvider,
+    this.onPairingCommitted,
   }) {
     _protocolGuard = LanTransferProtocolGuard(
       currentDeviceId: currentDeviceId,
@@ -1030,7 +1037,10 @@ class LanTransferService {
           networkIdentityPublicKey: proof.networkIdentityPublicKey,
         );
         _emitObservedPeer(proof);
-        _emit(_handshakeSuccessController, _peerFromPairingProof(proof));
+        final pairedPeer = _peerFromPairingProof(proof);
+        final pairingObserver = onPairingCommitted;
+        if (pairingObserver != null) await pairingObserver(pairedPeer);
+        _emit(_handshakeSuccessController, pairedPeer);
         return LanPairingHandshakeProgress.paired;
     }
   }

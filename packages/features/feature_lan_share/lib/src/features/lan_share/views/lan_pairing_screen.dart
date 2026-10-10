@@ -19,6 +19,7 @@ class LanPairingScreen extends StatefulWidget {
   final String targetDeviceId;
   final String initialAlias;
   final String sessionId;
+  final LanDiscoveredPeer? initialPeer;
   final bool isIncomingRequest;
 
   /// 为一个目标设备和会话创建配对页面。
@@ -27,6 +28,7 @@ class LanPairingScreen extends StatefulWidget {
     required this.targetDeviceId,
     required this.initialAlias,
     required this.sessionId,
+    this.initialPeer,
     this.isIncomingRequest = false,
   });
 
@@ -49,6 +51,7 @@ class _LanPairingScreenState extends State<LanPairingScreen>
   late bool _isIncomingRequest;
   late String _targetDeviceId;
   late String _targetAlias;
+  LanDiscoveredPeer? _targetPeer;
   LanPairingDirectionNotice? _directionNotice;
   StreamSubscription? _handshakeSubscription;
   StreamSubscription<LanPairingDirectionNotice>? _directionSubscription;
@@ -61,6 +64,7 @@ class _LanPairingScreenState extends State<LanPairingScreen>
     _isIncomingRequest = widget.isIncomingRequest;
     _targetDeviceId = widget.targetDeviceId;
     _targetAlias = widget.initialAlias;
+    _targetPeer = widget.initialPeer;
     _radarController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
@@ -99,10 +103,13 @@ class _LanPairingScreenState extends State<LanPairingScreen>
     _targetAlias = widget.initialAlias;
     _isIncomingRequest = widget.isIncomingRequest;
     if (oldWidget.targetDeviceId != widget.targetDeviceId) {
+      _targetPeer = widget.initialPeer;
       _directionNotice = context
           .read<LanShareViewModel>()
           .transferService
           .pairingDirectionFor(widget.targetDeviceId);
+    } else if (widget.initialPeer != null) {
+      _targetPeer = widget.initialPeer;
     }
   }
 
@@ -126,6 +133,7 @@ class _LanPairingScreenState extends State<LanPairingScreen>
     setState(() {
       _targetDeviceId = request.peer.peerId;
       _targetAlias = request.peer.displayAlias;
+      _targetPeer = request.peer.discovery ?? _targetPeer;
       if (request.isIncoming) {
         _isIncomingRequest = true;
       }
@@ -201,7 +209,8 @@ class _LanPairingScreenState extends State<LanPairingScreen>
     });
 
     // Find the device in viewmodel
-    final targetDevice = vm.peerStateFor(_targetDeviceId)?.discovery;
+    final targetDevice =
+        vm.peerStateFor(_targetDeviceId)?.discovery ?? _targetPeer;
 
     if (targetDevice == null) {
       setState(() {
@@ -230,6 +239,8 @@ class _LanPairingScreenState extends State<LanPairingScreen>
           _directionNotice =
               vm.transferService.pairingDirectionFor(_targetDeviceId) ??
               _directionNotice;
+        } else if (result is NetworkFailure<LanPairingHandshakeProgress>) {
+          _errorMessage = _pairingFailureMessage(result.error, strings);
         } else {
           _errorMessage = strings.lanSharePinMismatch;
         }
@@ -238,9 +249,41 @@ class _LanPairingScreenState extends State<LanPairingScreen>
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _errorMessage = '网络连接失败，请检查两端设备是否在同一 Wi-Fi。';
+        _errorMessage = strings.isEnglish
+            ? 'Network connection failed. Check that both devices are on the same Wi-Fi.'
+            : '网络连接失败，请检查两端设备是否在同一 Wi-Fi。';
       });
     }
+  }
+
+  String _pairingFailureMessage(NetworkError error, LanShareStrings strings) {
+    if (error.code == NetworkErrorCode.authenticationFailed) {
+      return strings.lanSharePinMismatch;
+    }
+    if (error.code == NetworkErrorCode.identityConflict) {
+      return strings.isEnglish
+          ? 'Device identity changed. Unpair it and try pairing again.'
+          : '设备身份已变化，请先解除配对后重试。';
+    }
+    if (error.code == NetworkErrorCode.timeout) {
+      return strings.isEnglish
+          ? 'Pairing timed out. Check that both devices are on the same Wi-Fi.'
+          : '配对请求超时，请检查两端设备是否在同一 Wi-Fi。';
+    }
+    if (error.code == NetworkErrorCode.noRoute ||
+        error.code == NetworkErrorCode.peerOffline) {
+      return strings.isEnglish
+          ? 'The device is unreachable. Check its address and Wi-Fi connection.'
+          : '无法连接到设备，请检查设备地址和 Wi-Fi 连接。';
+    }
+    if (error.code == NetworkErrorCode.invalidArgument) {
+      return strings.isEnglish
+          ? 'The pairing request is invalid. Enter the current 6-digit PIN.'
+          : '配对请求无效，请输入当前显示的 6 位 PIN 码。';
+    }
+    return strings.isEnglish
+        ? 'Pairing failed: ${error.message}'
+        : '配对失败：${error.message}';
   }
 
   /// 构建配对 UI 和当前审批状态。

@@ -122,7 +122,6 @@ final class LanReceiverCoordinator extends ChangeNotifier {
   StreamSubscription<LanPairingRequest>? _pairingInviteSubscription;
   StreamSubscription<LanDiscoveredPeer>? _announcedPeerSubscription;
   StreamSubscription<List<LanDiscoveredPeer>>? _discoveredPeersSubscription;
-  StreamSubscription<LanDiscoveredPeer>? _handshakeSuccessSubscription;
   StreamSubscription<IncomingTransferOffer>? _nativeOfferSubscription;
   final StreamController<IncomingTransferOffer> _incomingTransferController =
       StreamController<IncomingTransferOffer>.broadcast();

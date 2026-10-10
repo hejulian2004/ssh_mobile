@@ -212,6 +212,7 @@ class _LanPairingNavigationHostState extends State<LanPairingNavigationHost> {
                   targetDeviceId: currentRequest.peer.peerId,
                   initialAlias: currentRequest.peer.displayAlias,
                   sessionId: currentRequest.sessionId,
+                  initialPeer: currentRequest.peer.discovery,
                   isIncomingRequest: currentRequest.isIncoming,
                 ),
               ),
