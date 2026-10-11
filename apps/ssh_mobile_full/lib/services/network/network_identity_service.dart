@@ -57,12 +57,20 @@ class NetworkIdentityService {
   }
 
   Future<NetworkIdentityBundle> _loadAndCreate() async {
+    // These independent secure-store reads are both on the startup path.
+    // Join them before deriving or persisting keys, retaining single-flight
+    // identity creation and settling both reads before a failure is retried.
+    final storedSeeds = await Future.wait<String?>([
+      _secureStorage.read(key: _identitySeedKey),
+      _secureStorage.read(key: _x25519SeedKey),
+    ]);
     final ed25519 = Ed25519();
     final ed25519Pair = await _loadOrCreateKeyPair(
       newKeyPair: ed25519.newKeyPair,
       newKeyPairFromSeed: ed25519.newKeyPairFromSeed,
       storageKey: _identitySeedKey,
       description: 'QUIC Ed25519',
+      stored: storedSeeds[0],
     );
     final ed25519Private = await ed25519Pair.extractPrivateKeyBytes();
     final ed25519Public = await ed25519Pair.extractPublicKey();
@@ -73,6 +81,7 @@ class NetworkIdentityService {
       newKeyPairFromSeed: x25519.newKeyPairFromSeed,
       storageKey: _x25519SeedKey,
       description: 'Network X25519',
+      stored: storedSeeds[1],
     );
     final x25519Private = await x25519Pair.extractPrivateKeyBytes();
     final x25519Public = await x25519Pair.extractPublicKey();
@@ -99,8 +108,8 @@ class NetworkIdentityService {
     required Future<SimpleKeyPair> Function(List<int>) newKeyPairFromSeed,
     required String storageKey,
     required String description,
+    required String? stored,
   }) async {
-    final stored = await _secureStorage.read(key: storageKey);
     if (stored == null) {
       final pair = await newKeyPair();
       final seed = await pair.extractPrivateKeyBytes();

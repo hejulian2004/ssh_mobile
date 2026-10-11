@@ -121,7 +121,9 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
                               create: (context) => StartupViewModel(
                                 appSettings: context.read<AppSettings>(),
                               ),
-                              child: const StartupScreen(),
+                              child: StartupScreen(
+                                onReady: widget.onStartupReady,
+                              ),
                             ),
                           ),
                         );

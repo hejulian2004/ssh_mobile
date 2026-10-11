@@ -1,10 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
   <title id="title">SSH Mobile app icon</title>
-  <desc id="desc">A terminal prompt and status indicator on a dark rounded square.</desc>
-  <rect width="1024" height="1024" fill="#07111f"/>
-  <rect x="56" y="56" width="912" height="912" rx="220" fill="#0f2742"/>
-  <path d="M260 320L480 512L260 704" fill="none" stroke="#38bdf8" stroke-width="96" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M560 690H790" fill="none" stroke="#2dd4bf" stroke-width="82" stroke-linecap="round"/>
-  <circle cx="780" cy="270" r="74" fill="#07111f"/>
-  <circle cx="780" cy="270" r="52" fill="#4ade80"/>
+  <desc id="desc">A blue terminal prompt, teal cursor and green online indicator on a pale blue rounded square.</desc>
+  <rect x="56" y="56" width="912" height="912" rx="220" fill="#eff6ff"/>
+  <path d="M260 320L480 512L260 704" fill="none" stroke="#2563eb" stroke-width="96" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M560 690H790" fill="none" stroke="#0d9488" stroke-width="82" stroke-linecap="round"/>
+  <circle cx="780" cy="270" r="74" fill="#ffffff"/>
+  <circle cx="780" cy="270" r="52" fill="#16a34a"/>
 </svg>

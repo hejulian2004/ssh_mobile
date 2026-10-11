@@ -5,17 +5,29 @@ import 'package:ssh_mobile/features/startup/viewmodels/startup_viewmodel.dart';
 import 'package:ssh_mobile/services/app_settings.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:ssh_mobile/features/home/views/home_screen.dart';
+import 'package:ssh_mobile/app/startup_branding.dart';
 
 class StartupScreen extends StatefulWidget {
   final WidgetBuilder? homeBuilder;
+  final VoidCallback? onReady;
 
-  const StartupScreen({super.key, this.homeBuilder});
+  const StartupScreen({super.key, this.homeBuilder, this.onReady});
 
   @override
   State<StartupScreen> createState() => _StartupScreenState();
 }
 
 class _StartupScreenState extends State<StartupScreen> {
+  bool _readyReported = false;
+
+  void _reportReady() {
+    if (_readyReported || widget.onReady == null) return;
+    _readyReported = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onReady?.call();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final viewModel = context.watch<StartupViewModel>();
@@ -39,6 +51,7 @@ class _StartupScreenState extends State<StartupScreen> {
     }
 
     if (viewModel.shouldShowPowerGuide) {
+      _reportReady();
       return PowerGuideScreen(viewModel: viewModel);
     }
 
@@ -46,6 +59,7 @@ class _StartupScreenState extends State<StartupScreen> {
   }
 
   Widget _buildHome(BuildContext context) {
+    _reportReady();
     return widget.homeBuilder?.call(context) ?? const HomeScreen();
   }
 }
@@ -56,7 +70,8 @@ class _StartupLoadingScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      body: Center(child: AppLoadingIndicator(size: 28, strokeWidth: 2)),
+      backgroundColor: Colors.white,
+      body: StartupBranding(),
     );
   }
 }

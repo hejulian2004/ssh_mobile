@@ -22,6 +22,12 @@ final class FakeLanShareStrings extends Fake implements LanShareStrings {
   String get reject => 'Reject';
 
   @override
+  String get save => 'Save';
+
+  @override
+  String get cancel => 'Cancel';
+
+  @override
   String get networkIncomingTransferTitle => 'Incoming Transfer';
 
   @override
@@ -60,8 +66,10 @@ final class FakeLanShareSettings extends ChangeNotifier
   @override
   String get lanDeviceId => 'test-device';
 
+  String _lanDeviceAlias = 'Test Device';
+
   @override
-  String get lanDeviceAlias => 'Test Device';
+  String get lanDeviceAlias => _lanDeviceAlias;
 
   @override
   String get relayHost => '';
@@ -76,7 +84,10 @@ final class FakeLanShareSettings extends ChangeNotifier
   Future<void> ensureLanIdentity() async {}
 
   @override
-  Future<void> setLanDeviceAlias(String alias) async {}
+  Future<void> setLanDeviceAlias(String alias) async {
+    _lanDeviceAlias = alias;
+    notifyListeners();
+  }
 
   @override
   Future<void> setRelayEndpoint(String endpoint) async {

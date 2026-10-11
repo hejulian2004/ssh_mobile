@@ -1,13 +1,55 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
 import 'package:ssh_mobile/app/app_bootstrap.dart';
 import 'package:ssh_mobile/app/app_runtime.dart';
 
+class _StartupTestBinding extends AutomatedTestWidgetsFlutterBinding {
+  Completer<void>? rasterBarrier;
+
+  @override
+  Future<void> get waitUntilFirstFrameRasterized =>
+      rasterBarrier?.future ?? Future<void>.value();
+}
+
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
+  final binding = _StartupTestBinding();
+
+  testWidgets('waits for the visible raster frame before starting Runtime', (
+    tester,
+  ) async {
+    final rasterBarrier = Completer<void>();
+    binding.rasterBarrier = rasterBarrier;
+    var factoryStarted = false;
+    final previousDebugPrint = debugPrint;
+    debugPrint = (String? _, {int? wrapWidth}) {};
+    try {
+      unawaited(
+        AppBootstrap.run(
+          runtimeFactory: () {
+            factoryStarted = true;
+            return Future<AppRuntime>.error(StateError('raster-test'));
+          },
+        ),
+      );
+      await tester.pump();
+      expect(factoryStarted, isFalse);
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey<String>('app-bootstrap-loading')),
+        findsOneWidget,
+      );
+      rasterBarrier.complete();
+      await tester.pump();
+      expect(factoryStarted, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+    } finally {
+      if (!rasterBarrier.isCompleted) rasterBarrier.complete();
+      binding.rasterBarrier = null;
+      debugPrint = previousDebugPrint;
+    }
+  });
 
   testWidgets('defers Runtime construction until after the first frame', (
     tester,
@@ -64,6 +106,7 @@ void main() {
       find.byKey(const ValueKey<String>('app-bootstrap-loading')),
       findsOneWidget,
     );
+    expect(find.text('SSH Mobile'), findsOneWidget);
     unawaited(bootstrap);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -78,7 +121,7 @@ void main() {
       unawaited(
         runtimeFailure.future.then<void>(
           (_) {},
-          onError: (Object _, StackTrace __) {},
+          onError: (Object _, StackTrace _) {},
         ),
       );
       Widget? startedApp;
@@ -116,7 +159,7 @@ void main() {
         unawaited(
           runtimeFailure.future.then<void>(
             (_) {},
-            onError: (Object _, StackTrace __) {},
+            onError: (Object _, StackTrace _) {},
           ),
         );
         Widget? startedApp;

@@ -92,6 +92,41 @@ void main() {
     await coordinator.close().timeout(const Duration(seconds: 2));
     coordinatorClosed = true;
   });
+
+  testWidgets(
+    'settings screen renames device alias cleanly without controller lifecycle error',
+    (tester) async {
+      final settings = FakeLanShareSettings();
+      final viewModel = _createViewModel(settings);
+      addTearDown(() {
+        viewModel.dispose();
+        settings.dispose();
+      });
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ListenableProvider<LanShareSettingsPort>.value(value: settings),
+            ChangeNotifierProvider<LanShareViewModel>.value(value: viewModel),
+          ],
+          child: const MaterialApp(home: LanShareSettingsScreen()),
+        ),
+      );
+      await _pumpSettingsRoute(tester);
+
+      await tester.tap(find.byIcon(Icons.drive_file_rename_outline_rounded));
+      await _pumpSettingsRoute(tester);
+
+      expect(find.byType(TextField), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'My New Device');
+      await tester.tap(find.text(settings.strings.save));
+      await tester.pump(const Duration(milliseconds: 50));
+      await _pumpSettingsRoute(tester);
+
+      expect(tester.takeException(), isNull);
+      expect(settings.lanDeviceAlias, 'My New Device');
+    },
+  );
 }
 
 Future<void> _pumpSettingsRoute(WidgetTester tester) async {

@@ -19,6 +19,7 @@ import '../lan_share_feature_scope.dart';
 import 'lan_chat_screen.dart';
 import 'lan_qr_scanner_screen.dart';
 import 'lan_share_settings_screen.dart';
+import 'widgets/lan_manual_add_dialog.dart';
 
 part 'widgets/lan_share_dialogs.dart';
 

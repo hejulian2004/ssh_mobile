@@ -37,6 +37,42 @@ void main() {
       },
     );
 
+    test('answers username and localized password prompts', () {
+      final responses =
+          SshClientFactory.keyboardInteractiveResponsesForPassword(
+            const _FakeKeyboardInteractiveRequest('login', [
+              _FakeKeyboardInteractivePrompt('Login: ', true),
+              _FakeKeyboardInteractivePrompt('密码：', false),
+            ]),
+            'secret',
+            username: 'alice',
+          );
+
+      expect(responses, ['alice', 'secret']);
+    });
+
+    test(
+      'passes the exact saved password to password authentication',
+      () async {
+        final options = SshClientFactory.buildAuthOptions(
+          config: ConnectionConfig(
+            id: 'id',
+            name: 'server',
+            host: 'example.com',
+            username: 'alice',
+            authMethod: AuthMethod.password,
+          ),
+          credentials: const SshCredentials(
+            password: 'secret with spaces',
+            privateKey: null,
+          ),
+          identities: null,
+        );
+
+        expect(await options.onPasswordRequest!(), 'secret with spaces');
+      },
+    );
+
     test('rejects password auth when the password is missing', () {
       expect(
         () => SshClientFactory.validateAuthSecrets(

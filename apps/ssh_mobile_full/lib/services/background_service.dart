@@ -717,6 +717,32 @@ final class _BackgroundSshRuntime {
             86400,
           );
       final peerId = data['peerId'] as String?;
+      final config = ConnectionConfig(
+        id: connectionId ?? sessionId,
+        name: name,
+        host: host,
+        port: port,
+        username: username,
+        authMethod: AuthMethod.fromName(authMethod),
+        hostKeyFingerprint: data['hostKeyFingerprint'] as String?,
+        hostKeyAlgorithm: data['hostKeyAlgorithm'] as String?,
+        hostKeyTrustedAt: DateTime.tryParse(
+          data['hostKeyTrustedAt'] as String? ?? '',
+        ),
+      );
+      final credentials = SshCredentials(
+        password: password,
+        privateKey: privateKey,
+      );
+      // The background isolate does not go through
+      // SshClientFactory.connectClient when it constructs the client itself.
+      // Keep the same fail-closed credential contract before opening a socket
+      // or invoking a test seam.
+      SshClientFactory.validateAuthSecrets(
+        config: config,
+        password: credentials.password,
+        privateKey: credentials.privateKey,
+      );
       late final SSHClient client;
       final sessionFactory = _sessionFactory;
       if (sessionFactory != null) {
@@ -735,23 +761,6 @@ final class _BackgroundSshRuntime {
           details: 'sessionId=$sessionId host=$host:$port',
         );
 
-        final config = ConnectionConfig(
-          id: connectionId ?? sessionId,
-          name: name,
-          host: host,
-          port: port,
-          username: username,
-          authMethod: AuthMethod.fromName(authMethod),
-          hostKeyFingerprint: data['hostKeyFingerprint'] as String?,
-          hostKeyAlgorithm: data['hostKeyAlgorithm'] as String?,
-          hostKeyTrustedAt: DateTime.tryParse(
-            data['hostKeyTrustedAt'] as String? ?? '',
-          ),
-        );
-        final credentials = SshCredentials(
-          password: password,
-          privateKey: privateKey,
-        );
         final hostKeyPolicy = SshHostKeyPolicy();
 
         final identities = await SshClientFactory.identitiesFor(

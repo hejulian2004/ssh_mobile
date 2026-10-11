@@ -129,65 +129,44 @@ void main() {
     _write(entry.key, image.encodePng(resized));
   }
 
-  final windowsIcon = image.copyResize(
-    sources['windows']!,
-    width: 256,
-    height: 256,
-    interpolation: image.Interpolation.cubic,
-  );
+  final windowsIcons = [
+    for (final size in [16, 24, 32, 48, 64, 128, 256])
+      image.copyResize(
+        sources['windows']!,
+        width: size,
+        height: size,
+        interpolation: image.Interpolation.cubic,
+      ),
+  ];
   _write(
     'windows/runner/resources/app_icon.ico',
-    image.encodeIco(windowsIcon, singleFrame: true),
+    image.IcoEncoder().encodeImages(windowsIcons),
   );
-
   stdout.writeln('Generated ${targets.length} PNG icons and one ICO icon.');
 }
 
 image.Image _buildIcon(String platform) {
   const scale = 2;
   const size = 1024 * scale;
-  final canvas = image.Image(width: size, height: size);
+  final canvas = image.Image(width: size, height: size, numChannels: 4);
 
-  final image.Color background;
-  final image.Color panel;
-  final image.Color prompt;
-  final image.Color cursor;
-  final image.Color online = image.ColorRgb8(74, 222, 128);
-
-  if (platform == 'android') {
-    // Android: Green Theme (Teal/Lime/Green style)
-    background = image.ColorRgb8(11, 24, 16);
-    panel = image.ColorRgb8(24, 48, 33);
-    prompt = image.ColorRgb8(163, 230, 53);
-    cursor = image.ColorRgb8(34, 197, 94);
-  } else if (platform == 'ios') {
-    // iOS: Indigo / Rose Gradient Theme
-    background = image.ColorRgb8(24, 18, 36);
-    panel = image.ColorRgb8(45, 34, 71);
-    prompt = image.ColorRgb8(244, 63, 94);
-    cursor = image.ColorRgb8(139, 92, 246);
-  } else if (platform == 'macos') {
-    // macOS: Charcoal Grey / Silver Accent Theme
-    background = image.ColorRgb8(20, 20, 23);
-    panel = image.ColorRgb8(40, 40, 44);
-    prompt = image.ColorRgb8(245, 245, 247);
-    cursor = image.ColorRgb8(161, 161, 170);
-  } else {
-    // Windows / Default: Deep Blue / Cyan Theme
-    background = image.ColorRgb8(7, 17, 31);
-    panel = image.ColorRgb8(15, 39, 66);
-    prompt = image.ColorRgb8(56, 189, 248);
-    cursor = image.ColorRgb8(45, 212, 191);
+  // Keep the platform raster exports aligned with assets/app_icon.svg.
+  final background = image.ColorRgb8(255, 255, 255);
+  final panel = image.ColorRgb8(239, 246, 255);
+  final prompt = image.ColorRgb8(37, 99, 235);
+  final cursor = image.ColorRgb8(13, 148, 136);
+  final online = image.ColorRgb8(22, 163, 74);
+  // iOS requires an opaque icon; other platforms keep the outer edge clear.
+  if (platform == 'ios') {
+    image.fillRect(
+      canvas,
+      x1: 0,
+      y1: 0,
+      x2: size - 1,
+      y2: size - 1,
+      color: background,
+    );
   }
-
-  image.fillRect(
-    canvas,
-    x1: 0,
-    y1: 0,
-    x2: size - 1,
-    y2: size - 1,
-    color: background,
-  );
   image.fillRect(
     canvas,
     x1: 56 * scale,

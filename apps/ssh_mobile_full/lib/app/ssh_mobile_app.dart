@@ -39,10 +39,13 @@ part 'ssh_mobile_app_routes.dart';
 
 /// App Shell。它只消费由 [AppRuntime] 创建的 App Scope 实例。
 class SshMobileApp extends StatefulWidget {
-  const SshMobileApp({super.key, this.runtime});
+  const SshMobileApp({super.key, this.runtime, this.onStartupReady});
 
   /// 真实入口始终传入 Runtime；可空仅保留旧的构造型 smoke test 兼容面。
   final AppRuntime? runtime;
+
+  /// Releases the bootstrap overlay once the initial route is ready.
+  final VoidCallback? onStartupReady;
 
   @override
   State<SshMobileApp> createState() => _SshMobileAppState();

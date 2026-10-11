@@ -1,4 +1,4 @@
-最新更新时间：2026-08-28
+最新更新时间：2026-10-11
 
 # ssh_mobile_full
 
@@ -23,6 +23,18 @@ Network V2 的组合根约束：`AppRuntimeFactory` 先加载/创建 App-owned
 App Shell 的稳定组合入口是 `lib/main.dart`、`lib/app/app_bootstrap.dart`、
 `lib/app/app_runtime.dart` 和 `lib/app/navigation/`。外部调用方不得把旧
 `lib/screens/`、`lib/models/` 或兼容 Service 当作新模块 API。
+
+`AppBootstrap` 在 Logo 首帧栅格化后开始 Runtime 装配，并保留同一个加载动画。
+`SshMobileApp.onStartupReady` 在初始首页或电源引导完成首帧布局后通知启动壳移除
+遮罩；准备期间 App 隐藏且暂停 Ticker，异步数据读取继续执行。该回调不转移 Runtime
+资源所有权。
+
+启动品牌资源为 `assets/app_icon.svg`：透明边缘、浅蓝面板、蓝色终端提示符和青绿色
+光标。`StartupBranding` 使用 SVG 等比显示，按可用短边限制在 64–128 逻辑像素，
+保留安全区和大字号滚动空间。Android 原生启动页使用同款 VectorDrawable，日间与
+夜间启动底色均为白色。系统图标通过 `dart run tool/generate_app_icons.dart` 生成
+各平台 PNG 和包含 16–256 像素图层的 Windows ICO；调整 SVG 形状或配色时须同步
+生成器与 Android vector。启动页仍使用白底；iOS 的系统图标按平台要求保持不透明。
 
 ## 依赖
 

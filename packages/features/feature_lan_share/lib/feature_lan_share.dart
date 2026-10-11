@@ -21,6 +21,7 @@ export 'src/features/lan_share/views/lan_preview_viewer_screen.dart';
 export 'src/features/lan_share/views/lan_qr_scanner_screen.dart';
 export 'src/features/lan_share/views/lan_share_screen.dart';
 export 'src/features/lan_share/views/lan_share_settings_screen.dart';
+export 'src/features/lan_share/views/widgets/lan_manual_add_dialog.dart';
 export 'src/features/lan_share/views/lan_text_selection_screen.dart';
 export 'src/features/lan_share/views/network_incoming_transfer_host.dart';
 export 'src/features/lan_share/utils/lan_platform_capabilities.dart';

@@ -59,6 +59,60 @@ void main() {
         .setMockMethodCallHandler(_deviceInfoChannel, null);
   });
 
+  testWidgets(
+    'Android with a seen power guide renders home in its first frame',
+    (tester) async {
+      late _StartupFixture fixture;
+      await tester.runAsync(() async {
+        fixture = await _createFixture(
+          language: AppLanguage.en,
+          checkStatus: false,
+        );
+        await fixture.appSettings.markPowerGuideSeen();
+      });
+      addTearDown(fixture.dispose);
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      try {
+        await tester.pumpWidget(_startupHost(fixture.viewModel));
+        expect(find.text('Home placeholder'), findsOneWidget);
+        expect(fixture.powerCalls, isEmpty);
+        expect(fixture.viewModel.powerStatusCheckScheduled, isFalse);
+        await tester.pumpWidget(const SizedBox.shrink());
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
+
+  testWidgets('Android power query keeps visible startup content', (
+    tester,
+  ) async {
+    final statusGate = Completer<bool>();
+    late _StartupFixture fixture;
+    await tester.runAsync(() async {
+      fixture = await _createFixture(
+        language: AppLanguage.en,
+        checkStatus: false,
+        statusGate: statusGate,
+      );
+    });
+    addTearDown(fixture.dispose);
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await tester.pumpWidget(_startupHost(fixture.viewModel));
+      await tester.pump();
+      expect(find.text('SSH Mobile'), findsOneWidget);
+      expect(find.text('Home placeholder'), findsNothing);
+      statusGate.complete(false);
+      await tester.pumpAndSettle();
+      expect(find.text('Keep SSH connected in the background'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+    } finally {
+      if (!statusGate.isCompleted) statusGate.complete(false);
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
   testWidgets('English guide remains reachable at 320dp and 200% text', (
     tester,
   ) async {

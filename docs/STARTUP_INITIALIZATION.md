@@ -1,4 +1,4 @@
-> 最新更新时间：2026-10-09
+> 最新更新时间：2026-10-11
 
 # 应用启动按需初始化架构 (On-demand Startup Initialization Architecture)
 
@@ -15,11 +15,23 @@
   exactly-once 配置共享 `NetworkRuntime`/`NetworkFacade`，避免 LAN/SSH/Realtime 各自
   建立 identity 或 native runtime。
 - `AppBootstrap` 先挂载不依赖 Runtime 的轻量首帧壳，再异步等待完整
-  `AppRuntimeFactory` 装配；Runtime 提交后才切换到 `SshMobileApp`。这样数据库、Secure
+  `AppRuntimeFactory` 装配；Runtime 提交后在启动壳下挂载 `SshMobileApp`。这样数据库、Secure
   Storage、native capability 和 Telemetry 的启动 I/O 不会让 Android 原生 LaunchTheme
   长时间停留在黑屏；装配失败只显示不泄漏异常细节的启动失败态。
-- 生产路径在首个 Flutter frame 的 post-frame 回调之后才启动 Runtime 装配，避免
-  首次 layout/raster 与数据库、Secure Storage、native capability 争用 UI 线程。
+- 生产路径在首个 Flutter frame 的 post-frame 回调后，还会等待引擎确认首帧已栅格化，
+  才启动 Runtime 装配。post-frame 只表示已提交绘制，不能单独保证 Android 启动页已
+  可移除或 Windows 窗口已可显示。等待壳显示应用标识与加载动画，不依赖 Runtime。
+- Network Identity 的 Ed25519/X25519 安全存储读取并行执行，两个读取全部收敛后才
+  派生或持久化密钥；缓存、single-flight、读取失败重试和畸形密钥 fail-closed 保持不变。
+- Android 已持久化 `powerGuideSeen` 时直接显示首页，不再为跳过电源引导等待一次
+  post-frame 检查；首次引导仍保留系统状态查询与超时处理，查询期间也显示应用标识，
+  避免 Runtime 交接后再次只显示转圈。
+- 启动壳的同一个 Logo/动画保留到 `StartupScreen` 确认首页或电源引导就绪后才移除；
+  Runtime 交接期间通过稳定的 Widget key 保留动画状态。准备中的 App 使用 Offstage
+  隐藏并暂停其 Ticker，继续异步加载和电源状态查询，不显示或运行第二段加载动画。
+- 启动页始终使用白底浅色 SVG Logo，不受用户深色主题影响；Logo 保持正方形和
+  等比缩放，适配安全区、小窗口、横屏与大字号。Android 原生启动页同步白底，
+  Android 12 的系统图标掩码额外保留内边距。
 
 ### 2. ConnectionViewModel 与 SshService 解耦 (`ConnectionRuntimeActions`)
 - `ConnectionViewModel` 构造函数仅依赖 `ConnectionRepository`。
