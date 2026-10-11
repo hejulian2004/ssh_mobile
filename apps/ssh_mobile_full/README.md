@@ -7,9 +7,10 @@
 Full App 是 SSH Mobile 的完整 App Shell 和组合根，负责启动协调、`AppRuntime`
 生命周期、路由聚合、App Port 适配器以及兼容清单中明确保留的 App Scope 后端。
 
-Network V2 的组合根约束：`AppRuntimeFactory` 先加载/创建 App-owned
-`NetworkIdentityBundle`，再创建并 exactly-once 配置 `NetworkRuntime`，随后创建共享
-`NetworkFacade`。LAN、SSH、SFTP、Realtime 和 Relay 只借用这些 App Scope 资源；Feature
+Network V2 的组合根约束：`AppRuntimeFactory` 创建 App-owned `AppNetworkResources`，
+首次网络操作才加载/创建 `NetworkIdentityBundle` 并 exactly-once 配置原生
+`NetworkRuntime` 和共享 `NetworkFacade`；事件订阅和诊断不触发初始化。LAN、SSH、
+SFTP、Realtime 和 Relay 只借用这些 App Scope 资源；Feature
 或 Route Scope 不得创建第二个 runtime/facade，也不得在 deactivate/reactivate 时
 停止、销毁或重新配置它们。
 
@@ -24,10 +25,15 @@ App Shell 的稳定组合入口是 `lib/main.dart`、`lib/app/app_bootstrap.dart
 `lib/app/app_runtime.dart` 和 `lib/app/navigation/`。外部调用方不得把旧
 `lib/screens/`、`lib/models/` 或兼容 Service 当作新模块 API。
 
-`AppBootstrap` 在 Logo 首帧栅格化后开始 Runtime 装配，并保留同一个加载动画。
+`AppBootstrap` 立即挂载 Logo 启动壳，并在后续 microtask 开始 Runtime 装配，
+不等待首帧绘制或栅格化；异步 I/O 与首帧重叠，并保留同一个加载动画。
 `SshMobileApp.onStartupReady` 在初始首页或电源引导完成首帧布局后通知启动壳移除
 遮罩；准备期间 App 隐藏且暂停 Ticker，异步数据读取继续执行。该回调不转移 Runtime
 资源所有权。
+
+LAN 接收在首次打开快传页面时激活，随后由 Module 保持接收；启动时全局配对宿主
+仅订阅事件。遥测只准备独立的 Relay enrollment 门禁，不初始化接收器。网络密钥
+推导和 TLS 证书首次生成在工作 isolate 执行，安全存储读写仍使用平台 isolate。
 
 启动品牌资源为 `assets/app_icon.svg`：透明边缘、浅蓝面板、蓝色终端提示符和青绿色
 光标。`StartupBranding` 使用 SVG 等比显示，按可用短边限制在 64–128 逻辑像素，

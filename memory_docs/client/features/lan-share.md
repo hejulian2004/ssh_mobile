@@ -1,4 +1,4 @@
-> Last updated: 2026-09-23
+> Last updated: 2026-10-11
 
 # LAN Share Feature Memory
 
@@ -111,6 +111,9 @@ explicit/configured, not an import or App-start side effect.
   `NetworkCapability.runtime`; QUIC is not an implicit command-gateway
   prerequisite. Wave 1 `ConfigureRuntime` still initializes direct QUIC/TCP;
   QUIC-free WSS-only is deferred to Wave 2 and does not exist today.
+
+Full App defers receiver activation until first LAN page entry; enrollment gates
+remain independent of receiver initialization. See the [local contract](../../../packages/features/feature_lan_share/README.md).
 
 Current implementation checkpoints: AppRuntimeFactory/AppRuntime loads identity and configures one
 shared Facade before LAN activation; V2 pairing binds both static identities and

@@ -45,9 +45,9 @@ void main() {
         expect(runtime.networkFacade, isA<NetworkFacade>());
         expect(runtime.telemetryClient, isNotNull);
         expect(runtime.telemetryConnectivityMonitor, isNotNull);
-        expect(network.ensureCapabilityCalls, 1);
-        expect(network.openCommandGatewayCalls, 1);
-        expect(network.gateway.commands, hasLength(1));
+        expect(network.ensureCapabilityCalls, 0);
+        expect(network.openCommandGatewayCalls, 0);
+        expect(network.gateway.commands, isEmpty);
         expect(runtime.sshService, isNotNull);
         expect(
           runtime.sshService.initialized,

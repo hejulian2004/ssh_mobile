@@ -11,18 +11,20 @@
 - `main()` 仅委托给 `AppBootstrap.run()`；`AppRuntimeFactory` 创建唯一的 App Scope 服务，`AppRuntime` 负责其生命周期，并发起 `AppBootstrapCoordinator.ensureBootstrap()`。
 - `AppBootstrapCoordinator` 仅装载核心偏好（语言、主题、色板、SFTP 限制等）；Feature/Module Repository 按各自 Owner 惰性初始化，不再由统一存储门面承载。
 - MCP Token 生成与平台设备名获取仍按具体功能触发；Network V2 的 App-owned
-  `NetworkIdentityBundle` 则必须在 AppRuntime composition root 中先加载/创建，随后
-  exactly-once 配置共享 `NetworkRuntime`/`NetworkFacade`，避免 LAN/SSH/Realtime 各自
-  建立 identity 或 native runtime。
+  `NetworkIdentityBundle` 由 AppRuntime composition root 的 `AppNetworkResources`
+  在首次网络动作时加载/创建，并 single-flight 配置共享 `NetworkRuntime`/`NetworkFacade`；
+  启动和事件订阅不触发密钥或原生句柄创建，LAN/SSH/Realtime 仍共享唯一 Owner。
 - `AppBootstrap` 先挂载不依赖 Runtime 的轻量首帧壳，再异步等待完整
   `AppRuntimeFactory` 装配；Runtime 提交后在启动壳下挂载 `SshMobileApp`。这样数据库、Secure
   Storage、native capability 和 Telemetry 的启动 I/O 不会让 Android 原生 LaunchTheme
   长时间停留在黑屏；装配失败只显示不泄漏异常细节的启动失败态。
-- 生产路径在首个 Flutter frame 的 post-frame 回调后，还会等待引擎确认首帧已栅格化，
-  才启动 Runtime 装配。post-frame 只表示已提交绘制，不能单独保证 Android 启动页已
-  可移除或 Windows 窗口已可显示。等待壳显示应用标识与加载动画，不依赖 Runtime。
+- 生产路径同步挂载轻量启动壳，再在后续 microtask 开始 Runtime 装配，不等待
+  首帧 post-frame 或 rasterization；必要的异步 I/O 与首帧绘制重叠。同步重计算
+  不应进入装配入口：网络能力按需初始化，密钥和 TLS 证书生成使用工作 isolate。
+  启动壳显示应用标识与单个加载动画，不依赖 Runtime。
 - Network Identity 的 Ed25519/X25519 安全存储读取并行执行，两个读取全部收敛后才
-  派生或持久化密钥；缓存、single-flight、读取失败重试和畸形密钥 fail-closed 保持不变。
+  在工作 isolate 派生密钥，再回平台 isolate 持久化；缓存、single-flight、读取失败
+  重试和畸形密钥 fail-closed 保持不变。TLS 首次证书生成也使用工作 isolate。
 - Android 已持久化 `powerGuideSeen` 时直接显示首页，不再为跳过电源引导等待一次
   post-frame 检查；首次引导仍保留系统状态查询与超时处理，查询期间也显示应用标识，
   避免 Runtime 交接后再次只显示转圈。
@@ -45,8 +47,11 @@
 - 移除了 Home 页切换时 SFTP 对 `SystemAdminViewModel` 的跨模块强行读取。
 
 ### 4. LAN 后台接收器分离 (`LanReceiverCoordinator`)
-- 提取 `LanReceiverCoordinator` 管理全局 HTTPS 接收端口、mDNS 广播及配对邀请处理，保持后台配对功能完备。
-- Coordinator 只借用 AppRuntime 已配置的共享 NetworkFacade；激活、停用和重新激活
+- `LanReceiverCoordinator` 管理全局 HTTPS 接收端口、mDNS 广播及配对邀请处理。
+  Full App 在首次进入快传页面时激活接收，之后保持 App Scope 接收生命周期。
+  全局配对宿主仅订阅事件，不主动初始化；遥测通过 `ensureRelayEnrollment()` 独立
+  检查持久化 enrollment，不创建接收器、网络密钥或 TLS。
+- Coordinator 只借用 AppRuntime 按需配置的共享 NetworkFacade；激活、停用和重新激活
   只改变 LAN HTTP/Discovery/Transfer 资源与订阅，不 start/stop/reconfigure native
   NetworkRuntime。显式 unpair 才触发 `removePeer`，网络离线不会删除 Trust。
 - `LanShareFeatureScope` 按需取得 Coordinator 持有的唯一共享 `LanShareViewModel`，主页面、全局配对路由与聊天路由复用同一底层运行时，不会重复绑定端口。
@@ -67,7 +72,8 @@
   3 秒屏障等待收敛；超时后关闭诊断入口，迟到错误不得访问已经释放的 Logger。
 - 正常 `AppRuntime.dispose()` 仍先等待已提交 initializer，再按 Adapter → Module →
   Realtime → SFTP → SSH → Network → Database → Logger 逆序释放。
-- Feature 数据库装配与 Network native capability 配置在 Core 完成后并行执行；SSH
+- Feature 数据库装配与 LAN Module 注册在 Core 完成后并行执行，原生网络配置移到
+  首次网络动作；共享 Facade 订阅和原生句柄分阶段释放，SSH
   后台事件桥和 tmux 恢复不再登记为启动 initializer，而由首次 SSH/Terminal 使用触发。
 - Telemetry connectivity recovery 也在 Runtime 提交后后台启动，不阻塞首帧或 Runtime
   交接。

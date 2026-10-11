@@ -122,10 +122,9 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
       );
       final lanStorage =
           storageServiceOverride ?? LanStorageService(logger: logger);
-      final relayEnrollmentService = RelayEnrollmentService(
-        currentDeviceId: deviceId,
-        bootstrapClient: bootstrapClient,
-      );
+      await ensureRelayEnrollment();
+      if (_disposed) throw StateError('LAN receiver coordinator is disposed.');
+      final relayEnrollmentService = _enrollmentService!;
       relay = LanRelayCoordinator(
         appSettings: appSettings,
         logger: logger,
@@ -157,10 +156,11 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
       if (security.activePin == null) security.generate6DigitPin();
 
       _initialized = true;
-      if (initializeNetwork) await _startReceiverRuntime();
-      _receiverActive = initializeNetwork;
+      final startReceiver = initializeNetwork && startReceiverOnInitialization;
+      if (startReceiver) await _startReceiverRuntime();
+      _receiverActive = startReceiver;
       _notifyListeners();
-      if (initializeNetwork) relay.connectConfiguredInBackground();
+      if (startReceiver) relay.connectConfiguredInBackground();
     } catch (_) {
       await _cancelReceiverSubscriptions();
       await discovery?.close();
@@ -300,6 +300,7 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
     await attempt(_detachBorrowedNetworkFacade);
     await attempt(() => relayCoordinator?.close());
     _relayCoordinator = null;
+    _enrollmentService = null;
     await attempt(() => discoveryService?.close());
     await attempt(() => transferService?.close());
     if (_ownsPeerTrustStore) {

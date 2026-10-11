@@ -1,4 +1,4 @@
-最新更新时间：2026-09-23
+最新更新时间：2026-10-11
 
 # feature_lan_share
 
@@ -21,6 +21,10 @@ control HTTP、WSS Relay enrollment/编排、Web Share、传输历史和非秘�
 - `LanShareModule` 独占 `lan_share.db`、历史 Repository 和接收器资源；App
   Shell 创建并注入 App Scope NetworkIdentity、NetworkRuntime 和共享 NetworkFacade，
   只负责配置是否激活接收器。
+- Full App 启动时关闭自动接收；`LanShareFeatureScope` 在首次页面进入时激活共享
+  接收器。`startReceiverOnInitialization` 控制自动监听，显式激活仍可使用网络。
+  `ensureRelayEnrollment()` 只准备安全存储 enrollment 门禁，不创建网络身份或 TLS。
+  全局配对宿主可通过 `initializeReceiver: false` 仅订阅已激活接收器的邀请。
 - 设备聊天页顶栏可以通过注入的 `LanShareScreenSharePort` 发起
   screen-share secondary action。该 Port 只表达 `canShareWith`、
   `canReceiveScreenShareFrom` 和 `startScreenShare`；LAN Feature 不导入
@@ -44,7 +48,8 @@ control HTTP、WSS Relay enrollment/编排、Web Share、传输历史和非秘�
   重放、重复元数据和中途失败都不得留下无 owner 写入。桌面导出通过
   目录选择和流式复制完成，不整体加载大文件。
 - TLS context 与静态 X25519 密钥首次创建为单飞操作，TLS cache 绑定唯一
-  device ID；所有 LAN 客户端端点用结构化 URI 构造、固定证书并关闭自动重定向。
+  device ID；TLS 证书生成在工作 isolate 执行，安全存储操作保留在平台 isolate。
+  所有 LAN 客户端端点用结构化 URI 构造、固定证书并关闭自动重定向。
   重复广播会先收敛旧 mDNS/UDP owner，旧 socket 回调不得读取新代次数据。
 - LAN HTTPS 控制端点与 native QUIC/TCP 文件端点使用独立端口。Receiver 让 native
   绑定系统分配端口，再通过 mDNS/UDP、受认证 capabilities 和新二维码字段发布；

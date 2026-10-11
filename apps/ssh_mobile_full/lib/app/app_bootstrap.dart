@@ -30,27 +30,12 @@ final class AppBootstrap {
         WidgetsFlutterBinding.ensureInitialized();
         StartupInstrumentation.instance.recordMainStart();
 
-        // A Future alone only moves construction out of this synchronous
-        // callback; it can still run before Flutter paints the first frame.
-        // Register the production barrier synchronously, before runApp, so a
-        // host cannot consume the first frame before the callback is attached.
-        // Injected startApp callbacks are used by non-widget tests and retain
-        // their synchronous test contract.
-        final deferRuntimeUntilFirstFrame = startApp == null;
-        final firstFrameBarrier = deferRuntimeUntilFirstFrame
-            ? _waitForFirstFrame()
-            : null;
         final createRuntime = runtimeFactory ?? AppRuntimeFactory.create;
-        final runtimeFuture = deferRuntimeUntilFirstFrame
-            ? () async {
-                await firstFrameBarrier;
-                // A post-frame callback only confirms layout/paint submission.
-                // Wait for rasterization too, so Android can dismiss its splash
-                // and Windows can show the window before heavy composition.
-                await WidgetsBinding.instance.waitUntilFirstFrameRasterized;
-                return createRuntime();
-              }()
-            : Future<AppRuntime>(createRuntime);
+        // Mount the lightweight shell in this turn, then start composition on
+        // the microtask queue without waiting for paint or rasterization. Async I/O
+        // can overlap the first frame; CPU-heavy network setup stays on-demand
+        // and key/certificate derivation runs in worker isolates.
+        final runtimeFuture = Future<AppRuntime>.microtask(createRuntime);
         final shellRuntimeFuture = runtimeFuture
             .then<_AppBootstrapRuntimeResult>(
               _AppBootstrapRuntimeResult.success,
@@ -89,14 +74,6 @@ final class AppBootstrap {
         }
       },
     );
-  }
-
-  static Future<void> _waitForFirstFrame() {
-    final completer = Completer<void>();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!completer.isCompleted) completer.complete();
-    });
-    return completer.future;
   }
 }
 

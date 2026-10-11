@@ -21,8 +21,8 @@ typedef LanShareDatabaseFactory = LanShareDatabase Function();
 final class LanShareModule implements AppModule {
   /// 创建尚未注册的 LAN Module。
   ///
-  /// [receiverEnabled] 为空时读取 App Shell 的设置；显式为 false 时只
-  /// 初始化数据库和服务依赖，不启动 HTTPS、mDNS 或原生网络监听。
+  /// [receiverEnabled] 控制 Module 自动接收，为空时读取 App Shell 设置。
+  /// false 时仅装配数据库与 Coordinator，首次进入页面仍可显式激活接收。
   LanShareModule({
     bool? receiverEnabled,
     LanShareDatabaseFactory? databaseFactory,
@@ -144,7 +144,7 @@ final class LanShareModule implements AppModule {
         networkRuntime: networkRuntime,
         localAddressSelectionPort: localAddressSelectionPort,
         peerTrustStore: peerTrustStore,
-        initializeNetwork: receiverEnabled,
+        startReceiverOnInitialization: receiverEnabled,
       );
       _state = ModuleState.initialized;
     } catch (_) {
@@ -175,7 +175,7 @@ final class LanShareModule implements AppModule {
   @override
   Future<void> deactivate() async {
     if (_state != ModuleState.active) return;
-    if (receiverEnabled) await coordinator.deactivateReceiver();
+    await coordinator.deactivateReceiver();
     _state = ModuleState.inactive;
   }
 

@@ -52,9 +52,9 @@ final class AppLanShareSettingsAdapter extends ChangeNotifier
   @override
   int get relayPort => _settings.relayPort;
 
-  /// 当前版本保持原有行为，后台 LAN Receiver 默认开启。
+  /// 接收器由首次打开快传页面激活，启动时保持关闭。
   @override
-  bool get receiverEnabled => true;
+  bool get receiverEnabled => false;
 
   @override
   Future<void> ensureLanIdentity() => _settings.ensureLanIdentity();

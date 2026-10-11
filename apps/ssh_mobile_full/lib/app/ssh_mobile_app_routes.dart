@@ -75,6 +75,7 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
                       child: feature_developer.DeveloperPanelFloatingHost(
                         child: feature_lan_share.NetworkIncomingTransferHost(
                           child: feature_lan_share.LanPairingNavigationHost(
+                            initializeReceiver: false,
                             navigatorKey: _navigatorKey,
                             child: ShadAppBuilder(child: effectiveChild),
                           ),

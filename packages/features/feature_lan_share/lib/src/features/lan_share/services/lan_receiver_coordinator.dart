@@ -49,6 +49,7 @@ final class LanReceiverCoordinator extends ChangeNotifier {
         const LanShareSingleCandidateLocalAddressSelection(),
     LanPeerTrustStore? peerTrustStore,
     this.initializeNetwork = true,
+    this.startReceiverOnInitialization = true,
     this.transferServiceOverride,
     this.discoveryServiceOverride,
     this.storageServiceOverride,
@@ -95,6 +96,9 @@ final class LanReceiverCoordinator extends ChangeNotifier {
   /// 测试中可关闭监听器和原生网络初始化，但仍保留服务装配流程。
   final bool initializeNetwork;
 
+  /// Whether initialization also starts listening, or page entry does so later.
+  final bool startReceiverOnInitialization;
+
   /// 可选的 LAN 传输服务覆盖；缺省时由初始化流程内部构造真实服务。
   ///
   /// 供测试注入 fake，避免在测试环境触发真实 HTTPS 绑定、TLS 证书 isolate
@@ -112,6 +116,7 @@ final class LanReceiverCoordinator extends ChangeNotifier {
   LanStorageService? _lanStorageService;
   LanTransferService? _transferService;
   LanRelayCoordinator? _relayCoordinator;
+  RelayEnrollmentService? _enrollmentService;
   LanNativeTransferCoordinator? _nativeTransferCoordinator;
   NetworkFacade? _networkFacade;
   bool _receiverActive = false;
@@ -156,9 +161,19 @@ final class LanReceiverCoordinator extends ChangeNotifier {
   /// 初始化完成后返回唯一 LAN 传输服务。
   LanTransferService? get transferService => _transferService;
 
-  /// 初始化完成后返回 Relay enrollment 服务。
-  LanRelayEnrollmentPort? get relayEnrollmentService =>
-      _relayCoordinator?.enrollmentService;
+  /// enrollment 门禁准备完成后返回共享服务。
+  LanRelayEnrollmentPort? get relayEnrollmentService => _enrollmentService;
+
+  /// Prepare only the durable enrollment gate, without keys or listeners.
+  Future<LanRelayEnrollmentPort> ensureRelayEnrollment() async {
+    if (_disposed) throw StateError('LAN receiver coordinator is disposed.');
+    await appSettings.ensureLanIdentity();
+    if (_disposed) throw StateError('LAN receiver coordinator is disposed.');
+    return _enrollmentService ??= RelayEnrollmentService(
+      currentDeviceId: appSettings.lanDeviceId,
+      bootstrapClient: bootstrapClient,
+    );
+  }
 
   /// 当前是否已启用原生 Relay 配置。
   bool get nativeRelayActive => _relayCoordinator?.nativeRelayActive ?? false;

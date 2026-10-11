@@ -1,4 +1,4 @@
-> Last updated: 2026-10-09
+> Last updated: 2026-10-11
 
 # Client Architecture
 
@@ -6,11 +6,14 @@
 creates App-scoped resources, `AppRuntime` owns lifecycle, and Feature Route
 Scopes create/dispose route ViewModels.
 
-Network V2 setup loads the App-owned Ed25519/X25519 identity bundle, configures
+Full App Network V2 setup waits for the first network action, loads the
+App-owned Ed25519/X25519 identity bundle, configures
 one `NetworkRuntime` once per App process, and creates one shared
 `NetworkFacade`. LAN, SSH, SFTP, Realtime, and Relay borrow it; Features may
 release subscriptions and HTTP/Discovery/Transfer resources but never stop,
 destroy, or reconfigure the runtime/facade.
+See [startup initialization](../../docs/STARTUP_INITIALIZATION.md) for the cold
+listener, first-page LAN activation, and worker-isolate boundaries.
 
 `apps/ssh_mobile_network/` is a separate composition root for the Network
 Transfer page. It owns one `NetworkRuntime`, its LAN settings, identity, and

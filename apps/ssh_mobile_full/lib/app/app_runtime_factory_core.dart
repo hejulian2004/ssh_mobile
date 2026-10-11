@@ -20,13 +20,21 @@ extension _AppRuntimeFactoryCore on _AppRuntimeFactoryContext {
       supplied: hostKeyRepository,
       connectionRepository: runtimeConnectionRepository,
     );
-    // Network identity is App Scope state. Load it before creating the
-    // native runtime so every later consumer (Facade and LAN Feature) uses
-    // the same Ed25519/X25519 bundle.
+    // Keep identity and native configuration cold until a network action.
     runtimeNetworkIdentityService =
         networkIdentityService ?? NetworkIdentityService();
-    networkIdentity = await runtimeNetworkIdentityService.loadOrCreate();
-    runtimeNetworkRuntime = networkRuntime ?? NetworkRuntimeImpl();
+    final resources = AppNetworkResources(
+      nativeRuntime: networkRuntime ?? NetworkRuntimeImpl(),
+      initialize: _configureSharedNetwork,
+      createRealtimeSession: ({required realtimeId, required peerId}) =>
+          runtimeRealtimeClient.createSession(
+            realtimeId: realtimeId,
+            peerId: peerId,
+          ),
+    );
+    runtimeNetworkRuntime = resources.networkRuntime;
+    networkFacade = resources;
+    cleanup.add(networkFacade.dispose, priority: _CleanupPriority.realtime);
     cleanup.add(
       runtimeNetworkRuntime.dispose,
       priority: _CleanupPriority.network,

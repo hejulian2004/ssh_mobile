@@ -52,7 +52,6 @@ final class _AppRuntimeFactoryContext {
   late final connection_core.CredentialRepository runtimeCredentialRepository;
   late final connection_core.HostKeyRepository runtimeHostKeyRepository;
   late final NetworkIdentityService runtimeNetworkIdentityService;
-  late final NetworkIdentityBundle networkIdentity;
   late final NetworkRuntime runtimeNetworkRuntime;
   late final TelemetryTraceRegistry traceRegistry;
   late final RealtimeClient runtimeRealtimeClient;

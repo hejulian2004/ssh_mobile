@@ -16,11 +16,12 @@ class _StartupTestBinding extends AutomatedTestWidgetsFlutterBinding {
 void main() {
   final binding = _StartupTestBinding();
 
-  testWidgets('waits for the visible raster frame before starting Runtime', (
+  testWidgets('starts Runtime while the first raster frame is still pending', (
     tester,
   ) async {
     final rasterBarrier = Completer<void>();
     binding.rasterBarrier = rasterBarrier;
+    late Completer<AppRuntime> runtimeReady;
     var factoryStarted = false;
     final previousDebugPrint = debugPrint;
     debugPrint = (String? _, {int? wrapWidth}) {};
@@ -29,12 +30,13 @@ void main() {
         AppBootstrap.run(
           runtimeFactory: () {
             factoryStarted = true;
-            return Future<AppRuntime>.error(StateError('raster-test'));
+            runtimeReady = Completer<AppRuntime>();
+            return runtimeReady.future;
           },
         ),
       );
       await tester.pump();
-      expect(factoryStarted, isFalse);
+      expect(factoryStarted, isTrue);
       await tester.pump();
       expect(
         find.byKey(const ValueKey<String>('app-bootstrap-loading')),
@@ -43,6 +45,8 @@ void main() {
       rasterBarrier.complete();
       await tester.pump();
       expect(factoryStarted, isTrue);
+      runtimeReady.completeError(StateError('raster-test'));
+      await tester.pump();
       await tester.pumpWidget(const SizedBox.shrink());
     } finally {
       if (!rasterBarrier.isCompleted) rasterBarrier.complete();
@@ -51,7 +55,7 @@ void main() {
     }
   });
 
-  testWidgets('defers Runtime construction until after the first frame', (
+  testWidgets('starts initialization before the first frame is painted', (
     tester,
   ) async {
     final previousDebugPrint = debugPrint;
@@ -72,10 +76,8 @@ void main() {
       );
 
       await tester.pump();
-      // The post-frame callback completes the barrier before the first frame
-      // pump returns, so Runtime construction can start only after that frame.
       expect(factoryStarted, isTrue);
-      expect(factoryStartedAfterFirstFrame, isTrue);
+      expect(factoryStartedAfterFirstFrame, isFalse);
 
       await tester.pump();
       expect(
@@ -94,14 +96,24 @@ void main() {
   ) async {
     final runtimeReady = Completer<AppRuntime>();
     Widget? startedApp;
+    var factoryStarted = false;
     final bootstrap = AppBootstrap.run(
-      runtimeFactory: () => runtimeReady.future,
+      runtimeFactory: () {
+        factoryStarted = true;
+        return runtimeReady.future;
+      },
       startApp: (app) => startedApp = app,
     );
 
     expect(startedApp, isNotNull);
+    expect(
+      factoryStarted,
+      isFalse,
+      reason: 'Mount the shell before beginning composition',
+    );
     await tester.pumpWidget(startedApp!);
     await tester.pump(const Duration(milliseconds: 1));
+    expect(factoryStarted, isTrue);
     expect(
       find.byKey(const ValueKey<String>('app-bootstrap-loading')),
       findsOneWidget,
@@ -117,16 +129,15 @@ void main() {
     final previousDebugPrint = debugPrint;
     debugPrint = (String? _, {int? wrapWidth}) {};
     try {
-      final runtimeFailure = Completer<AppRuntime>();
-      unawaited(
-        runtimeFailure.future.then<void>(
-          (_) {},
-          onError: (Object _, StackTrace _) {},
-        ),
-      );
+      late Completer<AppRuntime> runtimeFailure;
       Widget? startedApp;
       final bootstrap = AppBootstrap.run(
-        runtimeFactory: () => runtimeFailure.future,
+        runtimeFactory: () {
+          // Match production: the pending initializer Future belongs to the
+          // bootstrap error zone, and its failure must reach the shell.
+          runtimeFailure = Completer<AppRuntime>();
+          return runtimeFailure.future;
+        },
         startApp: (app) => startedApp = app,
       );
 
@@ -155,16 +166,13 @@ void main() {
       final previousDebugPrint = debugPrint;
       debugPrint = (String? _, {int? wrapWidth}) {};
       try {
-        final runtimeFailure = Completer<AppRuntime>();
-        unawaited(
-          runtimeFailure.future.then<void>(
-            (_) {},
-            onError: (Object _, StackTrace _) {},
-          ),
-        );
+        late Completer<AppRuntime> runtimeFailure;
         Widget? startedApp;
         final bootstrap = AppBootstrap.run(
-          runtimeFactory: () => runtimeFailure.future,
+          runtimeFactory: () {
+            runtimeFailure = Completer<AppRuntime>();
+            return runtimeFailure.future;
+          },
           startApp: (app) => startedApp = app,
         );
 
