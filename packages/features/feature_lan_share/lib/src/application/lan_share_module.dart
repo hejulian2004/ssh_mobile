@@ -11,6 +11,7 @@ import 'package:network_transport/network_transport.dart';
 import '../data/database/lan_share_database.dart';
 import '../data/repositories/lan_share_history_repository.dart';
 import '../domain/lan_share_ports.dart';
+import '../domain/lan_discovery_bridge.dart';
 import '../features/lan_share/services/lan_receiver_coordinator.dart';
 import '../services/lan_share/lan_peer_trust.dart';
 
@@ -38,6 +39,7 @@ final class LanShareModule implements AppModule {
   LanShareNetworkIdentityPort? _networkIdentity;
   LanShareNetworkAccessPort? _networkAccess;
   LanShareLocalAddressSelectionPort? _localAddressSelectionPort;
+  LanShareDiscoveryBridgePort? _discoveryBridge;
   BootstrapClient? _bootstrapClient;
   NetworkRuntime? _networkRuntime;
   bool? _receiverEnabled;
@@ -90,6 +92,7 @@ final class LanShareModule implements AppModule {
     _localAddressSelectionPort = context
         .require<LanShareLocalAddressSelectionPort>();
     _bootstrapClient = context.require<BootstrapClient>();
+    _discoveryBridge = context.maybeGet<LanShareDiscoveryBridgePort>();
     _networkRuntime = context.require<NetworkRuntime>();
     _receiverEnabled = _configuredReceiverEnabled ?? _settings!.receiverEnabled;
   }
@@ -143,6 +146,7 @@ final class LanShareModule implements AppModule {
         historyRepository: repository,
         networkRuntime: networkRuntime,
         localAddressSelectionPort: localAddressSelectionPort,
+        discoveryBridge: _discoveryBridge,
         peerTrustStore: peerTrustStore,
         startReceiverOnInitialization: receiverEnabled,
       );
@@ -201,7 +205,11 @@ final class LanShareModule implements AppModule {
       if (_state == ModuleState.active && receiverEnabled) {
         await coordinator.deactivateReceiver();
       }
-      await _coordinator?.close();
+      if (_coordinator case final coordinator?) {
+        await coordinator.close();
+      } else {
+        await _discoveryBridge?.close();
+      }
     });
     await attempt(() async {
       await _database?.dispose();

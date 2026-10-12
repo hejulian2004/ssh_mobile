@@ -2,8 +2,81 @@ import 'dart:typed_data';
 
 import 'package:feature_lan_share/feature_lan_share.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:network_sdk/network_sdk.dart';
 
 void main() {
+  test(
+    'peer presentation copies preserve metadata and clear only explicitly removed fields',
+    () {
+      final time = DateTime.utc(2026, 10, 12);
+      final discovered = LanDiscoveredPeer(
+        deviceId: 'peer',
+        alias: 'Phone',
+        ip: '192.0.2.1',
+        controlPort: 53317,
+        advertisedNativePort: 43123,
+        os: 'android',
+        deviceType: LanDeviceType.mobile,
+        lastSeen: time,
+      );
+      expect(
+        discovered.hashCode,
+        LanDiscoveredPeer.fromJson(discovered.toJson()).hashCode,
+      );
+      expect(discovered.copyWith(), discovered);
+      expect(LanDeviceType.fromJson('unknown'), LanDeviceType.mobile);
+      final route = const LanPeerRouteState().copyWith(
+        directAvailable: true,
+        relayAvailable: true,
+        activeRoute: NetworkRouteType.relay,
+        endpoint: '192.0.2.1:43123',
+        updatedAt: time,
+      );
+      expect(route.localDirectAvailable, isTrue);
+      expect(route.relayRouteAvailable, isTrue);
+      expect(route.updatedAt, time);
+      final state = LanPeerViewState(
+        discovery: discovered,
+        route: route,
+        savedAlias: 'Saved',
+        savedDeviceType: LanDeviceType.mobile,
+        lastOnlineAt: time,
+      );
+      expect(state.controlPort, 53317);
+      expect(state.deviceType, LanDeviceType.mobile);
+      final copy = state.copyWith();
+      expect(copy.lastOnlineAt, time);
+      expect(copy.route, same(route));
+      final offline = state.copyWith(
+        peerId: 'peer',
+        trust: null,
+        discovery: null,
+        reachability: LanPeerReachability.offline,
+        savedAlias: 'Saved Phone',
+        savedDeviceType: LanDeviceType.webBrowser,
+        lastOnlineAt: time,
+        route: route.copyWith(
+          activeRoute: null,
+          endpoint: null,
+          updatedAt: null,
+        ),
+      );
+      expect(offline.displayAlias, 'Saved Phone');
+      expect(offline.deviceType, LanDeviceType.webBrowser);
+      expect(offline.isOffline, isTrue);
+      expect(offline.route.endpoint, isNull);
+      expect(
+        offline
+            .copyWith(
+              savedAlias: null,
+              savedDeviceType: null,
+              lastOnlineAt: null,
+            )
+            .lastOnlineAt,
+        isNull,
+      );
+    },
+  );
   group('LanDiscoveredPeer', () {
     test('contains discovery data only and round-trips its endpoint', () {
       final peer = LanDiscoveredPeer(

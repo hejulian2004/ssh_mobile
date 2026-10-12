@@ -1,4 +1,4 @@
-最新更新时间：2026-10-11
+最新更新时间：2026-10-12
 
 # ssh_mobile_full
 
@@ -43,6 +43,22 @@ LAN 接收在首次打开快传页面时激活，随后由 Module 保持接收�
 生成器与 Android vector。启动页仍使用白底；iOS 的系统图标按平台要求保持不透明。
 
 ## 依赖
+
+屏幕共享支持已配对设备的原生 Direct QUIC/TCP 信令，无需配置 Relay；入口先经
+LAN 的身份钉扎能力查询与 peer-policy Owner 准备直连，再创建 Realtime session。
+无可用 Direct 时保留 Relay Control 路径。邀请、接受与拒绝仍由用户明确确认，
+画面仍走 native WebRTC，不能把共享信令送达当作真实 capture/render 验收。
+
+Windows Full App 在 LAN 广播期间通过注入的 discovery Port 识别本机在线 Android
+Emulator。ADB 从已配置 Android SDK、Android Studio 默认 SDK 或 PATH 解析；未安装
+或不可用时保留普通 LAN 发现。适配器只创建/释放自己的 console UDP 发现映射、
+TCP HTTPS 映射以及独立 TCP/UDP native 映射，不读取配对密钥、不操作已有 ADB
+forward、不停止模拟器。Windows 和模拟器内 Android 都需要使用支持来源端口
+PONG 的版本；仍需双向 PIN 配对和原生传输接收审批。
+模拟器 NAT 可能改写 PONG 的回复源端口，适配器为每台模拟器保留独立的回环
+请求/接收 socket，按接收通道绑定其映射，不按回包源端口关联模拟器。
+真实设备映射核验入口为 `flutter test --no-pub test/manual/lan_emulator_mapping_smoke.dart`：
+需要唯一在线的本地模拟器，使用临时 TCP/UDP 应答器并清理本次映射，不访问 App 数据。
 
 依赖由本 App 的 `pubspec.yaml` 声明，包含 Flutter、Core/Infrastructure/Feature
 Package 和 App Shell 直接使用的插件；Feature 实现不得通过 App `/src/` 反向获取依赖。

@@ -18,6 +18,7 @@ pub const MAX_CHANNEL_FRAME_BYTES: usize = 48 * 1024;
 pub enum ChannelFrameKind {
     DataMessage = 1,
     DeliveryAck = 2,
+    RealtimeSignal = 6,
 }
 
 impl TryFrom<u8> for ChannelFrameKind {
@@ -27,6 +28,7 @@ impl TryFrom<u8> for ChannelFrameKind {
         match value {
             1 => Ok(Self::DataMessage),
             2 => Ok(Self::DeliveryAck),
+            6 => Ok(Self::RealtimeSignal),
             _ => Err(Error::new(
                 ErrorKind::InvalidData,
                 "unsupported channel frame kind",

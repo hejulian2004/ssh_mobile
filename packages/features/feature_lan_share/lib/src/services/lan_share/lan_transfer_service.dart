@@ -14,11 +14,20 @@ import 'lan_network_models.dart';
 import 'lan_pairing_crypto.dart';
 import 'lan_pairing_reciprocal.dart';
 import 'lan_share_models.dart';
+import '../../domain/lan_discovery_bridge.dart';
 import 'lan_storage_service.dart';
 import 'lan_transfer_protocol.dart';
 import 'package:network_sdk/network_sdk.dart';
 
 part 'lan_transfer_client.dart';
+part 'lan_transfer_http_routes.dart';
+part 'lan_transfer_peer_routes.dart';
+part 'lan_transfer_content_routes.dart';
+part 'lan_transfer_websockets.dart';
+part 'lan_pairing_commit.dart';
+part 'lan_pairing_client.dart';
+part 'lan_pairing_offer_validation.dart';
+part 'lan_transfer_peer_client.dart';
 part 'lan_pairing_server.dart';
 part 'lan_pairing_confirm.dart';
 
@@ -67,6 +76,13 @@ class LanTransferService {
   final Set<WebSocket> _trackedWebSockets = {};
   final Map<String, Future<NetworkResult<void>>> _webSocketConnectAttempts = {};
   final Set<Future<void>> _requestOperations = {};
+  final Set<Future<void>> _incomingPairingOperations = {};
+  final Map<String, Set<Future<NetworkResult<LanPairingHandshakeProgress>>>>
+  _outboundPairingOperations = {};
+  final Map<String, int> _peerPairingEpochs = {};
+  final Map<String, _PairingInviteAttempt> _pairingInviteAttempts = {};
+  final Map<String, Set<HttpClient>> _pairingHttpClients = {};
+
   final Map<String, _PendingPairingHandshake> _pendingPairingHandshakes = {};
   final LanReciprocalPairingGate _reciprocalPairing =
       LanReciprocalPairingGate();
@@ -100,12 +116,25 @@ class LanTransferService {
     this.networkIdentityPublicKeyProvider,
     this.nativeTransferPortProvider,
     this.onPairingCommitted,
+    this.discoveryBridge,
   }) {
     _protocolGuard = LanTransferProtocolGuard(
       currentDeviceId: currentDeviceId,
       securityService: securityService,
     );
   }
+
+  final LanShareDiscoveryBridgePort? discoveryBridge;
+
+  /// Resolves only live, platform-owned local port mappings.
+  LanDiscoveredPeer resolvePeer(LanDiscoveredPeer peer) =>
+      discoveryBridge?.routePeer(peer) ?? peer;
+
+  /// Maps an authenticated native capability without changing its identity.
+  int? resolveNativePort(LanDiscoveredPeer peer, int remotePort) =>
+      discoveryBridge == null
+      ? remotePort
+      : discoveryBridge!.nativePortFor(peer, remotePort);
 
   /// 发布收到的元数据和传输消息。
   Stream<LanMessage> get incomingMessageStream =>
@@ -147,6 +176,10 @@ class LanTransferService {
   /// 是否仍有未过期的单向配对证明，需要保活发现记录。
   bool hasPendingPairing(String peerId) =>
       _reciprocalPairing.hasPending(peerId);
+
+  /// Releases this peer's HTTPS pairing proofs and connection after explicit unpair.
+  Future<void> disconnectPairedPeer(String peerId) =>
+      _disconnectPairedPeer(peerId);
 
   /// 返回已绑定监听端口；绑定前返回默认端口。
   int get activePort => _server?.port ?? defaultHttpPort;
@@ -311,197 +344,11 @@ class LanTransferService {
     late final Future<void> operation;
     operation = _handleHttpRequest(request).whenComplete(() {
       _requestOperations.remove(operation);
+      _incomingPairingOperations.remove(operation);
     });
     _requestOperations.add(operation);
-  }
-
-  /// 处理一个 LAN HTTP 请求并写入规范化安全响应。
-  Future<void> _handleHttpRequest(HttpRequest request) async {
-    final path = request.uri.path;
-    try {
-      if (_closing || _closed) {
-        throw const LanHttpException(
-          HttpStatus.serviceUnavailable,
-          'LAN transfer service is shutting down.',
-        );
-      }
-      if (request.method == 'POST' && path == '/api/lan/handshake') {
-        await _handleSecureHandshakeRequest(request);
-      } else if (request.method == 'GET' && path == '/api/lan/ws') {
-        await _handleWebSocketUpgrade(request);
-      } else if (request.method == 'GET' && path == '/api/lan/check_pair') {
-        await _handleCheckPairRequest(request);
-      } else if (request.method == 'POST' && path == '/api/lan/announce') {
-        await _handleAnnounceRequest(request);
-      } else if (request.method == 'POST' &&
-          path == '/api/lan/pairing_invite') {
-        await _handlePairingInviteRequest(request);
-      } else if (request.method == 'GET' && path == '/api/lan/capabilities') {
-        await _handleCapabilitiesRequest(request);
-      } else if (request.method == 'POST' && path == '/api/lan/meta') {
-        await _handleMetaRequest(request);
-      } else if (request.method == 'POST' && path == '/api/lan/recall') {
-        await _handleRecallRequest(request);
-      } else {
-        throw const LanHttpException(
-          HttpStatus.notFound,
-          'LAN endpoint not found.',
-        );
-      }
-    } on LanHttpException catch (error) {
-      try {
-        request.response.statusCode = error.statusCode;
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(
-          jsonEncode({
-            'code': _httpErrorCode(error.statusCode).wireValue,
-            'message': error.message,
-            'operation': _operationForPath(path).wireName,
-            if (error.discardPairingProofs) 'discardPairingProofs': true,
-            if (request.headers.value('x-device-id') case final peerId?
-                when peerId.isNotEmpty)
-              'peer_id': peerId,
-          }),
-        );
-        await request.response.close();
-      } catch (_) {}
-    } catch (error) {
-      debugPrint(
-        '[LanTransferService] Error handling request $path: '
-        'errorType=${error.runtimeType}',
-      );
-      try {
-        request.response.statusCode = HttpStatus.internalServerError;
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(
-          jsonEncode({
-            'code': NetworkErrorCode.ioError.wireValue,
-            'message': 'LAN request failed.',
-            'operation': _operationForPath(path).wireName,
-            if (request.headers.value('x-device-id') case final peerId?
-                when peerId.isNotEmpty)
-              'peer_id': peerId,
-          }),
-        );
-        await request.response.close();
-      } catch (_) {}
-    }
-  }
-
-  /// 将 HTTP 状态映射为稳定的 LAN 错误码。
-  NetworkErrorCode _httpErrorCode(int statusCode) {
-    if (statusCode == HttpStatus.badRequest ||
-        statusCode == HttpStatus.requestEntityTooLarge) {
-      return NetworkErrorCode.invalidArgument;
-    }
-    if (statusCode == HttpStatus.unauthorized ||
-        statusCode == HttpStatus.forbidden ||
-        statusCode == HttpStatus.upgradeRequired) {
-      return NetworkErrorCode.authenticationFailed;
-    }
-    if (statusCode == HttpStatus.requestTimeout ||
-        statusCode == HttpStatus.gatewayTimeout) {
-      return NetworkErrorCode.timeout;
-    }
-    if (statusCode == HttpStatus.notFound) {
-      return NetworkErrorCode.noRoute;
-    }
-    return NetworkErrorCode.ioError;
-  }
-
-  /// 返回 HTTP 端点路径对应的稳定操作名称。
-  NetworkOperation _operationForPath(String path) {
-    return switch (path) {
-      '/api/lan/handshake' => NetworkOperation.sendHandshake,
-      '/api/lan/ws' => NetworkOperation.connectWebSocket,
-      '/api/lan/check_pair' => NetworkOperation.checkPair,
-      '/api/lan/announce' => NetworkOperation.sendAnnouncement,
-      '/api/lan/pairing_invite' => NetworkOperation.sendPairingInvite,
-      '/api/lan/capabilities' => NetworkOperation.readCapabilities,
-      '/api/lan/meta' => NetworkOperation.sendMeta,
-      '/api/lan/recall' => NetworkOperation.sendRecall,
-      _ => NetworkOperation.lanRequest,
-    };
-  }
-
-  /// 提供端点专属的原生能力数据。
-  Future<void> _handleCapabilitiesRequest(HttpRequest request) async {
-    await _protocolGuard.authorize(request);
-    final pubKeyBytes = await securityService.getStaticX25519PublicKeyBytes();
-    final networkIdentityKey = await networkIdentityPublicKeyProvider?.call();
-    final nativeTransferPort = nativeTransferPortProvider?.call();
-    final nativeTransferReady =
-        networkIdentityKey != null &&
-        nativeTransferPort != null &&
-        nativeTransferPort >= 1 &&
-        nativeTransferPort <= 65535;
-    request.response.statusCode = HttpStatus.ok;
-    request.response.headers.contentType = ContentType.json;
-    request.response.write(
-      jsonEncode({
-        'protocolVersion': LanControlProtocol.version,
-        'e2eEncryption': LanSecurityService.supportsE2EEncryption,
-        'x25519PubKey': base64.encode(pubKeyBytes),
-        if (networkIdentityKey != null)
-          'networkIdentityPubKey': base64.encode(networkIdentityKey),
-        'quicFileTransfer': nativeTransferReady,
-        if (nativeTransferReady) 'quicPort': nativeTransferPort,
-      }),
-    );
-    await request.response.close();
-  }
-
-  /// 确认已认证调用方正在检查自身配对状态。
-  Future<void> _handleCheckPairRequest(HttpRequest request) async {
-    final senderDeviceId = await _protocolGuard.authorize(request);
-    final requestedDeviceId = request.uri.queryParameters['deviceId'] ?? '';
-    if (requestedDeviceId != senderDeviceId) {
-      throw const LanHttpException(
-        HttpStatus.forbidden,
-        'Pairing identity does not match.',
-      );
-    }
-
-    request.response.statusCode = HttpStatus.ok;
-    request.response.headers.contentType = ContentType.json;
-    request.response.write(jsonEncode({'paired': true}));
-    await request.response.close();
-  }
-
-  /// 认证 LAN 请求并将其升级为 WebSocket。
-  Future<void> _handleWebSocketUpgrade(HttpRequest request) async {
-    if (!WebSocketTransformer.isUpgradeRequest(request)) {
-      throw const LanHttpException(
-        HttpStatus.badRequest,
-        'LAN WebSocket upgrade is required.',
-      );
-    }
-
-    final deviceId = await _protocolGuard.authorize(request);
-    if (request.uri.queryParameters['deviceId'] != deviceId) {
-      throw const LanHttpException(
-        HttpStatus.forbidden,
-        'Pairing identity does not match.',
-      );
-    }
-
-    try {
-      final socket = await WebSocketTransformer.upgrade(request);
-      if (_closing || _closed) {
-        await socket.close();
-        throw const LanHttpException(
-          HttpStatus.serviceUnavailable,
-          'LAN transfer service is shutting down.',
-        );
-      }
-      _registerActiveWebSocket(deviceId, socket);
-    } on LanHttpException {
-      rethrow;
-    } catch (_) {
-      throw const LanHttpException(
-        HttpStatus.internalServerError,
-        'LAN WebSocket upgrade failed.',
-      );
+    if (request.uri.path == '/api/lan/handshake') {
+      _incomingPairingOperations.add(operation);
     }
   }
 
@@ -533,126 +380,9 @@ class LanTransferService {
     return attempt;
   }
 
-  Future<NetworkResult<void>> _connectWebSocket(LanDiscoveredPeer peer) async {
-    final url = Uri(
-      scheme: 'wss',
-      host: peer.ip,
-      port: peer.controlPort,
-      path: '/api/lan/ws',
-      queryParameters: {'deviceId': currentDeviceId},
-    );
-
-    try {
-      final token = await securityService.getOutboundAccessToken(peer.deviceId);
-      if (token == null || token.isEmpty) {
-        return NetworkFailure(
-          NetworkError(
-            code: NetworkErrorCode.authenticationFailed,
-            message: 'LAN pairing credentials are unavailable.',
-            operation: NetworkOperation.connectWebSocket,
-            peerId: peer.deviceId,
-          ),
-        );
-      }
-      final client = await _createHttpClient(peerDeviceId: peer.deviceId);
-      WebSocket? openedSocket;
-      try {
-        openedSocket = await WebSocket.connect(
-          url.toString(),
-          headers: {
-            'x-device-id': currentDeviceId,
-            HttpHeaders.authorizationHeader: 'Bearer $token',
-          },
-          customClient: client,
-        ).timeout(const Duration(seconds: 4));
-      } finally {
-        client.close(force: openedSocket == null);
-      }
-      final socket = openedSocket;
-      if (_closing || _closed) {
-        await socket.close();
-        return NetworkFailure(
-          lanNetworkError(
-            StateError('LAN transfer service is closed.'),
-            operation: NetworkOperation.connectWebSocket,
-            peerId: peer.deviceId,
-          ),
-        );
-      }
-      _registerActiveWebSocket(peer.deviceId, socket);
-      return const NetworkSuccess<void>(null);
-    } catch (error) {
-      return NetworkFailure(
-        lanNetworkError(
-          error,
-          operation: NetworkOperation.connectWebSocket,
-          peerId: peer.deviceId,
-        ),
-      );
-    }
-  }
-
   /// 返回 [deviceId] 是否注册了活跃 WebSocket。
   bool isWebSocketConnected(String deviceId) {
     return _activeWebSockets.containsKey(deviceId);
-  }
-
-  /// 注册 socket，并发布类型化的已连接事件。
-  bool _registerActiveWebSocket(String deviceId, WebSocket socket) {
-    if (_closing || _closed) {
-      unawaited(socket.close());
-      return false;
-    }
-    socket.pingInterval = const Duration(seconds: 5);
-    _trackedWebSockets.add(socket);
-    final previousSocket = _activeWebSockets[deviceId];
-    _activeWebSockets[deviceId] = socket;
-    if (previousSocket != null && !identical(previousSocket, socket)) {
-      unawaited(_closeTrackedWebSocket(previousSocket));
-    }
-
-    _emit(
-      _connectionStateController,
-      LanConnectionStateChanged(deviceId: deviceId, connected: true),
-    );
-
-    socket.listen(
-      (data) {},
-      onError: (e) {
-        debugPrint(
-          '[LanTransferService] WebSocket failed: '
-          'errorType=${e.runtimeType}',
-        );
-        _unregisterActiveWebSocket(deviceId, socket);
-      },
-      onDone: () {
-        debugPrint('[LanTransferService] WebSocket disconnected for $deviceId');
-        _unregisterActiveWebSocket(deviceId, socket);
-      },
-      cancelOnError: true,
-    );
-    return true;
-  }
-
-  /// 仅当 socket 仍是该对端的活跃 socket 时移除它。
-  void _unregisterActiveWebSocket(String deviceId, WebSocket socket) {
-    if (identical(_activeWebSockets[deviceId], socket)) {
-      _activeWebSockets.remove(deviceId);
-      _emit(
-        _connectionStateController,
-        LanConnectionStateChanged(deviceId: deviceId, connected: false),
-      );
-    }
-    unawaited(_closeTrackedWebSocket(socket));
-  }
-
-  Future<void> _closeTrackedWebSocket(WebSocket socket) async {
-    try {
-      await socket.close();
-    } catch (_) {
-    } finally {
-      _trackedWebSockets.remove(socket);
-    }
   }
 
   /// 为生命周期测试注册可控 socket。
@@ -661,278 +391,6 @@ class LanTransferService {
     _registerActiveWebSocket(deviceId, socket);
   }
 
-  /// 校验并记录对端广播。
-  Future<void> _handleAnnounceRequest(HttpRequest request) async {
-    final json = await _protocolGuard.readJson(request);
-
-    final senderId = json['id'] is String ? (json['id'] as String).trim() : '';
-    final alias = json['alias'] is String
-        ? (json['alias'] as String).trim()
-        : '';
-    final os = json['os'] is String ? (json['os'] as String).trim() : '';
-    var hostIp = request.connectionInfo?.remoteAddress.address ?? '';
-    if (hostIp.startsWith('::ffff:')) {
-      hostIp = hostIp.substring(7);
-    }
-    final port = (json['port'] as num?)?.toInt() ?? defaultHttpPort;
-
-    if (senderId.isEmpty ||
-        senderId == currentDeviceId ||
-        senderId.length > 128 ||
-        alias.isEmpty ||
-        alias.length > 128 ||
-        os.isEmpty ||
-        os.length > 64 ||
-        hostIp.isEmpty ||
-        port < 1 ||
-        port > 65535) {
-      throw const LanHttpException(
-        HttpStatus.badRequest,
-        'Invalid device announcement.',
-      );
-    }
-    _protocolGuard.checkPairingInviteRate(hostIp);
-    {
-      final peer = LanDiscoveredPeer(
-        deviceId: senderId,
-        alias: alias,
-        ip: hostIp,
-        controlPort: port,
-        deviceType: _guessDeviceType(os),
-        os: os,
-        lastSeen: DateTime.now(),
-      );
-      _emit(_announcedPeerController, peer);
-    }
-
-    request.response.statusCode = HttpStatus.ok;
-    request.response.headers.contentType = ContentType.json;
-    request.response.write(
-      jsonEncode({'deviceId': currentDeviceId, 'port': activePort}),
-    );
-    await request.response.close();
-  }
-
-  /// 校验并记录传入配对邀请。
-  Future<void> _handlePairingInviteRequest(HttpRequest request) async {
-    final json = await _protocolGuard.readJson(request);
-    final senderId = json['deviceId'] is String
-        ? (json['deviceId'] as String).trim()
-        : '';
-    final sessionId = json['sessionId'] is String
-        ? (json['sessionId'] as String).trim()
-        : '';
-    final validForMs = (json['validForMs'] as num?)?.toInt() ?? 0;
-    final alias = json['alias'] is String
-        ? (json['alias'] as String).trim()
-        : '';
-    final os = json['os'] is String ? (json['os'] as String).trim() : '';
-    final port = (json['port'] as num?)?.toInt() ?? defaultHttpPort;
-    if (senderId.isEmpty ||
-        senderId == currentDeviceId ||
-        senderId.length > 128 ||
-        sessionId.isEmpty ||
-        sessionId.length > 128 ||
-        alias.isEmpty ||
-        alias.length > 128 ||
-        os.isEmpty ||
-        os.length > 64 ||
-        port < 1 ||
-        port > 65535 ||
-        validForMs <= 0 ||
-        validForMs > const Duration(minutes: 2).inMilliseconds) {
-      throw const LanHttpException(
-        HttpStatus.badRequest,
-        'Invalid pairing invitation.',
-      );
-    }
-    final expiresAt = DateTime.now().add(Duration(milliseconds: validForMs));
-    var hostIp = request.connectionInfo?.remoteAddress.address ?? '';
-    if (hostIp.startsWith('::ffff:')) {
-      hostIp = hostIp.substring(7);
-    }
-    if (hostIp.isEmpty) {
-      throw const LanHttpException(
-        HttpStatus.badRequest,
-        'Pairing invitation has no source address.',
-      );
-    }
-    _protocolGuard.checkPairingInviteRate(hostIp);
-    final peer = LanDiscoveredPeer(
-      deviceId: senderId,
-      alias: alias,
-      ip: hostIp,
-      controlPort: port,
-      deviceType: _guessDeviceType(os),
-      os: os,
-      lastSeen: DateTime.now(),
-    );
-    _emit(
-      _pairingInviteController,
-      LanPairingRequest(
-        peer: LanPeerViewState(discovery: peer),
-        sessionId: sessionId,
-        isIncoming: true,
-        expiresAt: expiresAt,
-      ),
-    );
-    request.response.statusCode = HttpStatus.ok;
-    request.response.headers.contentType = ContentType.json;
-    request.response.write(
-      jsonEncode({'deviceId': currentDeviceId, 'port': activePort}),
-    );
-    await request.response.close();
-  }
-
-  /// 将对端操作系统标签映射为功能使用的设备类别。
-  LanDeviceType _guessDeviceType(String os) {
-    final lower = os.toLowerCase();
-    if (lower.contains('android') || lower.contains('ios')) {
-      return LanDeviceType.mobile;
-    }
-    if (lower.contains('web')) {
-      return LanDeviceType.webBrowser;
-    }
-    return LanDeviceType.desktop;
-  }
-
-  /// 校验并接收文本/剪贴板元数据。
-  ///
-  /// Binary metadata is intentionally rejected. Files are transferred through
-  /// Network V2 and never through this HTTPS control plane.
-  Future<void> _handleMetaRequest(HttpRequest request) async {
-    final senderDeviceId = await _protocolGuard.authorize(request);
-    final e2ePubKeyHeader = request.headers.value('x-e2e-pubkey');
-    final isEncrypted = e2ePubKeyHeader == '1';
-    if (!isEncrypted) {
-      throw const LanHttpException(
-        HttpStatus.upgradeRequired,
-        'LAN metadata requires application E2E encryption.',
-      );
-    }
-    Map<String, dynamic> json;
-    final blob = await _protocolGuard.readBytes(
-      request,
-      maxBytes: LanTransferProtocolGuard.maxMetadataBodyBytes + 60,
-    );
-    try {
-      final plainBytes = await securityService.decryptE2E(blob);
-      if (plainBytes.length > LanTransferProtocolGuard.maxMetadataBodyBytes) {
-        throw const LanHttpException(
-          HttpStatus.requestEntityTooLarge,
-          'Metadata is too large.',
-        );
-      }
-      final decoded = jsonDecode(utf8.decode(plainBytes));
-      if (decoded is! Map<String, dynamic>) {
-        throw const FormatException('Expected a JSON object.');
-      }
-      json = decoded;
-    } on LanHttpException {
-      rethrow;
-    } catch (_) {
-      throw const LanHttpException(
-        HttpStatus.badRequest,
-        'Encrypted metadata is invalid.',
-      );
-    }
-
-    final payloadName = json['payloadType'];
-    final validPayload =
-        payloadName == LanPayloadType.text.name ||
-        payloadName == LanPayloadType.clipboard.name;
-    if (!validPayload) {
-      throw const LanHttpException(
-        HttpStatus.upgradeRequired,
-        'Binary LAN payloads require Network V2 transfer.',
-      );
-    }
-
-    late final LanMessage decodedMessage;
-    try {
-      decodedMessage = LanMessage.fromJson({
-        ...json,
-        'localPath': null,
-        'isIncoming': true,
-        'isRecalled': false,
-      });
-    } catch (_) {
-      throw const LanHttpException(
-        HttpStatus.badRequest,
-        'Invalid LAN message metadata.',
-      );
-    }
-    if (decodedMessage.id.isEmpty ||
-        decodedMessage.id.length > 128 ||
-        decodedMessage.senderId != senderDeviceId ||
-        decodedMessage.receiverId != currentDeviceId ||
-        decodedMessage.senderAlias.isEmpty ||
-        decodedMessage.senderAlias.length > 128 ||
-        decodedMessage.fileSize != 0 ||
-        (decodedMessage.textContent?.length ?? 0) > 512 * 1024) {
-      throw const LanHttpException(
-        HttpStatus.badRequest,
-        'Invalid LAN message metadata.',
-      );
-    }
-
-    final message = LanMessage(
-      id: decodedMessage.id,
-      senderId: senderDeviceId,
-      senderAlias: decodedMessage.senderAlias,
-      receiverId: currentDeviceId,
-      payloadType: decodedMessage.payloadType,
-      textContent: decodedMessage.textContent,
-      fileName: null,
-      fileSize: 0,
-      status: LanTransferStatus.completed,
-      bytesTransferred: 0,
-      createdAt: DateTime.now(),
-      isIncoming: true,
-    );
-
-    if (_closing || _closed) {
-      throw const LanHttpException(
-        HttpStatus.serviceUnavailable,
-        'LAN transfer service is shutting down.',
-      );
-    }
-
-    _emit(_incomingMessageController, message);
-
-    request.response.statusCode = HttpStatus.ok;
-    request.response.headers.contentType = ContentType.json;
-    request.response.write(jsonEncode({'id': message.id}));
-    await request.response.close();
-  }
-
-  /// 校验并广播已配对对端发来的撤回请求。
-  Future<void> _handleRecallRequest(HttpRequest request) async {
-    final senderDeviceId = await _protocolGuard.authorize(request);
-    final json = await _protocolGuard.readJson(request);
-    final messageId = json['messageId'] is String
-        ? (json['messageId'] as String).trim()
-        : '';
-    if (messageId.isEmpty || messageId.length > 128) {
-      throw const LanHttpException(
-        HttpStatus.badRequest,
-        'Invalid recalled message ID.',
-      );
-    }
-    _emit(
-      _recalledMessageIdController,
-      LanRecallRequest(senderDeviceId: senderDeviceId, messageId: messageId),
-    );
-
-    request.response.statusCode = HttpStatus.ok;
-    request.response.headers.contentType = ContentType.json;
-    request.response.write(jsonEncode({'messageId': messageId}));
-    await request.response.close();
-  }
-
-  // ── 带重试的客户端发送 API ──
-
-  /// 创建用于 LAN 请求的证书固定 HTTP 客户端。
   Future<HttpClient> _createHttpClient({
     String? peerDeviceId,
     String? expectedFingerprint,
@@ -981,71 +439,6 @@ class LanTransferService {
     _emit(_messageProgressController, message);
   }
 
-  /// 丢弃 [peerId] 的双向证明，并通知界面清除等待提示。
-  void _discardReciprocalPairing(String peerId) {
-    _reciprocalPairing.discard(peerId);
-    _emit(
-      _pairingDirectionController,
-      LanPairingDirectionNotice(
-        peerId: peerId,
-        outboundVerified: false,
-        inboundVerified: false,
-      ),
-    );
-  }
-
-  LanDiscoveredPeer _peerFromPairingProof(LanPairingDirectionProof proof) {
-    return LanDiscoveredPeer(
-      deviceId: proof.peerDeviceId,
-      alias: proof.alias,
-      ip: proof.ip,
-      controlPort: proof.controlPort,
-      deviceType: _guessDeviceType(proof.os),
-      os: proof.os,
-      lastSeen: DateTime.now(),
-    );
-  }
-
-  void _emitObservedPeer(LanPairingDirectionProof proof) {
-    _emit(_observedPeerController, _peerFromPairingProof(proof));
-  }
-
-  /// Persists trust only for a committed reciprocal update.
-  ///
-  /// Waiting leaves the trust store unchanged. The observed peer is emitted
-  /// before handshake success so discovery is registered first.
-  Future<LanPairingHandshakeProgress?> _applyReciprocalUpdate({
-    required LanReciprocalPairingUpdate update,
-    required LanPairingDirectionProof observed,
-  }) async {
-    _emit(_pairingDirectionController, update.notice);
-    switch (update.decision) {
-      case LanReciprocalPairingDecision.rejected:
-        return null;
-      case LanReciprocalPairingDecision.waiting:
-        _emitObservedPeer(observed);
-        return LanPairingHandshakeProgress.waitingForPeer;
-      case LanReciprocalPairingDecision.committed:
-        final proof = update.commitProof;
-        if (proof == null) return null;
-        await securityService.savePeerTrustRecord(
-          deviceId: proof.peerDeviceId,
-          certificateFingerprint: proof.certificateFingerprint,
-          inboundAccessToken: proof.inboundAccessToken,
-          outboundAccessToken: proof.outboundAccessToken,
-          x25519PublicKey: proof.x25519PublicKey,
-          networkIdentityPublicKey: proof.networkIdentityPublicKey,
-        );
-        _emitObservedPeer(proof);
-        final pairedPeer = _peerFromPairingProof(proof);
-        final pairingObserver = onPairingCommitted;
-        if (pairingObserver != null) await pairingObserver(pairedPeer);
-        _emit(_handshakeSuccessController, pairedPeer);
-        return LanPairingHandshakeProgress.paired;
-    }
-  }
-
-  /// 只在服务未进入关闭阶段时发布事件。
   void _emit<T>(StreamController<T> controller, T event) {
     if (_closing || _closed || controller.isClosed) return;
     controller.add(event);
@@ -1056,6 +449,14 @@ class LanTransferService {
 
   Future<void> _closeResources() async {
     _closing = true;
+    for (final peerId in _outboundPairingOperations.keys.toList()) {
+      cancelPairingAuthentication(peerId);
+    }
+    final invitations = _pairingInviteAttempts.values.toList();
+    for (final peerId in _pairingInviteAttempts.keys.toList()) {
+      cancelPairingInvite(peerId);
+    }
+    await Future.wait(invitations.map((attempt) => attempt.done.future));
     final activeStart = _startListeningFuture;
     if (activeStart != null) await activeStart;
     await stopListening();
@@ -1067,6 +468,11 @@ class LanTransferService {
     if (connectAttempts.isNotEmpty) {
       await Future.wait(connectAttempts);
     }
+    await Future.wait(
+      _outboundPairingOperations.values
+          .expand((operations) => operations)
+          .toList(),
+    );
     await closeConnections();
     _activeWebSockets.clear();
     _webSocketConnectAttempts.clear();

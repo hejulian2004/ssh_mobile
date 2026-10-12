@@ -1,4 +1,4 @@
-最新更新时间：2026-10-09
+最新更新时间：2026-10-12
 
 # 资源 Owner 审计
 
@@ -45,6 +45,8 @@
 | WebViewService | `AppRuntime` → `ClientWebViewService` | App | `dispose` chat sessions and controllers |
 | MCP HTTP Server | `McpModule` → `McpServerController` | App Module | `stop` server and pending approvals |
 | LAN Receiver | `LanShareModule` → `LanReceiverCoordinator` | App Module | deactivate receiver, close HTTP/WS/Discovery/Transfer resources and borrowed Facade subscriptions; never stop/destroy App NetworkRuntime/native handle |
+| LAN pairing invitation/PIN HTTP clients | `LanTransferService` | Peer attempt | reject duplicate attempts, force-close on termination/unpair/final close, drain outstanding work and invalidate late results; no trust revocation or shared Runtime release on termination |
+| Local Android Emulator discovery bridge | App-injected `AppLanEmulatorDiscovery`, activated by Receiver Discovery | LAN advertising generation | cancel polling/per-emulator subscriptions, drain in-flight ADB commands and observations, close each owned UDP socket, then delete only its exact console TCP/UDP redirections; never remove existing ADB forwards or stop emulators/ADB server |
 | LAN incoming transfer offer stream | `LanReceiverCoordinator` | App Module | cancel the current Facade subscription on every runtime replacement; close the stable broadcast controller during final Receiver release |
 | LAN PeerTrustStore | `LanShareModule` / LAN security boundary | App Module | serialize secure-storage writes, close change stream; explicit unpair deletes one record, deactivate does not clear trust |
 | LAN Native Peer Registry | `LanShareModule` → `LanReceiverCoordinator` | App Module/borrowed Facade | restore/register trusted peers and detach endpoint/event subscriptions; only explicit unpair calls `NetworkFacade.removePeer` |

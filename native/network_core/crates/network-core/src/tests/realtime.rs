@@ -22,6 +22,28 @@ use crate::runtime::PeerConfig;
 use crate::NetworkRuntime;
 
 #[test]
+fn wildcard_screen_driver_selects_a_concrete_interface_in_the_bound_family() {
+    let addresses = ["198.51.100.7", "0.0.0.0", "2001:db8::7"].map(|ip| ip.parse().unwrap());
+    assert_eq!(
+        super::io::select_interface_ip("0.0.0.0".parse().unwrap(), addresses, None),
+        Some("198.51.100.7".parse().unwrap())
+    );
+    assert_eq!(
+        super::io::select_interface_ip("0.0.0.0".parse().unwrap(), [], None),
+        None
+    );
+    let addresses = ["198.51.100.7", "198.51.100.8"].map(|ip| ip.parse().unwrap());
+    assert_eq!(
+        super::io::select_interface_ip(
+            "0.0.0.0".parse().unwrap(),
+            addresses,
+            Some("198.51.100.8".parse().unwrap())
+        ),
+        Some("198.51.100.8".parse().unwrap())
+    );
+}
+
+#[test]
 fn media_endpoint_driver_requires_a_current_matching_realtime_session() {
     let realtime_id = "00112233445566778899aabbccddeeff";
     let mut manager = RealtimeManager::default();

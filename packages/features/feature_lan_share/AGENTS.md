@@ -1,4 +1,4 @@
-最新更新时间：2026-09-12
+最新更新时间：2026-10-12
 
 # feature_lan_share 维护约束
 
@@ -36,6 +36,21 @@
 
 ## Protocol, trust, and transfer invariants
 
+- Device cards present presence and pairing separately. Saved trust/metadata is
+  never online evidence or a restored endpoint. Paired aliases and latest observed
+  came-online transitions use the existing non-secret metadata DAO; heartbeats
+  cannot advance that timestamp, and dynamic ports/IPs stay
+  absent. Explicit unpair invalidates pending authentication and disconnects
+  control before registry trust removal, clears the current list observation and
+  metadata, preserves history, and never suppresses rediscovery.
+
+- Optional `LanShareDiscoveryBridgePort` is App-injected and Discovery-owned.
+  Only its live owned mappings may publish local loopback discovery endpoints;
+  raw NAT observations cannot become control endpoints. Preserve contacted
+  control ports and map native capabilities only after pinned identity checks.
+  Stop/close drains observations/commands and releases exact local leases,
+  never existing ADB forwards, emulator processes, App Runtime, or Trust.
+
 - Network V2 transfer events (`Progress`/`Completed`/`Failed`) require authoritative
   `peerId`; missing/mismatched IDs fail closed, never use `transferId` alone.
   App↔App binary image/video/audio/file uses Native Network V2 regular-file
@@ -62,8 +77,13 @@
   capacity, body/name/size/preview are bounded, replay/reuse cannot create an
   untracked write, and failure releases the exact lease/deletes partial data/
   records failure. Desktop export uses bounded streams, never a huge memory copy.
-- LAN HTTPS and native QUIC/TCP use separate ports. Native binds ephemerally and
-  advertises only its confirmed port; senders never guess HTTPS. URI construction
+- LAN HTTPS and native QUIC/TCP use separate ports.
+  `prepareRealtimeConnection` reuses this owner for App screen-share signaling
+  preparation: pinned identity/capabilities, paired route authorization, and
+  dynamic endpoint reconciliation precede native connect; it sends no file and
+  creates no Realtime/media owner or dependency on `feature_screen_share`.
+  Native binds ephemerally and advertises only its confirmed port; senders never
+  guess HTTPS. URI construction
   is structured, connections direct/certificate-pinned/no-redirect. Advertising
   restart releases the prior mDNS/UDP generation; delayed callbacks retain their
   creation socket identity. Runtime startup ensures only `NetworkCapability.runtime`,

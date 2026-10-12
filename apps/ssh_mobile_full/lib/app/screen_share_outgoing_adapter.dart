@@ -105,6 +105,18 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
       if (selectedSource == null) return;
       if (superseded) throw StateError('Screen-share intent was superseded.');
 
+      final coordinator = runtime.lanShareModule.coordinator;
+      final network = coordinator.nativeTransferCoordinator;
+      if (network == null) throw StateError('Network receiver is not ready.');
+      final prepared = await network.prepareRealtimeConnection(
+        peerId: peerId,
+        discovery: coordinator.viewModel?.peerStateFor(peerId)?.discovery,
+      );
+      if (prepared is SdkFailure<void>) {
+        throw StateError(prepared.error.message);
+      }
+      if (superseded) throw StateError('Screen-share intent was superseded.');
+
       final realtimeId = _newHexIdentity();
       session = runtime.realtimeClient.createSession(
         realtimeId: realtimeId,

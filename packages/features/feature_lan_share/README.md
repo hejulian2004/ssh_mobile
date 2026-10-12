@@ -1,6 +1,22 @@
-最新更新时间：2026-10-11
+最新更新时间：2026-10-12
 
 # feature_lan_share
+
+mDNS 发现使用已解析的有效 IPv4，不能把 canonical hostname 当作 HTTPS 地址。
+仍有效的 UDP/手动端点观察优先于同一设备其他网卡的 mDNS 地址；过期或移除后允许
+重新发现。设备配对邀请和 PIN 验证都禁止重复连接，并提供终止入口；终止关闭该
+操作的 HTTP 连接、使迟到结果失效，不移除已有 Trust 或释放 App Runtime。
+
+设备列表将在线状态与配对状态分别展示。当前发现、已连接控制通道或 native/Relay
+在线观察可提供在线证据；旧配对记录本身不能证明在线。已配对设备离线后仍显示
+已保存别名和最近上线时间（本地观测的非在线→在线时间，持续在线时不随心跳刷新），
+首次没有观察记录时显示“未知”。这些非秘密信息使用
+现有 `LanPairingMetadata`，不恢复保存的 IP/端口为可用路由。
+
+Windows 和 Android 共用设备卡片：点击保留聊天/配对导航，长按、右键或更多按钮
+可确认解除配对。解除配对先使进行中的认证失效并释放控制连接，再通过唯一 native
+registry 删除信任与 peer，清理展示元数据及当前发现项；聊天历史保留，不屏蔽以后
+重新扫描和重新配对。
 
 LAN Quick Share 的独立 Feature Package。当前开发阶段只接受破坏性的
 `LAN Control Protocol V2`：负责设备发现、配对、capabilities、authenticated
@@ -79,6 +95,14 @@ control HTTP、WSS Relay enrollment/编排、Web Share、传输历史和非秘�
 
 ## 本地地址选择与配对路由
 
+- 可选 `LanShareDiscoveryBridgePort` 由 App Shell 注入，由 Discovery 广播生命周期
+  激活、停止和最终关闭。平台适配器只发布 discovery-only peer 与临时端口映射，
+  不建立 Trust，不改变 PIN/TLS/原生身份认证。UDP PONG 回复实际来源端口，适应 NAT；
+  普通 UDP 不把 loopback 来源当作可连接的对端，loopback 端点只由拥有映射的适配器发布。
+- 配对/announce 返回保留实际联系的控制端口；远端内部端口不能覆盖端口映射。
+  Native capabilities 仍先验证配对证书和静态身份，再通过该 Port 解析 native 端口；
+  映射失效返回 noRoute，不猜测端口或降级 HTTPS 文件传输。
+
 - WebShare Automatic 只按 Feature 定义的地址选择 Port 选址，不依赖
   `NetworkInterface.list()` 顺序。candidate 带有当前 IPv4、接口名和仅本次使用的
   `interfaceIndex`；接口索引不持久化。显式 override 仅在地址仍属于当前 eligible
@@ -103,6 +127,11 @@ HTTP/identity adapters 以及 Native Network V2 的共享 facade 借用边界。
 Control 只暴露 V2 pairing/upload contract。
 
 ## Package contract
+
+`LanNativeTransferCoordinator.prepareRealtimeConnection` 为 App 共享入口准备已认证的
+可靠信令通道，复用身份钉扎能力查询、模拟器映射及 `LanNativePeerRegistry` 的信任/
+动态端点 Owner；该操作不发送文件、不创建 Realtime 或媒体资源。Direct/Relay
+授权保持独立，发现的 deviceId 必须与所选已配对设备一致。
 
 - 职责：提供 LAN Control V2 发现/配对/capabilities/control HTTP、WSS Relay
   enrollment/状态、Web Share 和传输历史；二进制数据面只消费 Network V2 Transfer。

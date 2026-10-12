@@ -38,6 +38,7 @@ use crate::session::SessionId;
 mod claim;
 mod claim_commit;
 mod claim_reject;
+mod direct;
 mod io;
 mod provisional;
 mod provisional_signal;
@@ -53,6 +54,7 @@ pub(crate) use claim::{
 };
 pub(crate) use claim_commit::claim_incoming_offer;
 pub(crate) use claim_reject::{discard_incoming_offer, reject_incoming_offer};
+pub(crate) use direct::handle_direct_signal;
 pub(crate) use io::{
     close_realtime_sessions_for_session, create_io_driver, realtime_task_key,
     remove_realtime_session_if_owned, run_realtime_session_io, runtime_webrtc_config,

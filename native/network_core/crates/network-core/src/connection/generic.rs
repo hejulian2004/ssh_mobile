@@ -104,6 +104,7 @@ pub(crate) enum GenericFrameKind {
     StreamBytes = 3,
     StreamOpen = 4,
     StreamClose = 5,
+    RealtimeSignal = 6,
 }
 
 impl TryFrom<u8> for GenericFrameKind {
@@ -116,6 +117,7 @@ impl TryFrom<u8> for GenericFrameKind {
             3 => Ok(Self::StreamBytes),
             4 => Ok(Self::StreamOpen),
             5 => Ok(Self::StreamClose),
+            6 => Ok(Self::RealtimeSignal),
             _ => Err(ConnectionError::InvalidFrame),
         }
     }

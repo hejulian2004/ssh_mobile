@@ -48,6 +48,8 @@ import 'ai_feature_adapters.dart';
 import 'developer_feature_adapters.dart';
 import 'lan_share_feature_adapters.dart';
 import 'lan_share_local_address_selection.dart';
+import 'lan_share_emulator_discovery.dart';
+import 'lan_share_emulator_host.dart';
 import 'mcp_feature_adapters.dart';
 import 'monitoring_feature_adapters.dart';
 import 'network_sdk_adapters.dart';

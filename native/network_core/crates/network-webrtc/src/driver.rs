@@ -57,6 +57,7 @@ pub struct RealtimeIoDriver {
     peer: WebRtcPeer,
     socket: Arc<UdpSocket>,
     local_addr: SocketAddr,
+    io_local_addr: SocketAddr,
 }
 
 /// Shared owner handle used by Runtime signal handling and the I/O task.  The
@@ -101,6 +102,7 @@ impl RealtimeIoDriver {
             peer,
             socket: Arc::new(socket),
             local_addr,
+            io_local_addr: SocketAddr::new(candidate_ip, local_addr.port()),
         })
     }
 
@@ -131,7 +133,7 @@ impl RealtimeIoDriver {
     }
 
     fn local_addr_value(&self) -> SocketAddr {
-        self.local_addr
+        self.io_local_addr
     }
 }
 

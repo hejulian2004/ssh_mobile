@@ -181,7 +181,9 @@ extension _LanShareDialogActions on _LanShareScreenState {
     LanShareStrings strings,
   ) async {
     final result = await vm.requestPairing(device);
-    if (result is NetworkFailure<void> && context.mounted) {
+    if (result is NetworkFailure<void> &&
+        result.error.code != NetworkErrorCode.cancelled &&
+        context.mounted) {
       _showRequestFailure(context, result, strings);
     }
     return result;

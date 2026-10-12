@@ -28,6 +28,12 @@ extension _AppRuntimeFactoryNetwork on _AppRuntimeFactoryContext {
               isWindows: Platform.isWindows,
             ),
         BootstrapClient: bootstrapClient,
+        if (Platform.isWindows)
+          feature_lan_share.LanShareDiscoveryBridgePort:
+              AppLanEmulatorDiscovery(
+                host: AdbAndroidEmulatorHost(),
+                logger: AppLanShareLoggerAdapter(logger),
+              ),
         NetworkRuntime: runtimeNetworkRuntime,
       }),
     );

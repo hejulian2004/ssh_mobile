@@ -1,8 +1,16 @@
-Last updated: 2026-09-12
+Last updated: 2026-10-12
 
 # WebRTC Screen Sharing Architecture
 
 ## Status and authority
+
+The paired Direct signaling extension is defined by
+[ADR-036](../adr/ADR-036-direct-screen-share-signaling.md): App prepares a pinned
+native carrier, native borrows the ready Direct PathLease, and dedicated frame 6
+uses current application encryption and authenticated Session/source/target
+binding. Relay Control remains available when Direct is absent. The unchanged
+provisional claim and explicit consent gates apply to both paths; media never
+crosses Dart or Delivery. Device capture/render acceptance remains separate.
 
 Status: Accepted architecture for Phase 0 through Phase 7. Phase 0 and Phase 1
 have committed implementation evidence without separate screen-share PRs; their

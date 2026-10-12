@@ -1,6 +1,19 @@
-> Last updated: 2026-10-11
+> Last updated: 2026-10-12
 
 # LAN Share Feature Memory
+
+mDNS uses resolved IPv4 addresses rather than canonical hostnames. Fresh
+UDP/manual endpoint observations take precedence over another interface in a
+peer's mDNS record until expiry/removal. Invitation and PIN requests are
+single-flight per peer; explicit termination closes their owned HTTP clients
+and invalidates late proof/navigation results without revoking existing trust.
+
+Device list cards show independent online/pairing labels and the latest observed
+non-online→online transition in local time; heartbeats do not advance it. The existing metadata DAO retains paired aliases and
+timestamps after discovery expires, without restoring endpoints. Explicit
+long-press/right-click/menu unpair cancels in-flight authentication, drains control
+work, delegates trust/native removal to the registry, and removes presentation
+metadata/current discovery while preserving history and future rediscovery.
 
 `packages/features/feature_lan_share/` owns LAN Control Protocol V2 discovery,
 pairing, capabilities, authenticated control HTTPS/WebSocket, Web Share, Relay
@@ -54,6 +67,17 @@ explicit/configured, not an import or App-start side effect.
   metadata.
 
 ## Transfer and lifecycle invariants
+
+- Windows Full App optionally injects `LanShareDiscoveryBridgePort` to discover
+  local online Android Emulators through owned console UDP redirects. The bridge
+  uses one owned loopback request/receive socket per emulator because NAT can
+  rewrite PONG reply source ports; socket identity binds the route. It maps
+  control TCP and separate native TCP/UDP ports; Discovery owns its
+  advertising generation and drains/cleans exact leases on stop/close. Raw
+  localhost UDP observations do not become peers; PONG replies to the observed
+  source port across NAT. Pairing retains the contacted control port, and native
+  capability ports are mapped only after pinned identity verification. Neither
+  local mappings nor ADB visibility establish trust or replace native transfer.
 
 - WebShare QR Automatic uses the Feature-defined local IPv4 selection Port, never
   interface enumeration order. Candidates contain address, interface name, and

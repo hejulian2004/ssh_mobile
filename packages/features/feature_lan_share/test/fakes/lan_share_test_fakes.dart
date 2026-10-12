@@ -26,6 +26,10 @@ final class FakeLanShareStrings extends Fake implements LanShareStrings {
 
   @override
   String get cancel => 'Cancel';
+  @override
+  String get lanShareOnline => english ? 'Online' : '在线';
+  @override
+  String get lanShareOffline => english ? 'Offline' : '离线';
 
   @override
   String get networkIncomingTransferTitle => 'Incoming Transfer';
@@ -47,6 +51,7 @@ final class FakeLanShareSettings extends ChangeNotifier
   FakeLanShareSettings({this.english = false, this.relayEndpoint = ''});
 
   final bool english;
+  bool get hasActiveListeners => hasListeners;
 
   /// 已保存的 Relay origin；默认空字符串表示未配置。
   @override
@@ -591,6 +596,10 @@ final class FakeLanTransferService extends Fake implements LanTransferService {
 
   @override
   bool hasPendingPairing(String peerId) => false;
+  @override
+  bool isWebSocketConnected(String peerId) => false;
+  @override
+  Future<void> disconnectPairedPeer(String peerId) async {}
 
   @override
   Stream<LanMessage> get incomingMessageStream => const Stream.empty();

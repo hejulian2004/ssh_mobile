@@ -264,13 +264,17 @@ void main() {
         // 4. Garbage Collection test
         final expiredFile = File('${lanSandbox.path}/old_file.bin')
           ..writeAsStringSync('old');
+        await expiredFile.setLastModified(
+          DateTime.now().subtract(const Duration(days: 8)),
+        );
+        final freshFile = File('${lanSandbox.path}/fresh_file.bin')
+          ..writeAsStringSync('fresh');
         expect(expiredFile.existsSync(), isTrue);
         final gcDeletedCount = await storageService
-            .perform7DayGarbageCollection(
-              ttl: Duration.zero, // Expire immediately
-            );
-        expect(gcDeletedCount, greaterThanOrEqualTo(1));
+            .perform7DayGarbageCollection();
+        expect(gcDeletedCount, 1);
         expect(expiredFile.existsSync(), isFalse);
+        expect(freshFile.existsSync(), isTrue);
       },
     );
 

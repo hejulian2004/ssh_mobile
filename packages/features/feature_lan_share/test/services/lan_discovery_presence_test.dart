@@ -1,7 +1,59 @@
 import 'package:feature_lan_share/feature_lan_share.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'package:nsd/nsd.dart' as nsd;
 
 void main() {
+  test('mDNS uses resolved IPv4 instead of a canonical hostname', () async {
+    final service = _NsdDiscovery();
+    addTearDown(service.close);
+    await service.startDiscovery();
+    service.discovery.add(
+      nsd.Service(
+        name: 'Phone',
+        type: LanDiscoveryService.serviceType,
+        host: 'phone.local',
+        addresses: [InternetAddress('192.168.137.20')],
+        port: 53317,
+        txt: {'id': utf8.encode('phone')},
+      ),
+    );
+    expect(service.currentDiscoveredPeers.single.ip, '192.168.137.20');
+  });
+  test(
+    'fresh observed hotspot endpoint survives another mDNS interface address',
+    () async {
+      final service = _NsdDiscovery();
+      addTearDown(service.close);
+      await service.startDiscovery();
+      service.registerDiscoveredPeer(
+        _peer('peer', DateTime.now()).copyWith(ip: '192.168.137.20'),
+      );
+      service.discovery.add(
+        nsd.Service(
+          name: 'Peer',
+          type: LanDiscoveryService.serviceType,
+          host: '198.18.0.2',
+          port: 53317,
+          txt: {'id': utf8.encode('peer'), 'os': utf8.encode('android')},
+        ),
+      );
+      expect(service.currentDiscoveredPeers.single.ip, '192.168.137.20');
+      service.removeDiscoveredPeer('peer');
+      service.discovery.remove(service.discovery.services.single);
+      service.discovery.add(
+        nsd.Service(
+          name: 'Peer',
+          type: LanDiscoveryService.serviceType,
+          host: '192.168.137.21',
+          port: 53317,
+          txt: {'id': utf8.encode('peer')},
+        ),
+      );
+      expect(service.currentDiscoveredPeers.single.ip, '192.168.137.21');
+    },
+  );
   test('a refreshed discovery record survives the presence sweep', () async {
     final service = _service();
     addTearDown(service.close);
@@ -38,6 +90,22 @@ void main() {
     );
     expect(service.currentDiscoveredPeers, isEmpty);
   });
+}
+
+class _NsdDiscovery extends LanDiscoveryService {
+  _NsdDiscovery()
+    : super(
+        currentDeviceId: 'local',
+        currentDeviceAlias: 'Local',
+        localAddressSelectionPort:
+            const LanShareSingleCandidateLocalAddressSelection(),
+        multicastLock: _SilentMulticastLock(),
+      );
+  final discovery = nsd.Discovery('fixture');
+  @override
+  Future<nsd.Discovery> performStartDiscovery() async => discovery;
+  @override
+  Future<void> performStopDiscovery(nsd.Discovery discovery) async {}
 }
 
 LanDiscoveryService _service() {

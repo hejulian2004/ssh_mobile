@@ -76,12 +76,45 @@ pub(crate) async fn create_io_driver(
         .and_then(|endpoint| endpoint.local_addr().ok().map(|address| address.ip()))
         .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
     let bind_addr = SocketAddr::new(bind_ip, 0);
-    let advertised_ip = (!bind_ip.is_unspecified()).then_some(bind_ip);
+    let advertised_ip = if bind_ip.is_unspecified() {
+        let candidates = network_nat::discover_candidates(0).await;
+        // This sends no packet: the OS selects the default outbound interface.
+        let preferred = std::net::UdpSocket::bind(bind_addr)
+            .ok()
+            .and_then(|socket| {
+                socket.connect("192.0.2.1:9").ok()?;
+                socket.local_addr().ok().map(|address| address.ip())
+            });
+        select_interface_ip(
+            bind_ip,
+            candidates
+                .into_iter()
+                .map(|candidate| candidate.endpoint.ip()),
+            preferred,
+        )
+    } else {
+        Some(bind_ip)
+    };
     // Generic Realtime sessions stay media-neutral. Phase 2 screen sharing
     // configures the dedicated H.264 transceiver at the explicit screen-track
     // integration point instead of changing every DataChannel SDP.
     let peer = WebRtcPeer::new(config)?;
     RealtimeIoDriver::bind_with_advertised_ip(peer, bind_addr, advertised_ip).await
+}
+
+pub(super) fn select_interface_ip(
+    bind_ip: IpAddr,
+    addresses: impl IntoIterator<Item = IpAddr>,
+    preferred: Option<IpAddr>,
+) -> Option<IpAddr> {
+    let addresses: Vec<_> = addresses
+        .into_iter()
+        .filter(|ip| !ip.is_unspecified() && !ip.is_loopback() && ip.is_ipv4() == bind_ip.is_ipv4())
+        .take(16)
+        .collect();
+    preferred
+        .filter(|ip| addresses.contains(ip))
+        .or_else(|| addresses.first().copied())
 }
 
 pub(crate) fn realtime_task_key(realtime_id: &str) -> String {

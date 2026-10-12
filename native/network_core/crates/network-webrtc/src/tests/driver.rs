@@ -379,6 +379,11 @@ async fn driver_bind_uses_explicit_advertised_ip_and_closes_cleanly() {
         driver.local_addr().ip(),
         "127.0.0.1".parse::<std::net::IpAddr>().unwrap()
     );
+    assert_eq!(
+        driver.local_addr_value().ip(),
+        "192.0.2.44".parse::<std::net::IpAddr>().unwrap(),
+        "ICE packet context must match the advertised socket candidate"
+    );
     let handle = driver.into_handle();
     let mut driver = handle.lock().unwrap();
     driver.peer_mut().create_offer().expect("offer");

@@ -37,7 +37,8 @@ pub(crate) async fn send_business_frame(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let required_capability = match kind {
         crate::connection::GenericFrameKind::DataMessage
-        | crate::connection::GenericFrameKind::DeliveryAck => {
+        | crate::connection::GenericFrameKind::DeliveryAck
+        | crate::connection::GenericFrameKind::RealtimeSignal => {
             crate::connection::ConnectionCapability::ReliableMessage
         }
         crate::connection::GenericFrameKind::StreamOpen

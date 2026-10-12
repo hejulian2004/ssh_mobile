@@ -72,6 +72,7 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
         transferService: _transferService!,
         nativeTransferCoordinator: _nativeTransferCoordinator,
         historyDao: historyRepository.dao,
+        pairingMetadataDao: historyRepository.database.lanPairingMetadataDao,
         appSettings: appSettings,
         dataProtection: dataProtection,
         logger: logger,
@@ -111,6 +112,7 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
             currentDeviceId: deviceId,
             currentDeviceAlias: deviceAlias,
             localAddressSelectionPort: localAddressSelectionPort,
+            discoveryBridge: discoveryBridge,
           );
       // Network identity belongs to App Scope and is needed by LAN security
       // even when this Feature's listener/runtime activation is disabled.
@@ -142,6 +144,7 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
             nativeTransferPortProvider: () =>
                 networkRuntime.diagnostics.boundLocalPort,
             onPairingCommitted: _registerNewlyPairedPeer,
+            discoveryBridge: discoveryBridge,
           );
       final configuredTransfer = transfer;
       configuredTransfer.onPairingCommitted ??= _registerNewlyPairedPeer;
@@ -301,7 +304,11 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
     await attempt(() => relayCoordinator?.close());
     _relayCoordinator = null;
     _enrollmentService = null;
-    await attempt(() => discoveryService?.close());
+    await attempt(
+      () => discoveryService != null
+          ? discoveryService.close()
+          : discoveryBridge?.close(),
+    );
     await attempt(() => transferService?.close());
     if (_ownsPeerTrustStore) {
       await attempt(peerTrustStore.dispose);

@@ -7,6 +7,8 @@ class LanPairingMetadata extends Table {
   TextColumn get deviceType => text().withDefault(const Constant('mobile'))();
   TextColumn get ip => text().nullable()();
   IntColumn get port => integer().nullable()();
+
+  /// Latest locally observed came-online transition, in Unix milliseconds.
   IntColumn get lastSeen => integer()();
 
   @override

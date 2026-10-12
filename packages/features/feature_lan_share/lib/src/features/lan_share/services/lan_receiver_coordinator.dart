@@ -14,6 +14,7 @@ import 'package:uuid/uuid.dart';
 import '../../../data/database/lan_share_database.dart';
 import '../../../data/repositories/lan_share_history_repository.dart';
 import '../../../domain/lan_share_ports.dart';
+import '../../../domain/lan_discovery_bridge.dart';
 import '../../../services/lan_share/lan_discovery_service.dart';
 import '../../../services/lan_share/lan_native_transfer_coordinator.dart';
 import '../../../services/lan_share/lan_peer_trust.dart';
@@ -47,6 +48,7 @@ final class LanReceiverCoordinator extends ChangeNotifier {
     required this.networkRuntime,
     this.localAddressSelectionPort =
         const LanShareSingleCandidateLocalAddressSelection(),
+    this.discoveryBridge,
     LanPeerTrustStore? peerTrustStore,
     this.initializeNetwork = true,
     this.startReceiverOnInitialization = true,
@@ -82,6 +84,7 @@ final class LanReceiverCoordinator extends ChangeNotifier {
 
   /// App-selected route-aware Automatic local IPv4 selector.
   final LanShareLocalAddressSelectionPort localAddressSelectionPort;
+  final LanShareDiscoveryBridgePort? discoveryBridge;
 
   /// Module-owned atomic trust store. The Coordinator only consumes it and
   /// never treats discovery/reachability as trust.

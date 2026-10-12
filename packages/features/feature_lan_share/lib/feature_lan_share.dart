@@ -7,6 +7,7 @@ export 'src/application/lan_share_module.dart';
 export 'src/data/database/lan_share_database.dart';
 export 'src/data/repositories/lan_share_history_repository.dart';
 export 'src/domain/lan_share_ports.dart';
+export 'src/domain/lan_discovery_bridge.dart';
 export 'src/features/lan_share/lan_share_feature_scope.dart';
 export 'src/features/lan_share/services/lan_relay_coordinator.dart'
     show LanRelayStatus;
@@ -39,6 +40,7 @@ export 'src/services/lan_share/lan_pairing_reciprocal.dart'
         pairingDirectionHint;
 export 'src/services/lan_share/lan_multicast_lock.dart';
 export 'src/services/lan_share/lan_discovery_service.dart';
+export 'src/services/lan_share/lan_discovery_datagrams.dart';
 export 'src/services/lan_share/lan_security_service.dart';
 export 'src/services/lan_share/lan_share_models.dart';
 export 'src/services/lan_share/lan_storage_service.dart';

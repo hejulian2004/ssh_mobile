@@ -124,7 +124,7 @@ fn ssh_gateway_bridges_stream_to_a_local_tcp_echo_server() {
     fs::remove_dir_all(test_root).ok();
 }
 
-fn configure_runtime_for_test(
+pub(crate) fn configure_runtime_for_test(
     runtime: &NetworkRuntime,
     device_id: &str,
     identity_seed: [u8; 32],
@@ -173,7 +173,7 @@ fn upsert_command(
     )
 }
 
-fn upsert_command_with_routes(
+pub(crate) fn upsert_command_with_routes(
     command_id: &str,
     peer_id: &str,
     endpoint: SocketAddr,
@@ -210,7 +210,7 @@ fn upsert_command_with_routes(
 /// 每个 NetworkRuntime 启动一个多线程 tokio worker。全套测试并行执行真实
 /// QUIC/UDP/TCP/WebSocket 网络 I/O 时可能重度超订 CPU，命令结果在加载下的
 /// 真实延迟可远超 10s；用 30s 作为命令结果截止期，避免加载下偶发误报。
-fn send_and_expect_accepted(runtime: &NetworkRuntime, command: NetworkCommand) {
+pub(crate) fn send_and_expect_accepted(runtime: &NetworkRuntime, command: NetworkCommand) {
     let command_id = command.command_id.clone();
     runtime.send_command(command).expect("queue command");
     let result = poll_until(runtime, Duration::from_secs(30), |event| {
@@ -285,7 +285,7 @@ fn poll_until(
     None
 }
 
-fn wait_for_session_connected(runtime: &NetworkRuntime, peer_id: &str, timeout: Duration) -> bool {
+pub(crate) fn wait_for_session_connected(runtime: &NetworkRuntime, peer_id: &str, timeout: Duration) -> bool {
     let state = runtime
         .state
         .lock()

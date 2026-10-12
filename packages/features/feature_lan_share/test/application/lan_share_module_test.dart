@@ -3,6 +3,8 @@
 // 测试重点是配置关闭时不会启动接收器，以及 Module 会关闭自己拥有的
 // 数据库资源；网络、身份和日志均使用受控的 Port 假实现。
 
+import 'dart:async';
+
 import 'package:app_core/app_core.dart';
 import 'package:drift/native.dart';
 import 'package:feature_lan_share/feature_lan_share.dart';
@@ -18,6 +20,7 @@ void main() {
       final database = LanShareDatabase.forTesting(NativeDatabase.memory());
       final networkAccess = _FakeNetworkAccessPort();
       final networkRuntime = _FakeNetworkRuntime();
+      final bridge = _ColdBridge();
       const addressSelector = LanShareSingleCandidateLocalAddressSelection();
       final module = LanShareModule(
         receiverEnabled: false,
@@ -34,6 +37,7 @@ void main() {
           LanShareLocalAddressSelectionPort: addressSelector,
           BootstrapClient: _FakeBootstrapClient(),
           NetworkRuntime: networkRuntime,
+          LanShareDiscoveryBridgePort: bridge,
         }),
       );
       await module.initialize();
@@ -55,6 +59,9 @@ void main() {
       await module.dispose();
       expect(module.state, ModuleState.disposed);
       expect(() => module.database, throwsStateError);
+      expect(bridge.closed, 1);
+      await module.dispose();
+      expect(bridge.closed, 1);
     },
   );
 
@@ -64,6 +71,26 @@ void main() {
     await expectLater(module.initialize(), throwsStateError);
     expect(module.state, ModuleState.registered);
   });
+}
+
+final class _ColdBridge implements LanShareDiscoveryBridgePort {
+  int closed = 0;
+  @override
+  Stream<List<LanDiscoveredPeer>> get peers => const Stream.empty();
+  @override
+  Future<void> start(Map<String, Object> advertisement) async {}
+  @override
+  Future<void> stop() async {}
+  @override
+  Future<void> close() async {
+    closed++;
+  }
+
+  @override
+  LanDiscoveredPeer routePeer(LanDiscoveredPeer peer) => peer;
+  @override
+  int? nativePortFor(LanDiscoveredPeer peer, int advertisedPort) =>
+      advertisedPort;
 }
 
 final class _FakeBootstrapClient implements BootstrapClient {
