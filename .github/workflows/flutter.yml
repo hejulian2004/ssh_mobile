@@ -1022,7 +1022,9 @@ jobs:
       - uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
         with:
           workspaces: "native/network_core -> target"
-          shared-key: "network-sdk-${{ runner.os }}-${{ runner.arch }}"
+          shared-key: "android-sdk-${{ runner.os }}-${{ runner.arch }}"
+          # Host test artifacts are large and unused by Android cross-compiles.
+          cache-targets: false
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}

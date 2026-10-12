@@ -229,7 +229,6 @@ void main() {
     'lan-network-v2-targeted',
     'terminal-smoke-build',
     'app-unit-tests',
-    'android-build',
     'windows-build',
     'macos-build',
     'ios-build',
@@ -246,6 +245,17 @@ void main() {
       '$jobName 必须复用按平台架构隔离的 Rust target 缓存',
     );
   }
+
+  final androidBuild = _jobSection(workflow, 'android-build');
+  _expect(
+    androidBuild.contains('workspaces: "native/network_core -> target"') &&
+        androidBuild.contains(
+          r'shared-key: "android-sdk-${{ runner.os }}-${{ runner.arch }}"',
+        ) &&
+        androidBuild.contains('cache-targets: false') &&
+        androidBuild.contains('flutter build apk --debug --no-pub'),
+    'Android 必须缓存 Cargo 依赖并隔离缓存键，不恢复占满磁盘的 host target，且保留完整 APK 构建',
+  );
 
   final appCoverage = _jobSection(workflow, 'app-coverage');
   _expect(

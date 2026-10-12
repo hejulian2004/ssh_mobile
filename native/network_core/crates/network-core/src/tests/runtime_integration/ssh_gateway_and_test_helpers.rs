@@ -132,6 +132,13 @@ pub(crate) fn configure_runtime_for_test(
     address: SocketAddr,
     receive_directory: std::path::PathBuf,
 ) -> SocketAddr {
+    // Fixture runtimes can reuse a previous test's stack address. Their event
+    // backlog belongs to this configured instance, not that old address.
+    TEST_EVENT_BACKLOG
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .expect("test event backlog lock")
+        .remove(&(runtime as *const NetworkRuntime as usize));
     send_and_expect_accepted(
         runtime,
         NetworkCommand {
@@ -152,6 +159,41 @@ pub(crate) fn configure_runtime_for_test(
         .bound_local_port()
         .expect("runtime bound an actual UDP port");
     SocketAddr::new(address.ip(), port)
+}
+
+#[test]
+fn configuring_a_fresh_runtime_drops_backlog_from_a_previous_stack_instance() {
+    let runtime = NetworkRuntime::new().unwrap();
+    runtime.start().unwrap();
+    let runtime_key = &runtime as *const NetworkRuntime as usize;
+    TEST_EVENT_BACKLOG
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap()
+        .insert(
+            runtime_key,
+            VecDeque::from([network_protocol::NetworkEvent {
+                event_id: "previous-runtime".into(),
+                ..Default::default()
+            }]),
+        );
+    let root =
+        std::env::temp_dir().join(format!("fresh-runtime-backlog-{}", rand::random::<u64>()));
+    configure_runtime_for_test(
+        &runtime,
+        "fresh-runtime",
+        [71; 32],
+        [72; 32],
+        "127.0.0.1:0".parse().unwrap(),
+        root.clone(),
+    );
+    assert!(
+        poll_until(&runtime, Duration::from_millis(100), |event| event.event_id
+            == "previous-runtime")
+        .is_none()
+    );
+    runtime.stop().unwrap();
+    fs::remove_dir_all(root).ok();
 }
 
 /// 为当前 Network Protocol V2 契约创建显式对端注册命令。
@@ -285,7 +327,11 @@ fn poll_until(
     None
 }
 
-pub(crate) fn wait_for_session_connected(runtime: &NetworkRuntime, peer_id: &str, timeout: Duration) -> bool {
+pub(crate) fn wait_for_session_connected(
+    runtime: &NetworkRuntime,
+    peer_id: &str,
+    timeout: Duration,
+) -> bool {
     let state = runtime
         .state
         .lock()
