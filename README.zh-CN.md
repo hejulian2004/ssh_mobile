@@ -1,4 +1,4 @@
-> 最新更新时间：2026-10-09
+> 最新更新时间：2026-10-12
 
 <p align="center">
   <img src="apps/ssh_mobile_full/assets/app_icon_1024.png" alt="SSH Mobile 图标" width="112" />
@@ -41,6 +41,9 @@ SDP、Socket 与 Relay signaling 继续由 Rust/native/App Shell 持有。
   Owner，`PeerPathManager` 持有 Direct/Relay 物理路径，业务操作通过
   `PathLease` 借用 carrier。`E2eePolicy::Disabled` 只允许 Direct identity-only，
   不得降级为 Relay；Resolve 是 Direct/Relay 分阶段建连的权威门禁。
+- **屏幕共享**：可通过已认证的 Direct QUIC/TCP 信令连接，无需配置 Relay；授权允许时
+  保留 Relay Control 路径。接收端必须明确接受后才进入 native WebRTC 捕获/查看流程，
+  真实画面仍需平台与设备验收，见[屏幕共享架构](docs/architecture/WEBRTC_SCREEN_SHARING_ARCHITECTURE.md)。
 - **服务器监控**：查看性能、端口、应用进程、服务、用户和活动会话。
 - **AI Chat 与 Agent 执行**：支持流式输出、Plan Mode、审批式工具调用、聊天历史、消息分支、上下文压缩、RAG、Skills 和执行 Trace。
 - **本地 MCP Server**：桌面端可生成 Codex、Claude Code 和 Gemini CLI 配置；支持默认的 `reviewConfiguredTools` 与显式启用的 `trustedAgent` 两种模式，同时始终执行回环监听和硬安全边界。
@@ -54,12 +57,21 @@ SDP、Socket 与 Relay signaling 继续由 Rust/native/App Shell 持有。
 
 ### 环境要求
 
-- Flutter `>=3.47.0`，CI 固定使用 Flutter `3.47.0`。
-- Dart SDK `>=3.12.0 <4.0.0`。
+- Flutter 建议使用 CI 固定的 `3.47.0`；Full App 声明的最低版本为 `3.44.0`。
+- Dart SDK `>=3.12.2 <4.0.0`，需同时满足原生网络 Package 的约束。
+- Rust `1.97.1` 用于原生网络运行时，配置见 [rust-toolchain.toml](native/network_core/rust-toolchain.toml)。
 - Android Studio、Android SDK 或对应目标平台的开发工具链。
 - Windows 构建需要 Visual Studio 的 `Desktop development with C++`。
 - iOS 与 macOS 构建需要 macOS 和 Xcode。
 - iOS 14.0 或更高版本。
+
+依赖约束和解析版本以 Workspace/Package 的 `pubspec.yaml` 与 `pubspec.lock`
+为准，CI 工具链版本以 [Flutter workflow](.github/workflows/flutter.yml) 为准。
+Android 使用 Java 17、AGP 9.0.1 和 Gradle 9.1.0，配置见
+[Android 配置](apps/ssh_mobile_full/android/settings.gradle.kts)和
+[Gradle wrapper](apps/ssh_mobile_full/android/gradle/wrapper/gradle-wrapper.properties)。
+Relay 和管理端分别使用 [Go module](relay/go.mod) 与
+[前端依赖配置](front/package.json)，其 Go/Node CI 版本独立于 Flutter 应用。
 
 ### 安装依赖
 
@@ -141,7 +153,9 @@ flutter build ios --release --no-codesign
 # Windows：必须在原生 checkout 的 PowerShell 7（pwsh.exe）中运行。
 Set-Location '<native-repo>'
 . .\scripts\powershell\platform\configure_windows_toolchain.ps1 -FlutterRoot '<flutter-root>'
+Set-Location '<native-repo>\apps\ssh_mobile_full'
 & '<flutter-root>\bin\flutter.bat' build windows --no-pub
+Set-Location '<native-repo>'
 & .\scripts\powershell\platform\build_windows_msi.ps1 `
   -Flutter '<flutter-root>\bin\flutter.bat' `
   -Version '1.0.0'
@@ -292,7 +306,7 @@ flutter analyze --no-fatal-infos
 flutter test
 ```
 
-正常修改后的 WSL 回归入口是：
+常规修改按受影响 Owner 运行定向检查。仅在明确要求运行本地聚合 CI 时，从仓库根目录执行：
 
 ```bash
 bash scripts/bash/ci/full_test.sh --no-bootstrap
@@ -300,13 +314,13 @@ bash scripts/bash/ci/full_test.sh --no-bootstrap
 
 Agent 必须根据实际宿主选择脚本：Linux/WSL 使用 `scripts/bash/`，原生
 Windows PowerShell 7 使用 `scripts/powershell/`。同相对路径的 `.sh`/`.ps1`
-必须同步维护。Windows 日常入口为：
+必须同步维护。Windows 聚合入口为：
 
 ```powershell
 & .\scripts\powershell\ci\full_test.ps1 -NoBootstrap
 ```
 
-日常回归不收集 Flutter 覆盖率。大型重构、新功能或发布审查需独立运行四个
+该聚合入口不收集 Flutter 覆盖率。大型重构、新功能或发布审查需独立运行
 Owner 覆盖率门禁，每个门禁对其文档化范围执行 90% 阈值：
 
 ```bash
@@ -329,9 +343,8 @@ dart run tool/check_module_dependencies.dart
 dart run tool/check_resource_owners.dart
 ```
 
-合并到 `main` 后，CI 会运行 `dart run melos run format`、
-`dart run melos run analyze`、`dart run melos run test`，再执行 Full App Android
-和 Terminal-only Windows 冒烟构建。Workspace analyze 脚本将既有 `info` 级 lint
+CI 在 push 后按变更范围并行运行 Package 质量、协议、原生网络、App 测试和平台
+构建，当前 job 矩阵以 workflow 为准。Workspace analyze 脚本将既有 `info` 级 lint
 视为非阻断项，但 error 和 warning 仍会使门禁失败。
 标准 Workspace 测试选择器会排除明确标记的实时 `client-backend` 和
 `native-loopback` 集成测试。可选 Backend 冒烟门禁通过
@@ -388,56 +401,6 @@ Set-Location '<native-repo>'
 
 自动化测试使用 Fake、Mock 和受控 Fixture，不需要真实 SSH 凭据或 API Key。真实凭据不得提交到源代码、测试 Fixture、截图、日志、Agent Memory 或文档中。
 
-## Codex 与 GPT-5.6 如何参与开发
-
-Codex 和 GPT-5.6 是本项目开发流程中的重要工具，但产品范围、架构、安全边界、验收标准和最终审查仍由项目维护者负责。
-
-### Codex 如何加速工作流程
-
-Codex 主要用于：
-
-- 搜索整个仓库的依赖关系和调用路径；
-- 同时修改 Flutter UI、Service、测试、文档和平台配置文件；
-- 在修复问题的同时生成回归测试；
-- 执行结构化代码审查，定位旧状态覆盖、并发竞争和安全边界绕过问题；
-- 通过 `.agents/skills/ssh-mobile-maintenance/SKILL.md` 固化维护规则；
-- 使用 scoped `memory_docs/` 保存已核验的非敏感项目知识；
-- 在保留修改前执行可复现的格式化、代码生成、静态分析、测试、覆盖率和构建检查。
-
-### GPT-5.6 实现阶段：2026 年 7 月 10 日起
-
-固定审查区间从 2026 年 7 月 10 日的 [`3ac2b73`](https://github.com/hejulian2004/ssh_mobile/commit/3ac2b7314930c6340200af1ab581e6d919d9ad5a) 开始，到 2026 年 7 月 16 日的 [`aecbf92`](https://github.com/hejulian2004/ssh_mobile/commit/aecbf924eda2e1d28c2f86e07dfbf7b4518b1742) 结束，**包含首尾共 81 个提交**。根据项目开发记录，这个固定区间内的全部提交都由 GPT-5.6 辅助实现，并由项目维护者提出需求、选择方案和完成审查。
-
-完整对比：[`3ac2b73...aecbf92`](https://github.com/hejulian2004/ssh_mobile/compare/3ac2b7314930c6340200af1ab581e6d919d9ad5a...aecbf924eda2e1d28c2f86e07dfbf7b4518b1742)
-
-| 工作方向 | GPT-5.6 辅助完成的主要内容 | 代表性提交 |
-| --- | --- | --- |
-| 设计系统与自适应 UI | 建立共用页面外壳与导航；引入 `MobileUiMetrics`；适配 1.5K 与 2K 手机；重构 Servers、Settings、AI Chat、审批、Tools、Logs、SFTP 和 System Administration，并处理键盘、安全区、大字体与 48 dp 可访问性要求。 | [`3ac2b73`](https://github.com/hejulian2004/ssh_mobile/commit/3ac2b7314930c6340200af1ab581e6d919d9ad5a)、[`e05f7ef`](https://github.com/hejulian2004/ssh_mobile/commit/e05f7ef07eb23b4702fd64cd6e36139296fb0de4)、[`33d5f63`](https://github.com/hejulian2004/ssh_mobile/commit/33d5f63e77381fe1c94b6feaf9967abb5926b4fb) |
-| AI Chat 与 Agent 交互 | 重构输入框、Slash Commands、历史记录、附件、Trace Viewer、TODO 面板、执行摘要、Prompt 定制、工具选择器、目标服务器选择器和运行健康检查界面。 | [`275c1c3`](https://github.com/hejulian2004/ssh_mobile/commit/275c1c3ec751b9c6577c2211b760ad7650454bec)、[`64baeeb`](https://github.com/hejulian2004/ssh_mobile/commit/64baeeba2322b23491cacaefcc1679837f7e9eb5)、[`1c1c6cb`](https://github.com/hejulian2004/ssh_mobile/commit/1c1c6cb0b8fe35a8a1a10d1196c4595eecf6bb8e) |
-| Plan Mode 与执行安全 | 实现单飞式 Plan 审批、不可变模型服务与服务器目标快照、运行前健康检查、取消与聊天修改锁、Compare-and-Swap 资源保护、过期目标拒绝和持久化 TODO/运行状态协调。 | [`f3abce3`](https://github.com/hejulian2004/ssh_mobile/commit/f3abce32ed54ebc83917e5db1dd4f0b5a2e6718c)、[`857c637`](https://github.com/hejulian2004/ssh_mobile/commit/857c637b5045d114630467c2abc6a438a2b5e49a)、[`a202779`](https://github.com/hejulian2004/ssh_mobile/commit/a202779a4aa02422a4b130652db9552b94602241) |
-| SFTP 与附件安全 | 加入有界读取、加密且绑定目标的缓存、安全图片与文本预览、富预览外部导航阻断、PDF 外部打开策略、缓存刷新修复，以及编辑器、查看器、文件浏览器和服务器选择器重构。 | [`669262f`](https://github.com/hejulian2004/ssh_mobile/commit/669262f3311c13992e21e72bb4488af1212caedd)、[`d61b8b4`](https://github.com/hejulian2004/ssh_mobile/commit/d61b8b400208156eb3894a5cf65bed2a50b51bb8)、[`982b56e`](https://github.com/hejulian2004/ssh_mobile/commit/982b56e02c4edc1d4b7eb651bc18eded521f3927) |
-| 终端与服务器运维 | 重构实时终端、终端历史、复制模式、窗口管理、服务器卡片、监控健康面板、服务器选择器，并修复账户与会话加载问题。 | [`1dc2702`](https://github.com/hejulian2004/ssh_mobile/commit/1dc2702050cc174d3ac74a7f548b64c2ee4314fe)、[`24b43af`](https://github.com/hejulian2004/ssh_mobile/commit/24b43af8df9918b7c598bc839ebf2a8af97dab18)、[`77bc0d3`](https://github.com/hejulian2004/ssh_mobile/commit/77bc0d376c794144cce8415b62fbf63f26ced376) |
-| 架构与性能 | 推进 feature-first MVVM 迁移；抽取共用组件；缓存主题、图表和列表计算；缩小 Provider 监听范围；保留延迟加载；把远程输出解码和大型解析任务移到后台 isolate。 | [`9ffd48e`](https://github.com/hejulian2004/ssh_mobile/commit/9ffd48e2bc26fd3a3c6fc2cb83973076a7e01902)、[`3d2ceda`](https://github.com/hejulian2004/ssh_mobile/commit/3d2ceda56aba01be8f4452c492913b9f9fa11079)、[`1e587bf`](https://github.com/hejulian2004/ssh_mobile/commit/1e587bf3d521fd9007cd2636d86ad69cc26b2320)、[`833256a`](https://github.com/hejulian2004/ssh_mobile/commit/833256ab73134d474daea8aa9790678976f9c70b) |
-| 测试、文档与 CI | 扩充 Widget、ViewModel、Parser、安全、Plan Mode、SFTP、终端、启动页、响应式和系统管理测试；记录移动端 QA Matrix；建立双语 README；修复 Android 制品仓库配置；统一 iOS 14 构建要求。 | [`7d17380`](https://github.com/hejulian2004/ssh_mobile/commit/7d1738078e9be026582245a9a7b496982e1872b8)、[`0e83eac`](https://github.com/hejulian2004/ssh_mobile/commit/0e83eacdf8e55251c444453603f64f2c0c0c8d02)、[`9d33194`](https://github.com/hejulian2004/ssh_mobile/commit/9d33194af6c05308b7dbadbe1accf4dd4f923e12) |
-
-### 项目维护者作出的关键决策
-
-影响项目最终实现的关键决策包括：
-
-- 将 Agent 放在客户端运行，使 1 GB 服务器只需要提供 SSH/SFTP 能力；
-- 采用 feature-first MVVM 和明确的 Service 边界，避免把 Agent 编排逻辑堆在 Screen 中；
-- 以设备物理短边为高密度手机适配依据，同时保留系统文字缩放；
-- 远程写入和敏感操作必须经过显式审批；
-- 将审批绑定到不可变的服务器、模型服务、Playbook、Skill 和监控目标快照，防止异步状态变化重定向操作；
-- 直接阻断破坏性 Shell 删除和敏感路径读取，而不是只依赖模型 Prompt；
-- 凭据只进入平台 Secure Storage，持续增长的敏感数据在写入 Drift 前加密；
-- MCP 只允许本机访问、必须认证，并复用同一套审批策略；
-- AI 生成的修改必须经过自动化测试和确定性质量门禁。
-
-### 审查与责任
-
-GPT-5.6 和 Codex 提高了实现速度，但 AI 生成内容不会被直接视为正确结果。项目维护者负责检查行为、选择技术取舍、制定验收标准、拒绝不安全方案，并对每个合并修改承担最终责任。Gemini 也被用于对部分实现方案和文档内容进行交叉检查。
-
 ## 架构
 
 SSH Mobile 采用 feature-first MVVM 架构，通过 Provider 和 Selector 管理状态，并将 UI 组合、协议适配、持久化存储、监控和 AI 编排拆分为可独立测试的层。
@@ -455,6 +418,18 @@ flowchart LR
 ```
 
 ### 项目结构
+
+- `apps/ssh_mobile_ssh/`：直接 TCP SSH 的独立 App Shell，不创建网络 Runtime。
+- `apps/ssh_mobile_network/`：网络传输 App Shell，不组合 SSH Feature，也不创建
+  NetworkFacade；原生文件传输能力由 Full App 组合。
+- `apps/ssh_mobile_terminal/`：Terminal-only 依赖裁剪与生命周期验证切片，不提供
+  Full App 的真实 SSH 兼容后端。
+- `packages/features/feature_screen_share/`：通过不透明 Realtime/media Port 管理同意与
+  业务状态；`packages/infrastructure/realtime_media/` 提供媒体契约，Android/Windows
+  平台 Package 提供实现，`native/network_core/` 持有传输与 WebRTC 内部资源。
+- `packages/features/feature_lan_share/`：发现、双向配对、已认证控制 HTTPS/WebSocket、
+  原生文件传输编排、Web Share 和历史。Feature 独占 `lan_share.db`，借用共享
+  NetworkFacade，不持有第二个网络 Runtime。
 
 - `apps/ssh_mobile_full/lib/main.dart`：精简的应用入口；App Shell 与依赖装配位于
   `apps/ssh_mobile_full/lib/app/`（`AppBootstrap`、`AppRuntimeFactory`、`AppRuntime`
@@ -531,8 +506,8 @@ Connection 模块在开发期使用 `connection.sqlite`；Drift 表刻意不保�
 这些值只能通过 `CredentialRepository` 进入平台 Secure Storage。Connection
 ViewModel 通过 App Shell 注入消费 Core Repository。
 
-LAN 文件数据路径为 `LanShareViewModel → NetworkService → Rust
-NetworkRuntime`。命令只返回 typed accepted 结果，进度和终态通过 typed events
+LAN 文件数据路径为 `LanShareViewModel → LanNativeTransferCoordinator →
+NetworkFacade → Rust NetworkRuntime`。命令只返回 typed accepted 结果，进度和终态通过 typed events
 返回。Rust 负责每 peer 路径选择、身份认证 QUIC/TCP/WebSocket、流式文件校验
 以及原生 Relay 收发；Flutter 负责配对、审批 UI、历史记录和展示状态。Go Relay
 数据面只是短生命周期的 opaque forwarder，不接触文件明文元数据或明文字节；可选
@@ -586,7 +561,7 @@ Markdown 和 HTML 预览会阻断外部资源和导航。远程 PDF 不在应用
 
 ## 服务器监控
 
-监控工作区包含四个主要分区：
+监控工作区包含以下分区：
 
 - `Performance`：手动进行多服务器采样，并保留约 10 分钟内存历史。
 - `Ports`：单服务器端口快照和管理操作。
@@ -605,20 +580,11 @@ AI 消息正文、上下文、附件、工具 Trace、TODO Steps 和 Playbook �
 
 ## 工程质量
 
-### 7 月 10 日起始验证基线
-
-GPT-5.6 实现阶段开始时，项目使用 Flutter 3.44.2 和 Dart 3.12.2 完成了本地验证：
-
-- `flutter analyze`：无问题。
-- `flutter test --coverage`：568 个测试通过。
-- 非生成代码行覆盖率为 39.3%（`12690/32302`），CI 最低门槛为 35%。
-- Android Debug 与未签名 Release APK 构建成功。
-- Windows Release 构建成功。
-- 图标生成、Drift 生成、共享 Agent Skill 同步、格式化和差异检查均可复现。
-
-此后又增加了大量测试。要获取当前检出提交的实际结果，请执行[测试指南](#测试指南)中的命令。
-
-原始验证范围和仍需真机完成的项目见 [docs/VALIDATION_REPORT.md](docs/VALIDATION_REPORT.md)。
+验证结果对应具体提交，不在 README 固定维护测试个数或历史通过率。当前检查入口见
+[测试指南](#测试指南)和 [GitHub Actions](.github/workflows/flutter.yml)，Owner
+范围与必要阈值见[覆盖率政策](docs/COVERAGE_POLICY.md)。真实设备验收与自动化检查
+分别记录在[发布清单](docs/RELEASE_CHECKLIST.md)和
+[安全回归指南](docs/security_manual_regression.md)。
 
 ## Agent 协作文件
 

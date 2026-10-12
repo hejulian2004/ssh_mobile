@@ -1,4 +1,4 @@
-> Last updated: 2026-08-31
+> Last updated: 2026-10-12
 
 # Repository scripts
 
@@ -30,9 +30,13 @@ runner, App, and workspace/service helper modules. Each helper stays below the
 cohesive; mechanically numbered chunks (`part_01`, `file_01`) and gratuitous
 over-splitting are prohibited. The helpers preserve the same job names,
 arguments, timeout behavior, cleanup, and exit statuses across hosts. The
-GitHub Actions workflow is the authoritative full gate; use
-`bash scripts/bash/ci/full_test.sh` for the proportional Linux/WSL checks
-available on a local host.
+GitHub Actions workflow is the authoritative full gate. Ordinary changes use
+focused owner checks; run `bash scripts/bash/ci/full_test.sh` (or its native
+PowerShell counterpart) only when aggregate local CI is explicitly requested.
+
+The hosted Android build caches Cargo dependencies with an Android-specific key;
+it does not restore host test `target` artifacts. Other native jobs retain their
+platform/architecture target caches. Android still builds the full APK ABI set.
 
 `e2e/online_e2e.sh` and `e2e/online_e2e.ps1` are an explicit external-deployment
 gate. They are manual-only and never start Compose or join the routine CI

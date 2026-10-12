@@ -1,4 +1,4 @@
-> Last updated: 2026-10-09
+> Last updated: 2026-10-12
 
 <p align="center">
   <img src="apps/ssh_mobile_full/assets/app_icon_1024.png" alt="SSH Mobile icon" width="112" />
@@ -20,7 +20,7 @@
 
 SSH Mobile is a Flutter-based cross-platform SSH and SFTP client for Android, iOS, macOS, Windows, and Web. It combines multi-window terminals, remote file management, server monitoring, secure storage, and OpenAI-compatible AI tools in a single mobile and desktop operations workspace.
 
-The codebase is a 21-member Dart workspace. Feature implementations live under
+The codebase uses a Dart workspace, defined in [pubspec.yaml](pubspec.yaml). Feature implementations live under
 `packages/features/`, shared contracts live under `packages/core/`, and the
 Full App is the composition root for App-scoped adapters and resources. The
 remaining App compatibility backends are explicitly inventoried; they are not
@@ -50,6 +50,11 @@ ICE, SDP, sockets, and Relay signaling remain native/App Shell owned.
   operations borrow `PathLease` instances. `E2eePolicy::Disabled` is Direct
   identity-only and cannot fall through to Relay; authoritative Resolve gates the
   staged Direct/Relay connection flow.
+- **Screen sharing** uses authenticated Direct QUIC/TCP signaling without requiring
+  Relay; Relay Control remains available when authorized. The receiver must
+  explicitly accept before native WebRTC capture/viewing starts. Actual capture
+  and rendering remain platform/device acceptance checks; see
+  [screen-sharing architecture](docs/architecture/WEBRTC_SCREEN_SHARING_ARCHITECTURE.md).
 - **Server monitoring** for performance, ports, applications, services, users, and active sessions.
 - **AI chat and agent execution** with streaming output, Plan Mode, approval-controlled tools, persistent history, message branching, context compression, RAG, skills, and execution traces.
 - **Local MCP server** support on desktop platforms, including generated configuration for Codex, Claude Code, and Gemini CLI; it supports `reviewConfiguredTools` (default) and `trustedAgent` modes while always enforcing its loopback-only and hard security boundaries.
@@ -63,12 +68,22 @@ ICE, SDP, sockets, and Relay signaling remain native/App Shell owned.
 
 ### Requirements
 
-- Flutter `>=3.47.0`; CI is pinned to Flutter `3.47.0`.
-- Dart SDK `>=3.12.0 <4.0.0`.
+- Flutter: use the CI-pinned `3.47.0`; the Full App declares `>=3.44.0`.
+- Dart SDK `>=3.12.2 <4.0.0`, including the native package's constraint.
+- Rust `1.97.1` for the native network runtime; use [rust-toolchain.toml](native/network_core/rust-toolchain.toml).
 - Android Studio and Android SDK, or the corresponding platform toolchain.
 - Visual Studio with `Desktop development with C++` for Windows builds.
 - macOS and Xcode for iOS and macOS builds.
 - iOS 14.0 or later.
+
+Dependency constraints and resolved versions belong to the workspace/package
+`pubspec.yaml` files and `pubspec.lock`. CI toolchain pins are maintained in
+[Flutter workflow](.github/workflows/flutter.yml). Android uses Java 17, AGP
+9.0.1 and Gradle 9.1.0; see the [Android configuration](apps/ssh_mobile_full/android/settings.gradle.kts)
+and [Gradle wrapper](apps/ssh_mobile_full/android/gradle/wrapper/gradle-wrapper.properties).
+Relay and admin setup use their own [Go module](relay/go.mod) and
+[frontend manifest](front/package.json); their CI Go/Node pins are separate from
+the Flutter application requirements.
 
 ### Install dependencies
 
@@ -159,7 +174,9 @@ flutter build ios --release --no-codesign
 # Windows: run from a native checkout in PowerShell 7 (pwsh.exe).
 Set-Location '<native-repo>'
 . .\scripts\powershell\platform\configure_windows_toolchain.ps1 -FlutterRoot '<flutter-root>'
+Set-Location '<native-repo>\apps\ssh_mobile_full'
 & '<flutter-root>\bin\flutter.bat' build windows --no-pub
+Set-Location '<native-repo>'
 & .\scripts\powershell\platform\build_windows_msi.ps1 `
   -Flutter '<flutter-root>\bin\flutter.bat' `
   -Version '1.0.0'
@@ -321,8 +338,8 @@ flutter analyze --no-fatal-infos
 flutter test
 ```
 
-For the normal post-change local regression gate, use the repository wrapper
-from the root directory:
+For ordinary changes, run the affected owner's focused checks. Run aggregate
+local CI only when explicitly requested, from the repository root:
 
 ```bash
 bash scripts/bash/ci/full_test.sh --no-bootstrap
@@ -330,13 +347,13 @@ bash scripts/bash/ci/full_test.sh --no-bootstrap
 
 Run the script family for the actual host: Linux and WSL use `scripts/bash/`,
 while native Windows PowerShell 7 uses `scripts/powershell/`. Same-relative-path
-`.sh`/`.ps1` scripts are maintained together. The Windows daily gate is:
+`.sh`/`.ps1` scripts are maintained together. The Windows aggregate entry is:
 
 ```powershell
 & .\scripts\powershell\ci\full_test.ps1 -NoBootstrap
 ```
 
-This daily gate checks the runnable formatting, analysis, contract, workspace,
+This aggregate checks the runnable formatting, analysis, contract, workspace,
 App test, and build jobs without collecting Flutter coverage. Coverage is a
 periodic review because Flutter instrumentation substantially increases WSL
 runtime. Run the four owner-specific gates:
@@ -369,9 +386,9 @@ dart run tool/check_module_dependencies.dart
 dart run tool/check_resource_owners.dart
 ```
 
-On `main`, the CI workflow runs `dart run melos run format`,
-`dart run melos run analyze`, and `dart run melos run test`, followed by Full App
-Android and Terminal-only Windows smoke builds. The Workspace analyze script keeps
+The push-triggered CI workflow runs scope-selected jobs in parallel for package
+quality, contracts, native networking, App tests and platform builds. See the
+workflow for the current job matrix. The Workspace analyze script keeps
 existing `info`-level lints non-fatal while errors and warnings remain fatal.
 The standard Workspace test selector excludes the explicitly tagged live
 `client-backend` and `native-loopback` integrations. The optional backend smoke
@@ -440,56 +457,6 @@ Set-Location ../..
 
 Automated tests use fakes and controlled fixtures; they do not require real SSH credentials or API keys. Real credentials must never be committed to source control, test fixtures, screenshots, logs, agent memory, or documentation.
 
-## How Codex and GPT-5.6 Were Used
-
-Codex and GPT-5.6 were central to the development workflow, while the maintainer retained responsibility for product scope, architecture, security boundaries, acceptance criteria, and final review.
-
-### Codex workflow acceleration
-
-Codex accelerated the project by:
-
-- exploring repository-wide dependencies and call paths;
-- implementing coordinated changes across Flutter UI, services, tests, documentation, and platform files;
-- generating regression tests alongside fixes;
-- running structured code review and identifying stale state, race conditions, and security-boundary violations;
-- keeping maintenance instructions synchronized through `.agents/skills/ssh-mobile-maintenance/SKILL.md`;
-- preserving verified, non-sensitive project knowledge in scoped `memory_docs/`;
-- using deterministic formatting, generation, analysis, test, coverage, and build commands before changes were retained.
-
-### GPT-5.6 implementation period: July 10 onward
-
-The fixed review range starts with [`3ac2b73`](https://github.com/hejulian2004/ssh_mobile/commit/3ac2b7314930c6340200af1ab581e6d919d9ad5a) on July 10, 2026 and ends with [`aecbf92`](https://github.com/hejulian2004/ssh_mobile/commit/aecbf924eda2e1d28c2f86e07dfbf7b4518b1742) on July 16, 2026. It contains **81 commits including both endpoints**. According to the project development record, every commit in this fixed implementation range was produced through GPT-5.6-assisted sessions under maintainer direction and review.
-
-Full comparison: [`3ac2b73...aecbf92`](https://github.com/hejulian2004/ssh_mobile/compare/3ac2b7314930c6340200af1ab581e6d919d9ad5a...aecbf924eda2e1d28c2f86e07dfbf7b4518b1742)
-
-| Workstream | Summary of the GPT-5.6-assisted changes | Representative commits |
-| --- | --- | --- |
-| Design system and adaptive UI | Established shared page surfaces and navigation, introduced `MobileUiMetrics`, adapted 1.5K and 2K phones, and rebuilt mobile Servers, Settings, chat, approvals, tools, logs, SFTP, and System Administration layouts with keyboard, safe-area, large-text, and 48 dp accessibility constraints. | [`3ac2b73`](https://github.com/hejulian2004/ssh_mobile/commit/3ac2b7314930c6340200af1ab581e6d919d9ad5a), [`e05f7ef`](https://github.com/hejulian2004/ssh_mobile/commit/e05f7ef07eb23b4702fd64cd6e36139296fb0de4), [`33d5f63`](https://github.com/hejulian2004/ssh_mobile/commit/33d5f63e77381fe1c94b6feaf9967abb5926b4fb) |
-| AI chat and agent UX | Reworked the composer, slash commands, history, attachments, trace viewer, TODO panels, run summaries, prompt customization, tool selector, target-server picker, and runtime health dialog. | [`275c1c3`](https://github.com/hejulian2004/ssh_mobile/commit/275c1c3ec751b9c6577c2211b760ad7650454bec), [`64baeeb`](https://github.com/hejulian2004/ssh_mobile/commit/64baeeba2322b23491cacaefcc1679837f7e9eb5), [`1c1c6cb`](https://github.com/hejulian2004/ssh_mobile/commit/1c1c6cb0b8fe35a8a1a10d1196c4595eecf6bb8e) |
-| Plan Mode and execution safety | Added single-flight Plan approval, immutable provider and server-target snapshots, runtime preflight checks, cancellation and chat-mutation locks, compare-and-swap guards, stale-target rejection, and persisted TODO/run-state reconciliation. | [`f3abce3`](https://github.com/hejulian2004/ssh_mobile/commit/f3abce32ed54ebc83917e5db1dd4f0b5a2e6718c), [`857c637`](https://github.com/hejulian2004/ssh_mobile/commit/857c637b5045d114630467c2abc6a438a2b5e49a), [`a202779`](https://github.com/hejulian2004/ssh_mobile/commit/a202779a4aa02422a4b130652db9552b94602241) |
-| SFTP and attachment safety | Added bounded reads, encrypted and target-bound caches, safe image and text previews, blocked external rich-preview navigation, external handling for PDFs, cache refresh fixes, and modern editor, viewer, browser, and selector interfaces. | [`669262f`](https://github.com/hejulian2004/ssh_mobile/commit/669262f3311c13992e21e72bb4488af1212caedd), [`d61b8b4`](https://github.com/hejulian2004/ssh_mobile/commit/d61b8b400208156eb3894a5cf65bed2a50b51bb8), [`982b56e`](https://github.com/hejulian2004/ssh_mobile/commit/982b56e02c4edc1d4b7eb651bc18eded521f3927) |
-| Terminal and server operations | Modernized live terminal, history, copy mode, window management, server cards, monitoring health panels, server selectors, and account/session loading behavior. | [`1dc2702`](https://github.com/hejulian2004/ssh_mobile/commit/1dc2702050cc174d3ac74a7f548b64c2ee4314fe), [`24b43af`](https://github.com/hejulian2004/ssh_mobile/commit/24b43af8df9918b7c598bc839ebf2a8af97dab18), [`77bc0d3`](https://github.com/hejulian2004/ssh_mobile/commit/77bc0d376c794144cce8415b62fbf63f26ced376) |
-| Architecture and performance | Continued feature-first MVVM migration, extracted shared components, cached theme and chart/list computations, narrowed Provider subscriptions, preserved lazy loading, and moved heavy remote decoding and parsing to background isolates. | [`9ffd48e`](https://github.com/hejulian2004/ssh_mobile/commit/9ffd48e2bc26fd3a3c6fc2cb83973076a7e01902), [`3d2ceda`](https://github.com/hejulian2004/ssh_mobile/commit/3d2ceda56aba01be8f4452c492913b9f9fa11079), [`1e587bf`](https://github.com/hejulian2004/ssh_mobile/commit/1e587bf3d521fd9007cd2636d86ad69cc26b2320), [`833256a`](https://github.com/hejulian2004/ssh_mobile/commit/833256ab73134d474daea8aa9790678976f9c70b) |
-| Testing, documentation, and CI | Expanded widget, ViewModel, parser, security, Plan Mode, SFTP, terminal, startup, responsive, and system-admin tests; documented the mobile QA matrix; added bilingual README content; switched Android CI to reliable repositories; and aligned iOS builds to iOS 14. | [`7d17380`](https://github.com/hejulian2004/ssh_mobile/commit/7d1738078e9be026582245a9a7b496982e1872b8), [`0e83eac`](https://github.com/hejulian2004/ssh_mobile/commit/0e83eacdf8e55251c444453603f64f2c0c0c8d02), [`9d33194`](https://github.com/hejulian2004/ssh_mobile/commit/9d33194af6c05308b7dbadbe1accf4dd4f923e12) |
-
-### Key maintainer decisions
-
-The maintainer made the key decisions that shaped the implementation:
-
-- run the agent on the client so a 1 GB server only needs SSH/SFTP access;
-- use feature-first MVVM and explicit service boundaries instead of placing orchestration in screens;
-- base high-density phone adaptation on the physical short edge while preserving system text scaling;
-- require explicit approval for remote writes and sensitive operations;
-- bind approvals to immutable server, provider, playbook, skill, and monitor snapshots so asynchronous state changes cannot redirect an action;
-- block destructive shell deletion and sensitive path access instead of relying only on model instructions;
-- store credentials in platform secure storage and encrypt sensitive growing data in Drift;
-- keep MCP local-only, authenticated, and subject to the same approval policy;
-- make automated tests and deterministic quality gates mandatory for AI-generated changes.
-
-### Review and accountability
-
-GPT-5.6 and Codex accelerated implementation, but generated changes were not treated as authoritative. The maintainer reviewed behavior, selected trade-offs, defined acceptance criteria, rejected unsafe approaches, and retained final responsibility for every merged change. Gemini was also used to cross-check selected implementation and documentation decisions.
-
 ## Architecture
 
 SSH Mobile uses a feature-first MVVM architecture with Provider and Selector for state management. UI composition, protocol adapters, persistent storage, monitoring, and AI orchestration are separated into independently testable layers.
@@ -549,11 +516,16 @@ flowchart LR
   settings, SFTP, logger, Host Key, and monitoring implementations; the
   package does not depend on another Feature implementation.
 - `packages/features/feature_lan_share/`: LAN discovery, pairing,
-  HTTPS/WebSocket transfer, Web Share, transfer history, non-secret pairing
+  authenticated HTTPS/WebSocket control, native file-transfer coordination,
+  Web Share, transfer history, non-secret pairing
   metadata, and the `LanShareModule` with its independent `lan_share.db`.
   The package consumes `network_sdk` client contracts plus `network_transport`,
   `app_core`, `app_ui`, and injected App Ports; Network Protocol V2 construction remains
   in the App Shell adapter.
+- `packages/features/feature_screen_share/`: consent and business state through
+  opaque Realtime/media ports. `packages/infrastructure/realtime_media/` owns
+  the media contract, with Android and Windows implementations in their platform
+  packages. `native/network_core/` owns network transport and WebRTC internals.
 - `packages/features/feature_mcp/`: the local MCP HTTP/JSON-RPC server,
   exposure and invocation policy, approval queue, activity Repository, console
   UI, and independent `mcp.db`. Its settings, logger, and AI tool runtime are
@@ -647,8 +619,8 @@ are handled only by `CredentialRepository` and platform Secure Storage. The
 Connection ViewModel consumes the Core Connection repositories through App
 Shell injection.
 
-LAN file transfer follows `LanShareViewModel → NetworkService → Rust
-NetworkRuntime`. Commands return typed acceptance results, while progress and
+LAN file transfer follows `LanShareViewModel → LanNativeTransferCoordinator →
+NetworkFacade → Rust NetworkRuntime`. Commands return typed acceptance results, while progress and
 terminal outcomes arrive as typed events. The runtime owns per-peer path
 selection, authenticated QUIC/TCP/WebSocket routes, streaming file verification,
 and native Relay send/receive; Flutter owns pairing, approval UI, history, and
@@ -716,7 +688,7 @@ In-memory reads enforce hard limits and chunk validation before allocation. Larg
 
 ## Server Monitoring
 
-The monitoring workspace contains four primary sections:
+The monitoring workspace includes these sections:
 
 - `Performance`: manual multi-server sampling with approximately ten minutes of in-memory history.
 - `Ports`: single-server port snapshots and management operations.
@@ -747,20 +719,12 @@ A production database failure does not silently fall back to an in-memory databa
 
 ## Engineering Quality
 
-### July 10 starting baseline
-
-At the start of the GPT-5.6 implementation period, local validation was completed with Flutter 3.44.2 and Dart 3.12.2:
-
-- `flutter analyze`: no issues.
-- `flutter test --coverage`: 568 tests passed.
-- Non-generated line coverage: 39.3% (`12690/32302`), with a 35% CI floor.
-- Android debug and unsigned release APKs built successfully.
-- Windows release build completed successfully.
-- Icon generation, Drift generation, shared agent-skill synchronization, formatting, and diff checks were deterministic.
-
-Many additional tests were added after this baseline. Run the commands in [Testing Guide](#testing-guide) to obtain the current result for the checked-out commit.
-
-See [docs/VALIDATION_REPORT.md](docs/VALIDATION_REPORT.md) for the original validation scope and device-dependent checks.
+Validation belongs to the checked-out commit. Use the [Testing Guide](#testing-guide)
+and [GitHub Actions](.github/workflows/flutter.yml) for current checks, and the
+[coverage policy](docs/COVERAGE_POLICY.md) for owner scopes and required thresholds.
+Physical-device acceptance is tracked separately in the
+[release checklist](docs/RELEASE_CHECKLIST.md) and
+[security regression guide](docs/security_manual_regression.md).
 
 ## Agent Collaboration Files
 
