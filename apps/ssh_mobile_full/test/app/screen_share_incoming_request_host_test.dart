@@ -52,7 +52,7 @@ void main() {
       if (cleanedUp) return;
       cleanedUp = true;
       await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump();
+      await _settle(tester);
       debugPrint = debugPrintSynchronously;
       await commandGateway.close();
     }
@@ -164,7 +164,7 @@ void main() {
         if (cleanedUp) return;
         cleanedUp = true;
         await tester.pumpWidget(const SizedBox.shrink());
-        await tester.pump();
+        await _settle(tester);
         debugPrint = debugPrintSynchronously;
         await commandGateway.close();
       }
@@ -262,7 +262,7 @@ void main() {
       if (cleanedUp) return;
       cleanedUp = true;
       await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump();
+      await _settle(tester);
       debugPrint = debugPrintSynchronously;
       await commandGateway.close();
     }
@@ -341,7 +341,7 @@ void main() {
       if (cleanedUp) return;
       cleanedUp = true;
       await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump();
+      await _settle(tester);
       debugPrint = debugPrintSynchronously;
       await commandGateway.close();
     }
@@ -411,7 +411,7 @@ void main() {
         if (cleanedUp) return;
         cleanedUp = true;
         await tester.pumpWidget(const SizedBox.shrink());
-        await tester.pump();
+        await _settle(tester);
         debugPrint = debugPrintSynchronously;
         await commandGateway.close();
       }
@@ -485,14 +485,18 @@ Future<void> _mountHost({
   );
   final now = DateTime.now().toUtc();
   final warmupRealtimeId = '00112233445566778899aabbccddee00';
-  await runtime.realtimeClient.discardIncomingOffer(
-    _testOffer(
-      realtimeId: warmupRealtimeId,
-      sharedSessionInstanceId: 'ffeeddccbbaa99887766554433221100',
-      operationId: 'host-test-warmup-operation',
-      offerId: 'host-test-warmup',
-      claimToken: 'host-test-warmup-token',
-      bindingExpiry: now.add(const Duration(seconds: 5)),
+  // First use initializes identity in a real isolate. Keep that work outside
+  // WidgetTest's fake-async zone before testing route/expiry behavior.
+  await tester.runAsync(
+    () => runtime.realtimeClient.discardIncomingOffer(
+      _testOffer(
+        realtimeId: warmupRealtimeId,
+        sharedSessionInstanceId: 'ffeeddccbbaa99887766554433221100',
+        operationId: 'host-test-warmup-operation',
+        offerId: 'host-test-warmup',
+        claimToken: 'host-test-warmup-token',
+        bindingExpiry: now.add(const Duration(seconds: 5)),
+      ),
     ),
   );
   await _settle(tester);

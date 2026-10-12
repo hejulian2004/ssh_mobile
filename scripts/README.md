@@ -34,9 +34,20 @@ GitHub Actions workflow is the authoritative full gate. Ordinary changes use
 focused owner checks; run `bash scripts/bash/ci/full_test.sh` (or its native
 PowerShell counterpart) only when aggregate local CI is explicitly requested.
 
-The hosted Android build caches Cargo dependencies with an Android-specific key;
-it does not restore host test `target` artifacts. Other native jobs retain their
-platform/architecture target caches. Android still builds the full APK ABI set.
+The hosted Android build reuses Cargo libraries/dependencies through a dedicated
+build-only release cache, separate from host test artifacts. Cargo validates
+source/toolchain/configuration freshness. Android still builds the full APK ABI set.
+Its ephemeral Linux runner reclaims unused .NET/Haskell toolchains before
+downloads while retaining the Android SDK, Java and Rust toolchains.
+
+`native-linux-build` builds the Linux FFI library once for a commit and uploads
+its Cargo release dependencies and fingerprints. Linux SDK/Feature/App/E2E
+consumers depend on that producer and restore the exact-commit artifact through
+`.github/actions/restore-native-linux`; the action verifies revision/checksum,
+restores build-script permissions, and keeps Cargo's compiler/configuration
+checks. Other platforms and Android ABIs remain independent build targets.
+This reuses compilation, not test results: existing tests and coverage gates
+still run on each consumer.
 
 `e2e/online_e2e.sh` and `e2e/online_e2e.ps1` are an explicit external-deployment
 gate. They are manual-only and never start Compose or join the routine CI
