@@ -14,6 +14,59 @@ void main() {
   const realtimeId = '00112233445566778899aabbccddeeff';
 
   test(
+    'configured receiver observes invitations before any outgoing command',
+    () async {
+      final gateway = _FakeRealtimeGateway();
+      final backend = AppRealtimeSessionBackend(
+        networkRuntime: _FakeNetworkRuntime(gateway),
+      );
+      final received = <RealtimeBackendEvent>[];
+      final subscription = backend.events.listen(received.add);
+      backend.observeGateway(gateway);
+      // Repeated activation of the same borrowed gateway must not duplicate events.
+      backend.observeGateway(gateway);
+      gateway._events.add(
+        NativeRealtimeIncomingSessionOfferEvent(
+          eventId: 'incoming',
+          timestampMs: 1,
+          protocolVersion: 2,
+          offerId: 'offer',
+          claimToken: 'fixture-claim',
+          realtimeId: realtimeId,
+          authenticatedPeerId: 'peer-a',
+          sharedSessionInstanceId: realtimeId,
+          bindingExpiresAtMs: DateTime.utc(2030).millisecondsSinceEpoch,
+          request: _nativeTestConsent(),
+        ),
+      );
+      await _pump();
+      expect(
+        received.whereType<RealtimeIncomingSessionOfferBackendEvent>(),
+        hasLength(1),
+      );
+      expect(gateway.lastStartCommandId, isNull);
+      await subscription.cancel();
+      await backend.dispose();
+      gateway._events.add(
+        NativeRealtimeIncomingSessionOfferEvent(
+          eventId: 'late',
+          timestampMs: 2,
+          protocolVersion: 2,
+          offerId: 'late-offer',
+          claimToken: 'fixture-claim',
+          realtimeId: realtimeId,
+          authenticatedPeerId: 'peer-a',
+          sharedSessionInstanceId: realtimeId,
+          bindingExpiresAtMs: DateTime.utc(2030).millisecondsSinceEpoch,
+          request: _nativeTestConsent(),
+        ),
+      );
+      await _pump();
+      expect(received, hasLength(1));
+    },
+  );
+
+  test(
     'start queue success followed by native failure completes as failure',
     () async {
       final gateway = _FakeRealtimeGateway();

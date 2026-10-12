@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:app_core/app_core.dart';
+
 import 'package:feature_lan_share/feature_lan_share.dart' as lan;
 import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:flutter/foundation.dart';
@@ -104,6 +106,7 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
       final selectedSource = await _selectSource();
       if (selectedSource == null) return;
       if (superseded) throw StateError('Screen-share intent was superseded.');
+      _logPreparation('connecting authenticated peer');
 
       final coordinator = runtime.lanShareModule.coordinator;
       final network = coordinator.nativeTransferCoordinator;
@@ -116,6 +119,7 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
         throw StateError(prepared.error.message);
       }
       if (superseded) throw StateError('Screen-share intent was superseded.');
+      _logPreparation('starting native session');
 
       final realtimeId = _newHexIdentity();
       session = runtime.realtimeClient.createSession(
@@ -129,6 +133,7 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
       if (superseded) throw StateError('Screen-share intent was superseded.');
       await _waitForIdentity(session);
       if (superseded) throw StateError('Screen-share intent was superseded.');
+      _logPreparation('opening consent route');
       lease = AppScreenShareSessionLease(
         client: runtime.realtimeClient,
         session: session,
@@ -260,6 +265,15 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
       await subscription.cancel();
     }
   }
+
+  void _logPreparation(String phase) => runtime.logger.log(
+    LogRecord(
+      timestamp: DateTime.now(),
+      level: LogLevel.info,
+      source: 'ScreenShareEntryCoordinator',
+      message: 'Screen-share preparation: $phase',
+    ),
+  );
 
   String _newOperationId() {
     _operationSequence = (_operationSequence + 1) & 0xffff;

@@ -483,24 +483,11 @@ Future<void> _mountHost({
       ),
     ),
   );
-  final now = DateTime.now().toUtc();
-  final warmupRealtimeId = '00112233445566778899aabbccddee00';
-  // First use initializes identity in a real isolate. Keep that work outside
-  // WidgetTest's fake-async zone before testing route/expiry behavior.
-  await tester.runAsync(
-    () => runtime.realtimeClient.discardIncomingOffer(
-      _testOffer(
-        realtimeId: warmupRealtimeId,
-        sharedSessionInstanceId: 'ffeeddccbbaa99887766554433221100',
-        operationId: 'host-test-warmup-operation',
-        offerId: 'host-test-warmup',
-        claimToken: 'host-test-warmup-token',
-        bindingExpiry: now.add(const Duration(seconds: 5)),
-      ),
-    ),
-  );
+  // Simulate first LAN activation, without a synthetic Realtime warmup command.
+  // Real identity initialization stays outside WidgetTest's fake-async zone.
+  await tester.runAsync(() => runtime.networkRuntime.openCommandGateway());
   await _settle(tester);
-  expect(commandGateway.commands, isNotEmpty);
+  expect(commandGateway.commands, isEmpty);
 }
 
 Future<void> _emitOffer(

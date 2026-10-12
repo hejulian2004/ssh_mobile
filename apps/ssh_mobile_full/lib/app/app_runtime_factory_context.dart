@@ -55,6 +55,7 @@ final class _AppRuntimeFactoryContext {
   late final NetworkRuntime runtimeNetworkRuntime;
   late final TelemetryTraceRegistry traceRegistry;
   late final RealtimeClient runtimeRealtimeClient;
+  late final AppRealtimeSessionBackend runtimeRealtimeBackend;
   late final RealtimeMediaBackend runtimeRealtimeMediaBackend;
   late final AppRealtimeMediaSessionFactory runtimeRealtimeMediaSessionFactory;
   late final JsonBootstrapClient bootstrapClient;

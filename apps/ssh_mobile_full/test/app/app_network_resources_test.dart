@@ -18,6 +18,7 @@ void main() {
       final previousPrint = debugPrint;
       debugDefaultTargetPlatformOverride = TargetPlatform.windows;
       final native = FakeNetworkRuntime();
+      native.realtimeGateway = RuntimeNetworkRealtimeGateway(native.gateway);
       final harness = await newRuntimeHarness(
         networkRuntime: native,
         disposeLogger: false,
@@ -27,6 +28,7 @@ void main() {
         runtime = await harness.createFuture;
         expect(native.ensureCapabilityCalls, 0);
         expect(native.openCommandGatewayCalls, 0);
+        expect(native.openRealtimeGatewayCalls, 0);
         expect(
           await const FlutterSecureStorage().read(
             key: 'network_quic_ed25519_seed_v1',
@@ -37,6 +39,7 @@ void main() {
         await runtime.networkRuntime.openCommandGateway();
         expect(native.ensureCapabilityCalls, 1);
         expect(native.openCommandGatewayCalls, 2);
+        expect(native.openRealtimeGatewayCalls, 1);
         expect(
           await const FlutterSecureStorage().read(
             key: 'network_quic_ed25519_seed_v1',

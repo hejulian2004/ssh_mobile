@@ -34,6 +34,8 @@ App Shell 的稳定组合入口是 `lib/main.dart`、`lib/app/app_bootstrap.dart
 LAN 接收在首次打开快传页面时激活，随后由 Module 保持接收；启动时全局配对宿主
 仅订阅事件。遥测只准备独立的 Relay enrollment 门禁，不初始化接收器。网络密钥
 推导和 TLS 证书首次生成在工作 isolate 执行，安全存储读写仍使用平台 isolate。
+首次网络激活完成后，组合根为 Realtime 接收适配器接入同一原生运行时的借用
+gateway，确保从未主动共享过屏幕的设备也能收到邀请；冷启动订阅仍不初始化网络。
 
 启动品牌资源为 `assets/app_icon.svg`：透明边缘、浅蓝面板、蓝色终端提示符和青绿色
 光标。`StartupBranding` 使用 SVG 等比显示，按可用短边限制在 64–128 逻辑像素，

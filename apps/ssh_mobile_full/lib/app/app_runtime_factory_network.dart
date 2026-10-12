@@ -74,6 +74,10 @@ extension _AppRuntimeFactoryNetwork on _AppRuntimeFactoryContext {
           '${configured.error.code.name}',
         );
       }
+      // Use the already configured native owner here. Calling the lazy App
+      // wrapper would await this initialization itself. Passive receivers must
+      // observe invitations even if they have never issued Realtime commands.
+      runtimeRealtimeBackend.observeGateway(await native.openRealtimeGateway());
       return facade;
     } catch (_) {
       await facade.dispose();

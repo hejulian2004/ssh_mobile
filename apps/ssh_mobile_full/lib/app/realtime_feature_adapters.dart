@@ -43,6 +43,19 @@ final class AppRealtimeSessionBackend
   @override
   Stream<RealtimeBackendEvent> get events => _events.stream;
 
+  /// Borrows the configured App runtime's gateway for passive reception.
+  /// App startup stays cold; the composition root calls this on first network
+  /// activation, before publishing the configured facade to LAN callers.
+  void observeGateway(NetworkRealtimeGateway gateway) {
+    _ensureUsable();
+    if (identical(_gateway, gateway)) return;
+    if (_gateway != null) {
+      throw StateError('Realtime already observes another runtime gateway.');
+    }
+    _gateway = gateway;
+    _nativeSubscription = gateway.events.listen(_onNativeEvent);
+  }
+
   @override
   Future<SdkResult<void>> sendConsent({
     required String peerId,
@@ -251,14 +264,20 @@ final class AppRealtimeSessionBackend
     if (existing != null) return existing;
 
     late final Future<NetworkRealtimeGateway> future;
-    future = _networkRuntime.openRealtimeGateway();
+    future = _networkRuntime.openRealtimeGateway().then((gateway) {
+      // Configuring the shared runtime may have attached its gateway while
+      // this first command awaited readiness. Keep that single subscription.
+      if (_disposed) return gateway;
+      final current = _gateway;
+      if (current != null) return current;
+      observeGateway(gateway);
+      return gateway;
+    });
     _gatewayFuture = future;
     future.then<void>(
       (gateway) {
         if (!identical(_gatewayFuture, future) || _disposed) return;
         _gatewayFuture = null;
-        _gateway = gateway;
-        _nativeSubscription = gateway.events.listen(_onNativeEvent);
       },
       onError: (Object _, StackTrace _) {
         if (identical(_gatewayFuture, future)) _gatewayFuture = null;

@@ -41,9 +41,10 @@ extension _AppRuntimeFactoryCore on _AppRuntimeFactoryContext {
     );
     traceRegistry = TelemetryTraceRegistry();
     cleanup.add(traceRegistry.dispose, priority: _CleanupPriority.adapter);
-    runtimeRealtimeClient = RealtimeClientImpl(
-      backend: AppRealtimeSessionBackend(networkRuntime: runtimeNetworkRuntime),
+    runtimeRealtimeBackend = AppRealtimeSessionBackend(
+      networkRuntime: runtimeNetworkRuntime,
     );
+    runtimeRealtimeClient = RealtimeClientImpl(backend: runtimeRealtimeBackend);
     final endpointBackend = AppRealtimeMediaBackend(
       networkRuntime: runtimeNetworkRuntime,
     );
