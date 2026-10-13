@@ -15,6 +15,7 @@ extension _AppRuntimeFactoryRuntime on _AppRuntimeFactoryContext {
       networkFacade: networkFacade,
       realtimeClient: runtimeRealtimeClient,
       realtimeMediaResources: AppRealtimeMediaResources(
+        logger: logger,
         backend: runtimeRealtimeMediaBackend,
         sessionFactory: runtimeRealtimeMediaSessionFactory,
       ),

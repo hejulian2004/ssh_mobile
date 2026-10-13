@@ -161,11 +161,15 @@ enum GenericRouteCommand {
 pub(crate) struct GenericRouteHandle {
     id: u64,
     profile: ConnectionProfile,
+    peer_address: Option<SocketAddr>,
     commands: mpsc::Sender<GenericRouteCommand>,
     stop: CancellationToken,
 }
 
 impl GenericRouteHandle {
+    pub(crate) fn peer_address(&self) -> Option<SocketAddr> {
+        self.peer_address
+    }
     pub(crate) fn id(&self) -> GenericRouteId {
         GenericRouteId::new(self.id)
     }
@@ -253,6 +257,7 @@ pub(crate) fn test_blocking_generic_route() -> TestBlockingGenericRoute {
     let handle = GenericRouteHandle {
         id: NEXT_GENERIC_ROUTE_ID.fetch_add(1, Ordering::Relaxed),
         profile: ConnectionProfile::for_generic(TransportKind::Tcp),
+        peer_address: None,
         commands: command_tx,
         stop: CancellationToken::default(),
     };
@@ -305,6 +310,7 @@ pub(crate) fn prepare_generic_route(connection: GenericConnection) -> GenericRou
     let handle = GenericRouteHandle {
         id: NEXT_GENERIC_ROUTE_ID.fetch_add(1, Ordering::Relaxed),
         profile,
+        peer_address: connection.transport.peer_address(),
         commands: command_tx,
         stop: stop.clone(),
     };

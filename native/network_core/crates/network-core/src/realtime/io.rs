@@ -66,6 +66,8 @@ pub(crate) fn runtime_webrtc_config_from_values(
 pub(crate) async fn create_io_driver(
     state: &RuntimeState,
     config: WebRtcConfig,
+    peer_id: &str,
+    screen_direction: Option<network_webrtc::MediaDirection>,
 ) -> Result<RealtimeIoDriver, WebRtcError> {
     let bind_ip = state
         .lifecycle
@@ -78,11 +80,35 @@ pub(crate) async fn create_io_driver(
     let bind_addr = SocketAddr::new(bind_ip, 0);
     let advertised_ip = if bind_ip.is_unspecified() {
         let candidates = network_nat::discover_candidates(0).await;
-        // This sends no packet: the OS selects the default outbound interface.
+        let peer_endpoint = state
+            .peers
+            .read()
+            .await
+            .get(peer_id)
+            .and_then(|peer| peer.endpoint);
+        let active_endpoint = match state
+            .acquire_path_lease(peer_id, crate::connect::CAPABILITY_RELIABLE_MESSAGE)
+            .await
+        {
+            Ok(lease) if lease.profile().topology() == crate::connection::RouteTopology::Direct => {
+                match lease.stream_carrier() {
+                    Some(crate::connect::StreamCarrier::Quic(connection)) => {
+                        Some(connection.remote_address())
+                    }
+                    Some(crate::connect::StreamCarrier::Generic(handle)) => handle.peer_address(),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        // This sends no packet. Ask for the route to this paired peer; the
+        // default Internet route can be a different NIC from Windows hotspot.
         let preferred = std::net::UdpSocket::bind(bind_addr)
             .ok()
             .and_then(|socket| {
-                socket.connect("192.0.2.1:9").ok()?;
+                socket
+                    .connect(realtime_route_target(active_endpoint.or(peer_endpoint)))
+                    .ok()?;
                 socket.local_addr().ok().map(|address| address.ip())
             });
         select_interface_ip(
@@ -95,11 +121,18 @@ pub(crate) async fn create_io_driver(
     } else {
         Some(bind_ip)
     };
-    // Generic Realtime sessions stay media-neutral. Phase 2 screen sharing
-    // configures the dedicated H.264 transceiver at the explicit screen-track
-    // integration point instead of changing every DataChannel SDP.
-    let peer = WebRtcPeer::new(config)?;
+    let mut peer = WebRtcPeer::new(config)?;
+    if let Some(direction) = screen_direction {
+        let ssrc = matches!(direction, network_webrtc::MediaDirection::Sendonly).then_some(1);
+        peer.configure_h264_screen_video(direction, ssrc)?;
+    }
     RealtimeIoDriver::bind_with_advertised_ip(peer, bind_addr, advertised_ip).await
+}
+
+pub(super) fn realtime_route_target(peer_endpoint: Option<SocketAddr>) -> SocketAddr {
+    peer_endpoint
+        .filter(|endpoint| !endpoint.ip().is_unspecified() && !endpoint.ip().is_loopback())
+        .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)), 9))
 }
 
 pub(super) fn select_interface_ip(

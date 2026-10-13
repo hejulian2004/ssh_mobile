@@ -91,6 +91,7 @@ fn carries_realtime_commands_and_events_through_the_ffi_wire() {
         protocol_version: NETWORK_PROTOCOL_VERSION,
         payload: Some(network_command::Payload::StartRealtimeSession(
             StartRealtimeSessionCommand {
+                screen_video: false,
                 realtime_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: "peer-a".into(),
             },
@@ -141,6 +142,7 @@ fn realtime_failure_returns_a_terminal_result_through_the_live_ffi_runtime() {
         protocol_version: NETWORK_PROTOCOL_VERSION,
         payload: Some(network_command::Payload::StartRealtimeSession(
             StartRealtimeSessionCommand {
+                screen_video: false,
                 realtime_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: "missing-peer".into(),
             },

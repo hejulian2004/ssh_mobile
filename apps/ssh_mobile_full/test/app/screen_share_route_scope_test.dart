@@ -426,6 +426,40 @@ void main() {
     await coordinator.dispose();
   });
 
+  test('Windows capture keeps the selected native catalog token', () async {
+    final platform = _RecordingWindowsPlatform(sources: [source]);
+    final windowsBackend = WindowsRealtimeMediaBackend(
+      endpointBackend: _NativeOwnerBackend(),
+      platform: platform,
+    );
+    // Native enumeration replaces all catalog tokens, even for the same display.
+    capabilities.sources = [
+      ScreenCaptureSource(
+        id: ScreenCaptureSourceId('display:new-generation'),
+        kind: ScreenCaptureSourceKind.display,
+        label: 'Display 1',
+      ),
+    ];
+    final coordinator = AppScreenShareMediaCoordinator(
+      session: session,
+      resources: AppRealtimeMediaResources(
+        backend: windowsBackend,
+        sessionFactory: AppRealtimeMediaSessionFactory(backend: windowsBackend),
+      ),
+      capabilities: capabilities,
+      source: source,
+    );
+    await coordinator.prepare(capture: true);
+    await coordinator.port.startCapture(
+      operationId: 'operation-a',
+      realtimeId: realtimeId,
+      generation: 7,
+    );
+    expect(platform.capturedSource, same(source));
+    expect(capabilities.listCalls, 0);
+    await coordinator.dispose();
+  });
+
   test('stop rejects a different operation identity', () async {
     final coordinator = _coordinator(
       backend,
@@ -761,7 +795,21 @@ final class _RecordingCapabilities
   }
 }
 
-final class _RecordingMediaBackend implements RealtimeMediaBackend {
+final class _NativeOwnerBackend extends _RecordingMediaBackend
+    implements RealtimeMediaNativeOwnerBackend {
+  @override
+  Future<RealtimeMediaNativeOwnerToken> openNativeOwner({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) async => RealtimeMediaNativeOwnerToken('1');
+  @override
+  Future<void> closeNativeOwner({
+    required RealtimeMediaNativeOwnerToken token,
+    required RealtimeMediaEndpointIdentity identity,
+  }) async {}
+}
+
+class _RecordingMediaBackend implements RealtimeMediaBackend {
   final List<String> operations = <String>[];
   int _nextEndpoint = 0;
   Completer<void>? startGate;
@@ -917,6 +965,7 @@ final class _RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
   _RecordingWindowsPlatform({required this.sources});
 
   final List<ScreenCaptureSource> sources;
+  ScreenCaptureSource? capturedSource;
 
   @override
   Future<List<ScreenCaptureSource>> listCaptureSources() async => sources;
@@ -927,7 +976,9 @@ final class _RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
     required RealtimeMediaEndpointIdentity identity,
     required ScreenCaptureSource source,
     RealtimeMediaNativeOwnerToken? ownerToken,
-  }) async {}
+  }) async {
+    capturedSource = source;
+  }
 
   @override
   Future<RemoteVideoSurface> attachRemoteVideoSurface({

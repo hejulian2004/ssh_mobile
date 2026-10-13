@@ -73,10 +73,10 @@ pub(crate) fn release_endpoint(
         let mut driver = driver
             .lock()
             .map_err(|_| RealtimeMediaError::DriverUnavailable)?;
-        driver
-            .peer_mut()
-            .clear_h264_screen_video(direction)
-            .map_err(|_| RealtimeMediaError::DriverUnavailable)?;
+        match driver.peer_mut().clear_h264_screen_video(direction) {
+            Ok(()) | Err(network_webrtc::WebRtcError::ScreenVideoNotConfigured) => {}
+            Err(_) => return Err(RealtimeMediaError::DriverUnavailable),
+        }
     }
     // Keep the lease visible until native queue/order cleanup succeeds so a
     // caller can retry a transient driver failure deterministically.

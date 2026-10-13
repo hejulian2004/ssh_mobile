@@ -269,7 +269,7 @@ pub(crate) fn apply_signal_with_driver(
                 shared_session_instance_id: session.shared_session_instance_id.clone(),
                 revision: session.revision,
                 generation,
-                state: Some(RealtimeSessionState::Connected),
+                state: Some(RealtimeSessionState::Negotiating),
                 outbound: None,
             })
         }

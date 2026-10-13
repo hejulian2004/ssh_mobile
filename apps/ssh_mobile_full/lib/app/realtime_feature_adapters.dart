@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:app_core/app_core.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'package:network_transport/network_transport.dart';
 import 'package:ssh_mobile_network_native/ssh_mobile_network_native.dart';
@@ -22,12 +23,16 @@ final class AppRealtimeSessionBackend
         RealtimeIncomingSessionBackend {
   AppRealtimeSessionBackend({
     required this._networkRuntime,
+    this.logger,
+    this.screenVideo = false,
     this.maxPendingCommands = _defaultMaxPendingCommands,
     this.commandResultTimeout = _defaultCommandResultTimeout,
   }) : assert(maxPendingCommands > 0),
        assert(commandResultTimeout > Duration.zero);
 
   final NetworkRuntime _networkRuntime;
+  final AppLogger? logger;
+  final bool screenVideo;
   final int maxPendingCommands;
   final Duration commandResultTimeout;
   final StreamController<RealtimeBackendEvent> _events =
@@ -186,7 +191,11 @@ final class AppRealtimeSessionBackend
   }) => _sendCommand(
     operation: NetworkOperation.connect,
     peerId: peerId,
-    send: (gateway) => gateway.start(realtimeId: realtimeId, peerId: peerId),
+    send: (gateway) => gateway.start(
+      realtimeId: realtimeId,
+      peerId: peerId,
+      screenVideo: screenVideo,
+    ),
   );
 
   @override

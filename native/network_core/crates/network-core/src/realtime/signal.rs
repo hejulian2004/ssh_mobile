@@ -282,7 +282,7 @@ pub(crate) async fn handle_realtime_signal(
             .contains_key(realtime_id)
     {
         Some(
-            create_io_driver(state, runtime_webrtc_config())
+            create_io_driver(state, runtime_webrtc_config(), peer_id, None)
                 .await
                 .map_err(|error| boxed_message(error.to_string()))?
                 .into_handle(),

@@ -130,45 +130,71 @@ pub(crate) async fn handle_direct_signal(
     authenticated_peer: &str,
     frame: &[u8],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if !state
-        .route_is_authorized(authenticated_peer, RouteTopology::Direct)
-        .await
-    {
-        return Err(boxed_message("direct signaling is not authorized"));
-    }
-    let (session_id, aad, encrypted) = split_frame(frame)?;
-    let session = state
-        .connection_sessions
-        .current_session_id(authenticated_peer)
-        .await
-        .ok_or_else(|| boxed_message("direct signaling session unavailable"))?;
-    if state
-        .connection_sessions
-        .current_remote_session_binding(authenticated_peer)
-        .await
-        .as_deref()
-        != Some(session_id)
-    {
-        return Err(boxed_message("stale direct signaling session"));
-    }
-    let decoded = state
-        .decrypt_application_payload(authenticated_peer, session_id, aad, encrypted)
-        .await?;
-    let signal = RealtimeSignal::decode(decoded.as_slice())?;
-    if signal.source_device_id != authenticated_peer
-        || signal.revision == 0
-        || state
+    let mut phase = "authorization";
+    let result = async {
+        if !state
+            .route_is_authorized(authenticated_peer, RouteTopology::Direct)
+            .await
+        {
+            return Err(boxed_message("direct signaling is not authorized"));
+        }
+        phase = "frame";
+        let (session_id, aad, encrypted) = split_frame(frame)?;
+        phase = "binding";
+        let session = state
             .connection_sessions
             .current_session_id(authenticated_peer)
             .await
-            != Some(session)
-    {
-        return Err(boxed_message(
-            "direct signaling authenticated binding mismatch",
-        ));
+            .ok_or_else(|| boxed_message("direct signaling session unavailable"))?;
+        if state
+            .connection_sessions
+            .current_remote_session_binding(authenticated_peer)
+            .await
+            .as_deref()
+            != Some(session_id)
+        {
+            return Err(boxed_message("stale direct signaling session"));
+        }
+        phase = "authentication";
+        let decoded = state
+            .decrypt_application_payload(authenticated_peer, session_id, aad, encrypted)
+            .await?;
+        phase = "envelope";
+        let signal = RealtimeSignal::decode(decoded.as_slice())?;
+        if signal.source_device_id != authenticated_peer
+            || signal.revision == 0
+            || state
+                .connection_sessions
+                .current_session_id(authenticated_peer)
+                .await
+                != Some(session)
+        {
+            return Err(boxed_message(
+                "direct signaling authenticated binding mismatch",
+            ));
+        }
+        super::validate_realtime_id(&signal.realtime_id).map_err(super::boxed_protocol_error)?;
+        phase = "dispatch";
+        handle_v2_realtime_signal(state, &signal).await
     }
-    super::validate_realtime_id(&signal.realtime_id).map_err(super::boxed_protocol_error)?;
-    handle_v2_realtime_signal(state, &signal).await
+    .await;
+    if result.is_err() {
+        // Rejection remains fail-closed. Publish only a fixed stage name on
+        // the existing bounded diagnostics lane; never echo payload or IDs.
+        let error = realtime_error(
+            NetworkErrorCode::IoError,
+            format!("Screen-share direct rejection: {phase}"),
+            "receive_realtime_signal",
+            authenticated_peer,
+        );
+        let _ = crate::commands::emit_peer_diagnostics_with_error(
+            state,
+            authenticated_peer.to_owned(),
+            Some(error),
+        )
+        .await;
+    }
+    result
 }
 
 #[cfg(test)]

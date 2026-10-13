@@ -1,9 +1,6 @@
 #ifndef REALTIME_MEDIA_WINDOWS_CAPTURE_STATE_H_
 #define REALTIME_MEDIA_WINDOWS_CAPTURE_STATE_H_
 
-#include "windows_capture.h"
-#include "windows_h264_encoder.h"
-
 #include <winrt/Windows.Graphics.Capture.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 
@@ -12,6 +9,9 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+
+#include "windows_capture.h"
+#include "windows_h264_encoder.h"
 
 namespace realtime_media_windows {
 
@@ -42,6 +42,7 @@ struct CaptureState final {
   std::atomic<uint32_t> target_bitrate_kbps{3 * 1024};
   std::atomic<uint32_t> target_framerate{30};
   std::atomic<uint64_t> next_encode_timestamp{0};
+  std::atomic<uint64_t> next_recovery_timestamp{0};
 
   IDirect3DDevice device{nullptr};
   GraphicsCaptureItem item{nullptr};
@@ -67,7 +68,7 @@ struct CaptureState final {
 // Installs the native FrameArrived/Closed callbacks after all capture resources
 // have been assigned to the state. The callback owns the capture→encode→push
 // hot path and never posts frame bytes to Dart.
-void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state);
+void InstallCaptureCallbacks(const std::shared_ptr<CaptureState> &state);
 
 }  // namespace realtime_media_windows
 

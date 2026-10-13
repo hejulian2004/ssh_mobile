@@ -1,10 +1,15 @@
-> Last updated: 2026-09-07
+> Last updated: 2026-10-13
 
 # SSH Mobile Network Native
 
 This Dart FFI package builds and bundles the repository's Rust
 `network-ffi` crate. It exposes a managed `NativeNetworkRuntime` that sends
 versioned Protobuf commands and streams raw Protobuf events back to Dart.
+
+`NativeNetworkProtocol.startRealtimeSessionCommand(screenVideo: true)` sets
+local Network V2 field 3 to request H.264 screen-track negotiation before Offer.
+The default omits the field and preserves ordinary Realtime command bytes;
+this intent does not bypass the explicit screen-share consent gate.
 
 Native event polling runs on a helper isolate because the Rust poll call may
 block. Runtime disposal first asks that isolate to stop, waits for its exit,

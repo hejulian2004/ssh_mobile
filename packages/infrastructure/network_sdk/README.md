@@ -1,4 +1,4 @@
-最新更新时间：2026-09-07
+最新更新时间：2026-10-13
 
 # network_sdk
 
@@ -59,7 +59,8 @@ import 'package:network_sdk/network_sdk.dart';
 App Shell 注入的 backend 事件和生命周期；它不再提供合成视频帧流。屏幕共享使用
 `realtime_media` 的不透明 endpoint/surface 生命周期，未解码的视频帧和音频设备能力
 保持 unavailable，不把 SDP/ICE 事件泄漏给 Feature。`start()`/`stop()` 的 Future 等待 App Shell 关联到
-`NativeCommandResultEvent` 的命令完成；队列入列成功不会被当作操作完成，且 stop
+原生命令终态的完成结果（App 适配器关联 `NativeCommandResultV2Event` 的命令与
+目标设备）；队列入列成功不会被当作操作完成，且 stop
 只有在 native `closed` 状态事件到达后才把 session 状态置为 `stopped`。
 
 Native state/snapshot events also carry the native-authoritative Realtime

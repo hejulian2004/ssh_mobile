@@ -1,4 +1,4 @@
-Last updated: 2026-09-08
+Last updated: 2026-10-13
 
 # realtime_media_windows
 
@@ -32,6 +32,16 @@ IDR requests stay on the native WebRTC/codec path and never become Dart bytes.
 Release ordering is platform detach/close first, then native endpoint lease
 release. The package does not own `NetworkRuntime`, signaling, consent, TURN
 credentials, or feature state.
+
+Capture reuses Flutter's existing COM apartment when changing its model is
+rejected. It initializes Media Foundation in that apartment and uninitializes
+COM only when it acquired its own reference. Selected source tokens stay bound
+to the native catalog; capture start validates the original target's liveness.
+The hardware encoder follows Media Foundation's asynchronous input/output
+events, honors transform-owned output samples, and uses the Baseline H.264
+profile advertised by the screen-track SDP. It never selects a software codec.
+`test/windows/hardware_h264_encoder_probe.cpp` verifies encoding with a fixed
+native texture on a GPU-equipped Windows host; absent hardware is a GAP.
 
 ## Current phase boundary
 

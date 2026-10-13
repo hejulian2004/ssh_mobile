@@ -8,6 +8,31 @@ use std::time::{Duration, Instant};
 const REALTIME_ID: &str = "00112233445566778899aabbccddeeff";
 const PEER_ID: &str = "peer-a";
 
+#[tokio::test]
+async fn endpoint_release_before_track_configuration_is_idempotent() {
+    let peer = WebRtcPeer::new(WebRtcConfig::default()).expect("create peer");
+    let driver = RealtimeIoDriver::bind(peer, "127.0.0.1:0".parse().unwrap())
+        .await
+        .expect("bind")
+        .into_handle();
+    let mut registry = RealtimeMediaRegistry::new();
+    let endpoint = registry
+        .create(
+            REALTIME_ID,
+            PEER_ID,
+            RealtimeMediaDirection::Send,
+            1,
+            1,
+            &driver,
+        )
+        .expect("create endpoint");
+    registry
+        .release(endpoint)
+        .expect("release unconfigured track");
+    registry.release(endpoint).expect("repeat release");
+    assert!(registry.endpoints.is_empty());
+}
+
 async fn test_driver() -> RealtimeIoDriverHandle {
     let mut peer = WebRtcPeer::new(WebRtcConfig::default()).expect("create peer");
     peer.configure_h264_screen_video(MediaDirection::Sendrecv, Some(1))

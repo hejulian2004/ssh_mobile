@@ -22,6 +22,20 @@ use crate::runtime::PeerConfig;
 use crate::NetworkRuntime;
 
 #[test]
+fn screen_driver_route_probe_targets_the_hotspot_peer_instead_of_default_route() {
+    let phone = "192.0.2.40:44000".parse().unwrap();
+    assert_eq!(super::io::realtime_route_target(Some(phone)), phone);
+    assert_eq!(
+        super::io::realtime_route_target(None),
+        "192.0.2.1:9".parse::<std::net::SocketAddr>().unwrap()
+    );
+    assert_eq!(
+        super::io::realtime_route_target(Some("127.0.0.1:44000".parse().unwrap())),
+        "192.0.2.1:9".parse::<std::net::SocketAddr>().unwrap()
+    );
+}
+
+#[test]
 fn wildcard_screen_driver_selects_a_concrete_interface_in_the_bound_family() {
     let addresses = ["198.51.100.7", "0.0.0.0", "2001:db8::7"].map(|ip| ip.parse().unwrap());
     assert_eq!(
@@ -796,7 +810,8 @@ fn offer_answer_and_stale_revision_are_session_bound() {
         answer.payload,
     )
     .expect("connected");
-    assert_eq!(connected.state, Some(RealtimeSessionState::Connected));
+    // Applying SDP cannot authorize media before ICE/DTLS reports connected.
+    assert_eq!(connected.state, Some(RealtimeSessionState::Negotiating));
     let late_ice = apply_signal(
         &mut caller_manager,
         realtime_id,
@@ -2520,6 +2535,7 @@ async fn signaling_flows_over_v2_control_plane_and_transport_loss_then_reestabli
     start_session(
         state.clone(),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -2582,6 +2598,7 @@ async fn signaling_flows_over_v2_control_plane_and_transport_loss_then_reestabli
     start_session(
         state.clone(),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -2633,6 +2650,7 @@ async fn signaling_lost_mid_negotiation_closes_cleanly_and_re_request_succeeds()
     let error = start_session(
         state.clone(),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -2655,6 +2673,7 @@ async fn signaling_lost_mid_negotiation_closes_cleanly_and_re_request_succeeds()
     start_session(
         state.clone(),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -2684,6 +2703,7 @@ async fn start_realtime_cleans_the_driver_when_supervisor_is_stopping() {
     let error = start_session(
         Arc::clone(&state),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -2710,6 +2730,7 @@ async fn duplicate_start_realtime_rejects_without_retaining_a_bound_driver() {
     start_session(
         state.clone(),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -2740,6 +2761,7 @@ async fn duplicate_start_realtime_rejects_without_retaining_a_bound_driver() {
     let error = start_session(
         state.clone(),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -3206,6 +3228,7 @@ async fn start_realtime_cancellation_closes_driver_when_supervisor_is_stopping()
     let error = start_session(
         Arc::clone(&state),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -3308,6 +3331,7 @@ async fn realtime_turn_configuration_is_parsed_and_invalid_driver_setup_fails_cl
     let error = start_session_with_config(
         Arc::clone(&state),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
         },

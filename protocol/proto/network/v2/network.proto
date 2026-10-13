@@ -303,6 +303,8 @@ message DisconnectRelayCommand {}
 message StartRealtimeSessionCommand {
   string realtime_id = 1;
   string peer_id = 2;
+  // Explicit screen-video intent; ordinary Realtime sessions stay media-neutral.
+  bool screen_video = 3;
 }
 
 message StopRealtimeSessionCommand {

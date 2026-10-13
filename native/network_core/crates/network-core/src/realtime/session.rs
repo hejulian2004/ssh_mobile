@@ -209,7 +209,16 @@ pub(crate) async fn start_session_with_config(
         ));
     }
 
-    let mut driver = create_io_driver(&state, config).await.map_err(|error| {
+    let mut driver = create_io_driver(
+        &state,
+        config,
+        &command.peer_id,
+        command
+            .screen_video
+            .then_some(network_webrtc::MediaDirection::Sendonly),
+    )
+    .await
+    .map_err(|error| {
         realtime_error(
             network_protocol::NetworkErrorCode::IoError,
             error.to_string(),

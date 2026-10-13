@@ -1,4 +1,4 @@
-最新更新时间：2026-10-12
+最新更新时间：2026-10-13
 
 # ssh_mobile_full
 
@@ -36,6 +36,18 @@ LAN 接收在首次打开快传页面时激活，随后由 Module 保持接收�
 推导和 TLS 证书首次生成在工作 isolate 执行，安全存储读写仍使用平台 isolate。
 首次网络激活完成后，组合根为 Realtime 接收适配器接入同一原生运行时的借用
 gateway，确保从未主动共享过屏幕的设备也能收到邀请；冷启动订阅仍不初始化网络。
+Realtime 命令以原生 `CommandResultV2` 的终态完成关联，并核对目标设备；入队成功
+不能替代命令完成或 native-authoritative 会话状态。
+
+Windows 屏幕选择使用原生目录绑定的源标识；接受邀请后直接交给原生采集 Owner
+核验目标是否仍有效，不重新枚举并替换已选择的目录。媒体失败日志只记录阶段和
+类型化错误码，不记录屏幕内容、源标签或会话标识。
+
+设备级验证入口为 `test/device/screen_share_device_probe.dart`，通过
+`flutter run -t test/device/screen_share_device_probe.dart` 在 Windows 和 Android
+模拟器分别启动。测试使用隔离临时目录与固定测试身份，自动邀请和接受，检查
+发送、解码和渲染计数；模拟器运行前设置 `adb forward tcp:47831 tcp:47831`。
+此入口只用于设备测试，不进入正式应用；模拟器验证不能替代真机硬件能力验收。
 
 启动品牌资源为 `assets/app_icon.svg`：透明边缘、浅蓝面板、蓝色终端提示符和青绿色
 光标。`StartupBranding` 使用 SVG 等比显示，按可用短边限制在 64–128 逻辑像素，

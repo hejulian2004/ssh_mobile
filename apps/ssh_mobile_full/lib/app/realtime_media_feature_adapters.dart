@@ -1,3 +1,4 @@
+import 'package:app_core/app_core.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'package:network_transport/network_transport.dart';
 import 'package:realtime_media/realtime_media.dart';
@@ -227,8 +228,10 @@ final class AppRealtimeMediaResources {
   const AppRealtimeMediaResources({
     required this.backend,
     required this.sessionFactory,
+    this.logger,
   });
 
+  final AppLogger? logger;
   final RealtimeMediaBackend backend;
   final AppRealtimeMediaSessionFactory sessionFactory;
 }

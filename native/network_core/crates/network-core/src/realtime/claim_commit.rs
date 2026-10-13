@@ -52,7 +52,14 @@ pub(crate) async fn claim_incoming_offer(
             binding.provisional_epoch,
         )
     };
-    let driver = match create_io_driver(&state, runtime_webrtc_config()).await {
+    let driver = match create_io_driver(
+        &state,
+        runtime_webrtc_config(),
+        &command.peer_id,
+        Some(network_webrtc::MediaDirection::Recvonly),
+    )
+    .await
+    {
         Ok(driver) => driver.into_handle(),
         Err(error) => {
             let mut manager = state.realtime.lock().await;

@@ -270,18 +270,16 @@ final class _NativeProtocolCommandEncoder {
     required String commandId,
     required String realtimeId,
     required String peerId,
+    bool screenVideo = false,
   }) {
     _values.validateCommandId(commandId);
     _values.validateRealtimeId(realtimeId);
     _values.validatePeerId(peerId);
-    return _command(
-      commandId,
-      21,
-      (_ProtoWriter()
-            ..string(1, realtimeId)
-            ..string(2, peerId))
-          .takeBytes(),
-    );
+    final payload = _ProtoWriter()
+      ..string(1, realtimeId)
+      ..string(2, peerId);
+    if (screenVideo) payload.varint(3, 1);
+    return _command(commandId, 21, payload.takeBytes());
   }
 
   /// Encodes `StopRealtimeSession` into the V2 command envelope.

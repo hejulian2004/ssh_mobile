@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:app_core/app_core.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'package:network_transport/network_transport.dart';
@@ -12,6 +13,129 @@ import 'package:ssh_mobile/app/realtime_media_feature_adapters.dart';
 
 void main() {
   const realtimeId = '00112233445566778899aabbccddeeff';
+
+  test('native diagnostics log only bounded lifecycle metadata', () async {
+    final gateway = _FakeRealtimeGateway();
+    final logger = _LifecycleLogger();
+    final backend = AppRealtimeSessionBackend(
+      networkRuntime: _FakeNetworkRuntime(gateway),
+      logger: logger,
+    );
+    backend.observeGateway(gateway);
+    gateway._events.add(
+      NativeRealtimeStateChangedEvent(
+        eventId: 'private-event',
+        timestampMs: 1,
+        protocolVersion: 2,
+        realtimeId: realtimeId,
+        peerId: 'private-peer',
+        state: NativeRealtimeSessionState.negotiating,
+        revision: 1,
+        generation: 1,
+        sharedSessionInstanceId: realtimeId,
+      ),
+    );
+    await _pump();
+    expect(logger.messages, ['Screen-share native state: negotiating']);
+    for (final message in [
+      'Screen-share direct rejection: binding',
+      'Screen-share direct rejection: private-payload',
+    ]) {
+      gateway._events.add(
+        NativePeerDiagnosticsEvent(
+          eventId: 'diagnostic',
+          timestampMs: 2,
+          protocolVersion: 2,
+          peerId: 'private-peer',
+          state: NativePeerState.online,
+          e2eePolicy: NativeE2eePolicy.required,
+          readyPathCount: 1,
+          queuedCommandCount: 0,
+          activeStreamCount: 0,
+          activeTransferCount: 0,
+          lastError: NativeNetworkError(
+            code: 8,
+            message: message,
+            operation: 'receive_realtime_signal',
+          ),
+        ),
+      );
+    }
+    await _pump();
+    expect(logger.messages, [
+      'Screen-share native state: negotiating',
+      'Screen-share native rejection: binding',
+    ]);
+    await backend.dispose();
+  });
+
+  for (final state in [0, 1, 2]) {
+    test(
+      'V2 command terminal state $state completes without timeout',
+      () async {
+        final gateway = _FakeRealtimeGateway();
+        final backend = AppRealtimeSessionBackend(
+          networkRuntime: _FakeNetworkRuntime(gateway),
+        );
+        final result = backend.start(realtimeId: realtimeId, peerId: 'peer-a');
+        await _pump();
+        gateway._events.add(
+          NativeCommandResultV2Event(
+            eventId: 'terminal',
+            timestampMs: 1,
+            protocolVersion: 2,
+            commandId: gateway.lastStartCommandId!,
+            peerId: 'peer-a',
+            state: state,
+          ),
+        );
+        final completed = await result;
+        if (state == 0) {
+          expect(completed, isA<SdkSuccess<void>>());
+        } else {
+          expect(completed, isA<SdkFailure<void>>());
+          expect(
+            (completed as SdkFailure<void>).error.code,
+            state == 2 ? NetworkErrorCode.cancelled : NetworkErrorCode.ioError,
+          );
+        }
+        await backend.dispose();
+      },
+    );
+  }
+
+  test('V2 terminal result cannot complete another peer command', () async {
+    final gateway = _FakeRealtimeGateway();
+    final backend = AppRealtimeSessionBackend(
+      networkRuntime: _FakeNetworkRuntime(gateway),
+    );
+    var completed = false;
+    final result = backend.start(realtimeId: realtimeId, peerId: 'peer-a').then(
+      (value) {
+        completed = true;
+        return value;
+      },
+    );
+    await _pump();
+    void emit(String peer) => gateway._events.add(
+      NativeCommandResultV2Event(
+        eventId: 'terminal',
+        timestampMs: 1,
+        protocolVersion: 2,
+        commandId: gateway.lastStartCommandId!,
+        peerId: peer,
+        state: 0,
+      ),
+    );
+    emit('peer-b');
+    await _pump();
+    expect(completed, isFalse);
+    emit('peer-a');
+    expect(await result, isA<SdkSuccess<void>>());
+    emit('peer-a');
+    await _pump();
+    await backend.dispose();
+  });
 
   test(
     'configured receiver observes invitations before any outgoing command',
@@ -1038,6 +1162,16 @@ void main() {
   });
 }
 
+final class _LifecycleLogger implements AppLogger {
+  final messages = <String>[];
+
+  @override
+  void log(LogRecord record) => messages.add(record.message);
+
+  @override
+  AppLogger scope(String name) => this;
+}
+
 Future<void> _pump() => Future<void>.delayed(Duration.zero);
 
 RealtimeConsent _testConsent({
@@ -1142,6 +1276,7 @@ class _FakeRealtimeGateway implements NetworkRealtimeGateway {
   NativeCommandTicket start({
     required String realtimeId,
     required String peerId,
+    bool screenVideo = false,
   }) {
     final commandId = 'start-${++_sequence}';
     lastStartCommandId = commandId;

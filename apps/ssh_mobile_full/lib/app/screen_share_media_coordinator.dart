@@ -80,6 +80,7 @@ final class AppScreenShareMediaCoordinator {
     this.source,
   }) {
     _port = AppScreenShareMediaPort(
+      logger: resources.logger,
       events: _events.stream,
       onStartCapture: _startCaptureTracked,
       onStartViewer: _startViewerTracked,
@@ -268,7 +269,9 @@ final class AppScreenShareMediaCoordinator {
       }
       ownsPreparation = true;
       _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
-      final sources = await capabilities.listCaptureSources();
+      final sources = resources.backend is WindowsRealtimeMediaBackend
+          ? [selectedSource] // Native start validates the bound catalog token.
+          : await capabilities.listCaptureSources();
       _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
       if (!sources.any((item) => item.id.value == selectedSource.id.value)) {
         throw const RealtimeMediaException(

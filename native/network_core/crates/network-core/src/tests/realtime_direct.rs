@@ -194,6 +194,42 @@ fn direct_signals_reject_forgery_replay_stale_binding_and_wrong_recipient() {
 }
 
 #[test]
+fn rejected_direct_signal_publishes_bounded_diagnostics_without_changing_state() {
+    let pair = Pair::new();
+    let mut frame = pair.frame(&close_signal());
+    *frame.last_mut().unwrap() ^= 1;
+    assert!(pair
+        .b
+        .handle()
+        .block_on(handle_direct_signal(&pair.sb, "unit-a", &frame))
+        .is_err());
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut found = false;
+    while std::time::Instant::now() < deadline {
+        if let Some(event) = pair.b.poll_event(100) {
+            if let Some(network_protocol::network_event::Payload::PeerDiagnostics(diagnostics)) =
+                event.payload
+            {
+                if let Some(error) = diagnostics.last_error {
+                    assert_eq!(
+                        error.message,
+                        "Screen-share direct rejection: authentication"
+                    );
+                    assert_eq!(error.operation, "receive_realtime_signal");
+                    found = true;
+                    break;
+                }
+            }
+        }
+    }
+    assert!(found, "rejection diagnostics must reach the App logger");
+    assert!(pair
+        .b
+        .handle()
+        .block_on(async { pair.sb.realtime.lock().await.sessions.is_empty() }));
+}
+
+#[test]
 fn direct_sender_fails_closed_when_identity_or_payload_is_invalid() {
     let pair = Pair::new();
     pair.a.handle().block_on(async {

@@ -1,10 +1,14 @@
-最新更新时间：2026-09-07
+最新更新时间：2026-10-13
 
 # network_transport
 
 `network_transport` 是 App Scope 唯一网络运行时的稳定 Facade。它包装
 `ssh_mobile_network_native` 提供的原生运行时，不在 Dart 层复制 TCP、UDP、QUIC
 或 WebRTC 协议实现。
+
+Realtime gateway 的 `start(screenVideo: true)` 明确请求在 Offer 前配置原生
+H.264 屏幕视频轨道；默认值保持普通 Realtime 会话的媒体中立行为。此标志不授权
+采集，屏幕共享仍须通过独立邀请、接受与原生 generation 门禁。
 
 ## 边界
 

@@ -151,6 +151,28 @@ void main() {
     },
   );
 
+  test('readiness updates preserve a pending acceptance result', () async {
+    controller.seedIncomingRequest(
+      _consent(
+        issued: issued,
+        expires: issued.add(const Duration(minutes: 1)),
+        decision: RealtimeConsentDecision.request,
+        senderPeerId: 'remote-peer',
+        actionRevision: 1,
+        operationId: 'readiness-during-accept',
+      ),
+    );
+    final result = Completer<SdkResult<void>>();
+    consent.nextSend = result;
+    final accepting = controller.acceptIncoming();
+    await controller.setMediaReady(false);
+    await controller.setMediaReady(true);
+    result.complete(const SdkSuccess<void>(null));
+    await accepting;
+    expect(controller.state, ScreenShareOperationState.active);
+    expect(media.viewerStarts, ['readiness-during-accept']);
+  });
+
   test('duplicate and unknown-operation requests are ignored', () async {
     consent.emit(
       _consent(

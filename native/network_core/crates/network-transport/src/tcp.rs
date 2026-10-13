@@ -39,6 +39,11 @@ impl TcpTransport {
         Self { stream }
     }
 
+    /// Physical remote socket address, including for an accepted connection.
+    pub fn peer_addr(&self) -> Result<SocketAddr, TransportError> {
+        Ok(self.stream.peer_addr()?)
+    }
+
     pub(crate) fn into_split(self) -> (TcpReader, TcpWriter) {
         let (reader, writer) = self.stream.into_split();
         (TcpReader { stream: reader }, TcpWriter { stream: writer })

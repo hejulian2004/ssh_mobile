@@ -232,7 +232,12 @@ final class ScreenShareController extends ChangeNotifier
   /// capability. It is intentionally a boolean, not a handle or frame.
   Future<void> setMediaReady(bool ready) async {
     _ensureUsable();
-    ++_operationEpoch;
+    // Readiness invalidates media work, but never a pending consent decision.
+    // Native Connected may arrive before the ACCEPT command result.
+    if (state == ScreenShareOperationState.accepted ||
+        state == ScreenShareOperationState.active) {
+      ++_operationEpoch;
+    }
     _setSnapshot(
       ScreenShareOperationSnapshot(
         state: state,

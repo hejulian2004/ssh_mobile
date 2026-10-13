@@ -46,7 +46,7 @@ fn exercise_direct_realtime(tcp: bool, wildcard: bool) {
     assert!(wait_for_session_connected(&b, "direct-a", Duration::from_secs(20)));
     let id = "00112233445566778899aabbccddeeff";
     send_and_expect_accepted(&a, NetworkCommand { command_id: "direct-realtime-start".into(), protocol_version: NETWORK_PROTOCOL_VERSION,
-        payload: Some(network_command::Payload::StartRealtimeSession(StartRealtimeSessionCommand { realtime_id:id.into(), peer_id:"direct-b".into() })) });
+        payload: Some(network_command::Payload::StartRealtimeSession(StartRealtimeSessionCommand { screen_video: false,  realtime_id:id.into(), peer_id:"direct-b".into() })) });
     let event = poll_until(&a, Duration::from_secs(10), |e| matches!(e.payload,
         Some(network_event::Payload::RealtimeState(ref s)) if s.realtime_id == id && s.shared_session_instance_id.len() == 32)).expect("native negotiating identity");
     let Some(network_event::Payload::RealtimeState(snapshot)) = event.payload else { unreachable!() };

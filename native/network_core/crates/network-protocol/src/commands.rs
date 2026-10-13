@@ -193,6 +193,8 @@ pub struct StartRealtimeSessionCommand {
     pub realtime_id: String,
     #[prost(string, tag = "2")]
     pub peer_id: String,
+    #[prost(bool, tag = "3")]
+    pub screen_video: bool,
 }
 
 #[derive(Clone, PartialEq, Message)]

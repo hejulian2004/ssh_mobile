@@ -1,12 +1,57 @@
 import 'dart:async';
 
+import 'package:app_core/app_core.dart';
 import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_sdk/network_sdk.dart';
+import 'package:realtime_media/realtime_media.dart';
 
 import 'package:ssh_mobile/app/screen_share_feature_adapters.dart';
 
 void main() {
+  test(
+    'media failure logs only its typed code and preserves the error',
+    () async {
+      final logger = _MediaLogger();
+      const failure = RealtimeMediaException(
+        RealtimeMediaErrorCode.encoderUnavailable,
+        'private-payload',
+      );
+      final port = AppScreenShareMediaPort(
+        logger: logger,
+        events: const Stream.empty(),
+        onStartCapture:
+            ({
+              required operationId,
+              required realtimeId,
+              required generation,
+            }) async => throw failure,
+        onStartViewer:
+            ({
+              required operationId,
+              required realtimeId,
+              required generation,
+            }) async {},
+        onStop:
+            ({
+              required operationId,
+              required realtimeId,
+              required generation,
+            }) async {},
+      );
+      await expectLater(
+        port.startCapture(
+          operationId: 'operation-a',
+          realtimeId: 'session-a',
+          generation: 1,
+        ),
+        throwsA(same(failure)),
+      );
+      expect(logger.messages, [
+        'Screen-share media capture failed: encoderUnavailable',
+      ]);
+    },
+  );
   const realtimeId = '00112233445566778899aabbccddeeff';
   final issued = DateTime.utc(2030, 1, 1, 12);
   final consent = RealtimeConsent(
@@ -109,6 +154,14 @@ void main() {
       'stop:operation-a:$realtimeId:7',
     ]);
   });
+}
+
+final class _MediaLogger implements AppLogger {
+  final messages = <String>[];
+  @override
+  void log(LogRecord record) => messages.add(record.message);
+  @override
+  AppLogger scope(String name) => this;
 }
 
 final class _FakeRealtimeSession implements RealtimeSession {

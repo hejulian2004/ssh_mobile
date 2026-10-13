@@ -1433,6 +1433,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "rtc",
+ "socket2 0.6.5",
  "thiserror 1.0.69",
  "tokio",
 ]

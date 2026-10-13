@@ -3,6 +3,29 @@ part of 'realtime_feature_adapters.dart';
 extension on AppRealtimeSessionBackend {
   void _onNativeEvent(NativeNetworkEvent event) {
     if (_disposed) return;
+    final phase = switch (event) {
+      NativeRealtimeStateChangedEvent(:final state) => 'state: ${state.name}',
+      NativeRealtimeSnapshotEvent(:final state) => 'snapshot: ${state.name}',
+      NativeRealtimeSignalEvent(:final kind, :final consent) =>
+        'signal: ${kind.name}${consent == null ? '' : ' ${consent.decision.name}'}',
+      NativePeerDiagnosticsEvent(:final lastError)
+          when lastError?.operation == 'receive_realtime_signal' &&
+              RegExp(
+                r'^Screen-share direct rejection: (authorization|frame|binding|authentication|envelope|dispatch)$',
+              ).hasMatch(lastError!.message) =>
+        'rejection: ${lastError.message.split(': ').last}',
+      _ => null,
+    };
+    if (phase != null) {
+      logger?.log(
+        LogRecord(
+          timestamp: DateTime.now(),
+          level: LogLevel.info,
+          source: 'AppRealtimeSessionBackend',
+          message: 'Screen-share native $phase',
+        ),
+      );
+    }
     switch (event) {
       case NativeRealtimeStateChangedEvent(
         :final realtimeId,
@@ -84,6 +107,32 @@ extension on AppRealtimeSessionBackend {
         }
       case NativeCommandResultEvent event:
         _completeCommand(event);
+      case NativeCommandResultV2Event event:
+        final pending = _pendingCommands[event.commandId];
+        if (pending == null ||
+            (pending.peerId != null && pending.peerId != event.peerId)) {
+          return;
+        }
+        // Native V2 publishes terminal state (0 succeeded, 1 failed, 2
+        // cancelled), rather than the older accepted boolean. Queue success
+        // alone cannot finish a Realtime command.
+        _completeCommand(
+          NativeCommandResultEvent(
+            eventId: event.eventId,
+            timestampMs: event.timestampMs,
+            protocolVersion: event.protocolVersion,
+            commandId: event.commandId,
+            accepted: event.state == 0 && event.error == null,
+            error:
+                event.error ??
+                (event.state == 2
+                    ? NativeNetworkError(
+                        code: NetworkErrorCode.cancelled.wireValue,
+                        message: 'Native Realtime command was cancelled.',
+                      )
+                    : null),
+          ),
+        );
       case NativePeerStateChangedEvent():
       case NativeRealtimeSignalEvent():
       case NativeSshStreamDataReceivedEvent():

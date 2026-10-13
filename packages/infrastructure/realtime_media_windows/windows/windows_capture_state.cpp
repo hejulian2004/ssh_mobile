@@ -2,16 +2,15 @@
 
 #include <d3d11.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Graphics.Capture.h>
+#include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
+#include <winrt/Windows.Graphics.DirectX.h>
+#include <winrt/base.h>
 
 #include <algorithm>
 #include <chrono>
 #include <vector>
-
-#include <winrt/Windows.Foundation.h>
-#include <winrt/Windows.Graphics.Capture.h>
-#include <winrt/Windows.Graphics.DirectX.h>
-#include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
-#include <winrt/base.h>
 
 namespace realtime_media_windows {
 
@@ -88,11 +87,11 @@ bool CaptureState::Stop() {
   return ReleaseResources();
 }
 
-void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
+void InstallCaptureCallbacks(const std::shared_ptr<CaptureState> &state) {
   const std::weak_ptr<CaptureState> weak_state = state;
   state->frame_arrived_token = state->frame_pool.FrameArrived(
-      [weak_state](Direct3D11CaptureFramePool const& pool,
-                   winrt::Windows::Foundation::IInspectable const&) {
+      [weak_state](Direct3D11CaptureFramePool const &pool,
+                   winrt::Windows::Foundation::IInspectable const &) {
         const auto state = weak_state.lock();
         if (!state) return;
         state->EnterCallback();
@@ -124,9 +123,8 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
             state->frames_captured.fetch_add(1);
 
             auto surface = frame.Surface();
-            winrt::com_ptr<
-                ::Windows::Graphics::DirectX::Direct3D11::
-                    IDirect3DDxgiInterfaceAccess>
+            winrt::com_ptr<::Windows::Graphics::DirectX::Direct3D11::
+                               IDirect3DDxgiInterfaceAccess>
                 access;
             winrt::check_hresult(winrt::get_unknown(surface)->QueryInterface(
                 IID_PPV_ARGS(access.put())));
@@ -134,16 +132,15 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
             winrt::check_hresult(
                 access->GetInterface(IID_PPV_ARGS(texture.put())));
             std::vector<EncodedAccessUnit> access_units;
-            const auto elapsed = std::chrono::steady_clock::now() -
-                                 state->started_at;
+            const auto elapsed =
+                std::chrono::steady_clock::now() - state->started_at;
             const auto elapsed_ns =
                 std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed)
                     .count();
             const uint64_t timestamp_90khz =
-                elapsed_ns <= 0
-                    ? 0
-                    : static_cast<uint64_t>(elapsed_ns) * 90'000ULL /
-                          1'000'000'000ULL;
+                elapsed_ns <= 0 ? 0
+                                : static_cast<uint64_t>(elapsed_ns) *
+                                      90'000ULL / 1'000'000'000ULL;
             const auto target_framerate =
                 std::max<uint32_t>(5, state->target_framerate.load());
             const uint64_t frame_interval = 90'000ULL / target_framerate;
@@ -171,7 +168,7 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
               state->stopped.store(true);
               break;
             }
-            for (const auto& access_unit : access_units) {
+            for (const auto &access_unit : access_units) {
               if (state->stopped.load()) break;
               NativeH264FrameMetadata metadata;
               metadata.sequence = state->sequence.fetch_add(1);
@@ -188,6 +185,18 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
                 // The native queue owns queue-drop accounting. Counting this
                 // status here would make the platform/native merge report the
                 // same dropped access unit twice.
+                auto next_recovery = state->next_recovery_timestamp.load();
+                if (timestamp_90khz >= next_recovery &&
+                    state->next_recovery_timestamp.compare_exchange_strong(
+                        next_recovery, timestamp_90khz + 90'000ULL)) {
+                  std::lock_guard<std::mutex> encode_lock(state->encoder_mutex);
+                  if (!state->stopped.load() && state->encoder != nullptr &&
+                      !state->encoder->RequestKeyframe()) {
+                    state->terminal_status.store(kCaptureTerminalEncoderFailed);
+                    state->stopped.store(true);
+                    break;
+                  }
+                }
                 continue;
               } else {
                 state->frames_dropped.fetch_add(1);
@@ -208,8 +217,8 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
         }
       });
   state->closed_token = state->item.Closed(
-      [weak_state](GraphicsCaptureItem const&,
-                   winrt::Windows::Foundation::IInspectable const&) {
+      [weak_state](GraphicsCaptureItem const &,
+                   winrt::Windows::Foundation::IInspectable const &) {
         const auto state = weak_state.lock();
         if (!state) return;
         state->EnterCallback();
