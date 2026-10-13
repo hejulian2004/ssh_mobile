@@ -3,12 +3,14 @@ import 'dart:async';
 import 'package:feature_lan_share/feature_lan_share.dart' as lan;
 import 'package:flutter/material.dart';
 import 'package:network_sdk/network_sdk.dart';
+import 'package:realtime_media/realtime_media.dart';
 
 import 'app_runtime.dart';
 import 'navigation/app_route_contributions.dart';
 import 'screen_share_peer_arbitration.dart';
 import 'screen_share_route_scope.dart';
 import 'screen_share_session_lease.dart';
+import 'screen_share_codec_mode_picker.dart';
 
 /// App-global host for incoming screen-share requests. It is mounted around
 /// the MaterialApp child so a request is visible while the user is in any
@@ -47,6 +49,7 @@ final class _AppScreenShareIncomingRequestHostState
   int _hostEpoch = 0;
   int? _activeOfferEpoch;
   bool _busy = false;
+  RealtimeMediaCodecMode _codecMode = RealtimeMediaCodecMode.hardware;
 
   @override
   void initState() {
@@ -112,6 +115,7 @@ final class _AppScreenShareIncomingRequestHostState
     }
     _hostEpoch = candidateEpoch;
     _offer = offer;
+    _codecMode = RealtimeMediaCodecMode.hardware;
     _offerState = _IncomingOfferState.pending;
     _busy = false;
     _armExpiryTimer(offer, candidateEpoch, effectiveExpiry);
@@ -168,6 +172,12 @@ final class _AppScreenShareIncomingRequestHostState
             const SizedBox(height: 8),
             Text('Peer ${offer.authenticatedPeerId} wants to share a screen.'),
             const SizedBox(height: 12),
+            AppScreenShareCodecModePicker(
+              mode: _codecMode,
+              onChanged: _busy
+                  ? null
+                  : (mode) => setState(() => _codecMode = mode),
+            ),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: <Widget>[
@@ -202,6 +212,7 @@ final class _AppScreenShareIncomingRequestHostState
     if (!_beginResolving(offer)) return;
     final ownerEpoch = _hostEpoch;
     AppScreenShareSessionLease? lease;
+    final codecMode = _codecMode;
     RealtimeSession? session;
     var handedOff = false;
     try {
@@ -227,6 +238,7 @@ final class _AppScreenShareIncomingRequestHostState
           initialIncomingRequest: offer.request,
           mode: AppScreenShareRouteMode.receive,
           acceptIncomingOnOpen: true,
+          codecMode: codecMode,
         ),
       );
       // Transfer ownership as soon as Navigator installs the route. The

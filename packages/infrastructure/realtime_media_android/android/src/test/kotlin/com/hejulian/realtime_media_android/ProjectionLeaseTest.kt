@@ -11,6 +11,12 @@ import java.util.concurrent.TimeUnit
 
 class ProjectionLeaseTest {
     @Test
+    fun projectionFailuresRemainTypedWithoutSystemMessageContent() {
+        assertEquals("permission_denied", projectionFailureCode(SecurityException("private-fixture")))
+        assertEquals("backend_failure", projectionFailureCode(IllegalStateException("private-fixture")))
+    }
+
+    @Test
     fun leaseCanBeConsumedOnlyOnceAndReleasedIdempotently() {
         val lease = ProjectionLeaseStateMachine()
 

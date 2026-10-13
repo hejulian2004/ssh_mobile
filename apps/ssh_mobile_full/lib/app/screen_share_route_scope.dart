@@ -33,6 +33,7 @@ final class AppScreenShareRouteArguments {
     this.mode = AppScreenShareRouteMode.receive,
     this.startOutgoing = false,
     this.acceptIncomingOnOpen = false,
+    this.codecMode = RealtimeMediaCodecMode.hardware,
   });
 
   final RealtimeSession session;
@@ -45,6 +46,7 @@ final class AppScreenShareRouteArguments {
   final AppScreenShareRouteMode mode;
   final bool startOutgoing;
   final bool acceptIncomingOnOpen;
+  final RealtimeMediaCodecMode codecMode;
 }
 
 /// Route scope for the App Shell's explicit screen-share route.
@@ -116,6 +118,7 @@ final class _AppScreenShareRouteScopeState
             widget.capabilities ??
             appScreenSharePlatformCapabilitiesFor(widget.resources.backend),
         source: widget.arguments.source,
+        codecMode: widget.arguments.codecMode,
       );
       _initialization = _initialize();
     } catch (error, stackTrace) {

@@ -7,16 +7,18 @@
 #include <vector>
 
 #include "windows_h264_encoder.h"
+#include "windows_capture.h"
 
-int main() {
+int main(int argc, char** argv) {
+  const bool cpu = argc > 1 && std::string(argv[1]) == "--cpu";
   winrt::init_apartment(winrt::apartment_type::multi_threaded);
   if (FAILED(MFStartup(MF_VERSION))) return 2;
   winrt::com_ptr<ID3D11Device> device;
   winrt::com_ptr<ID3D11DeviceContext> context;
-  if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-                               D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
-                               D3D11_SDK_VERSION, device.put(), nullptr,
-                               context.put())))
+  if (FAILED(D3D11CreateDevice(
+          nullptr, cpu ? D3D_DRIVER_TYPE_WARP : D3D_DRIVER_TYPE_HARDWARE,
+          nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
+          D3D11_SDK_VERSION, device.put(), nullptr, context.put())))
     return 2;
   D3D11_TEXTURE2D_DESC description{};
   description.Width = 640;
@@ -32,8 +34,10 @@ int main() {
   winrt::com_ptr<ID3D11Texture2D> texture;
   if (FAILED(device->CreateTexture2D(&description, &initial, texture.put())))
     return 2;
-  auto encoder = realtime_media_windows::HardwareH264Encoder::Create(
-      device.get(), context.get());
+  auto encoder = realtime_media_windows::NativeH264Encoder::Create(
+      device.get(), context.get(),
+      cpu ? realtime_media_windows::NativeCodecMode::Cpu
+          : realtime_media_windows::NativeCodecMode::Hardware);
   if (!encoder) {
     std::cout << "GAP hardware_encoder_unavailable\n";
     return 2;
@@ -47,10 +51,14 @@ int main() {
       return 1;
     }
     units += output.size();
-    for (const auto &unit : output) {
+    if (cpu && frame >= 3 && units == 0) {
+      std::cout << "FAIL cpu_startup_frame_latency\n";
+      return 1;
+    }
+    for (const auto& unit : output) {
       bool sps = false, pps = false, idr = false;
       for (size_t index = 0; index + 4 < unit.payload.size(); ++index) {
-        const auto &bytes = unit.payload;
+        const auto& bytes = unit.payload;
         if (bytes[index] != 0 || bytes[index + 1] != 0) continue;
         size_t header = index + 2;
         if (bytes[header] == 0) ++header;

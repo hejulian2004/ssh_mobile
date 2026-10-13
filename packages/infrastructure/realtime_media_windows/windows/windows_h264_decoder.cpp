@@ -25,80 +25,35 @@ namespace realtime_media_windows {
 namespace {
 
 constexpr uint32_t kFrameRateNumerator = 30;
-constexpr uint32_t kFrameRateDenominator = 1;
 
-uint64_t TimestampTo100Ns(uint64_t timestamp_90khz) {
-  const uint64_t seconds = timestamp_90khz / 90'000ULL;
-  const uint64_t remainder = timestamp_90khz % 90'000ULL;
-  return seconds * 10'000'000ULL + remainder * 10'000'000ULL / 90'000ULL;
-}
-
-bool SetVideoType(IMFMediaType* type,
-                  const GUID& subtype,
-                  uint32_t width,
-                  uint32_t height) {
-  return type != nullptr &&
-         SUCCEEDED(type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video)) &&
-         SUCCEEDED(type->SetGUID(MF_MT_SUBTYPE, subtype)) &&
-         SUCCEEDED(MFSetAttributeSize(type, MF_MT_FRAME_SIZE, width, height)) &&
-         SUCCEEDED(MFSetAttributeRatio(type, MF_MT_FRAME_RATE,
-                                       kFrameRateNumerator,
-                                       kFrameRateDenominator)) &&
-         SUCCEEDED(MFSetAttributeRatio(type, MF_MT_PIXEL_ASPECT_RATIO, 1, 1)) &&
-         SUCCEEDED(type->SetUINT32(MF_MT_INTERLACE_MODE,
-                                   MFVideoInterlace_Progressive));
-}
-
-class HardwareH264Decoder final {
+class NativeH264Decoder final {
  public:
-  static std::unique_ptr<HardwareH264Decoder> Create(
-      ID3D11Device* device,
-      ID3D11DeviceContext* context) {
-    if (device == nullptr || context == nullptr) return nullptr;
-    MFT_REGISTER_TYPE_INFO input_info{MFMediaType_Video, MFVideoFormat_H264};
-    MFT_REGISTER_TYPE_INFO output_info{MFMediaType_Video, MFVideoFormat_NV12};
-    IMFActivate** activations = nullptr;
-    UINT32 count = 0;
-    const HRESULT result = MFTEnumEx(
-        MFT_CATEGORY_VIDEO_DECODER,
-        MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER, &input_info,
-        &output_info, &activations, &count);
-    if (FAILED(result) || activations == nullptr || count == 0) {
-      if (activations != nullptr) CoTaskMemFree(activations);
+  static std::unique_ptr<NativeH264Decoder> Create(ID3D11Device* device,
+                                                   ID3D11DeviceContext* context,
+                                                   NativeCodecMode mode) {
+    if (mode == NativeCodecMode::Hardware &&
+        (device == nullptr || context == nullptr))
       return nullptr;
-    }
-    winrt::com_ptr<IMFTransform> transform;
-    for (UINT32 index = 0; index < count && transform == nullptr; ++index) {
-      if (activations[index] != nullptr) {
-        activations[index]->ActivateObject(IID_PPV_ARGS(transform.put()));
-      }
-    }
-    for (UINT32 index = 0; index < count; ++index) {
-      if (activations[index] != nullptr) activations[index]->Release();
-    }
-    CoTaskMemFree(activations);
+    auto transform = CreateH264DecoderTransform(mode);
     if (transform == nullptr) return nullptr;
-
-    auto decoder = std::unique_ptr<HardwareH264Decoder>(
-        new HardwareH264Decoder(std::move(transform)));
+    auto decoder = std::unique_ptr<NativeH264Decoder>(
+        new NativeH264Decoder(std::move(transform), mode));
     if (!decoder->Initialize(device, context)) return nullptr;
     return decoder;
   }
 
-  ~HardwareH264Decoder() {
+  ~NativeH264Decoder() {
     if (transform_ != nullptr) {
       transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
       transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
     }
   }
 
-  HardwareH264Decoder(const HardwareH264Decoder&) = delete;
-  HardwareH264Decoder& operator=(const HardwareH264Decoder&) = delete;
+  NativeH264Decoder(const NativeH264Decoder&) = delete;
+  NativeH264Decoder& operator=(const NativeH264Decoder&) = delete;
 
-  bool Decode(const NativeH264FrameMetadata& metadata,
-              const uint8_t* payload,
-              size_t payload_length,
-              winrt::com_ptr<ID3D11Texture2D>* output) {
+  bool Decode(const NativeH264FrameMetadata& metadata, const uint8_t* payload,
+              size_t payload_length, DecodedVideoFrame* output) {
     if (transform_ == nullptr || payload == nullptr || payload_length == 0 ||
         output == nullptr || payload_length > 4 * 1024 * 1024) {
       return false;
@@ -107,7 +62,9 @@ class HardwareH264Decoder final {
         metadata.width > 16'384 || metadata.height > 16'384) {
       return false;
     }
+    failure_stage_ = "configure";
     if (!Configure(metadata.width, metadata.height)) return false;
+    failure_stage_ = "input_sample";
 
     winrt::com_ptr<IMFMediaBuffer> buffer;
     winrt::com_ptr<IMFSample> sample;
@@ -128,40 +85,33 @@ class HardwareH264Decoder final {
     buffer->Unlock();
     buffer->SetCurrentLength(static_cast<DWORD>(payload_length));
     if (FAILED(sample->AddBuffer(buffer.get()))) return false;
-    sample->SetSampleTime(static_cast<LONGLONG>(TimestampTo100Ns(metadata.timestamp)));
+    sample->SetSampleTime(
+        static_cast<LONGLONG>(TimestampTo100Ns(metadata.timestamp)));
     sample->SetSampleDuration(10'000'000 / kFrameRateNumerator);
-    if (metadata.keyframe != 0) sample->SetUINT32(MFSampleExtension_CleanPoint, 1);
+    if (metadata.keyframe != 0)
+      sample->SetUINT32(MFSampleExtension_CleanPoint, 1);
+    if (!Drain(output)) return false;
+    failure_stage_ = "input";
     if (FAILED(transform_->ProcessInput(0, sample.get(), 0))) return false;
     return Drain(output);
   }
 
+  const char* FailureStage() const { return failure_stage_; }
   bool Reset() {
     if (transform_ == nullptr) return false;
     return SUCCEEDED(transform_->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0));
   }
 
  private:
-  explicit HardwareH264Decoder(winrt::com_ptr<IMFTransform> transform)
-      : transform_(std::move(transform)) {}
+  explicit NativeH264Decoder(winrt::com_ptr<IMFTransform> transform,
+                             NativeCodecMode mode)
+      : transform_(std::move(transform)), mode_(mode) {}
 
   bool Initialize(ID3D11Device* device, ID3D11DeviceContext* context) {
-    if (FAILED(device->QueryInterface(IID_PPV_ARGS(device_.put()))) ||
-        FAILED(context->QueryInterface(IID_PPV_ARGS(context_.put())))) {
+    if (mode_ == NativeCodecMode::Cpu) return true;
+    if (!InitializeHardwareDecoderDevice(transform_.get(), device,
+                                         device_manager_.put()))
       return false;
-    }
-    UINT reset_token = 0;
-    if (FAILED(MFCreateDXGIDeviceManager(&reset_token,
-                                         device_manager_.put())) ||
-        FAILED(device_manager_->ResetDevice(device_.get(), reset_token))) {
-      return false;
-    }
-    transform_->ProcessMessage(
-        MFT_MESSAGE_SET_D3D_MANAGER,
-        reinterpret_cast<ULONG_PTR>(device_manager_.get()));
-    winrt::com_ptr<IMFAttributes> attributes;
-    if (SUCCEEDED(transform_->GetAttributes(attributes.put()))) {
-      attributes->SetUINT32(MF_SA_D3D11_AWARE, 1);
-    }
     converter_ = std::make_unique<Nv12ToBgraConverter>();
     return converter_->Initialize(device, context);
   }
@@ -184,12 +134,11 @@ class HardwareH264Decoder final {
         FAILED(transform_->SetOutputType(0, output_type.get(), 0))) {
       return false;
     }
-    MFT_OUTPUT_STREAM_INFO stream_info = {};
-    if (FAILED(transform_->GetOutputStreamInfo(0, &stream_info))) return false;
-    output_buffer_size_ = std::max<DWORD>(stream_info.cbSize, 64 * 1024);
-    output_provides_samples_ =
-        (stream_info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES) != 0;
-    if (converter_ == nullptr || !converter_->Configure(width, height)) {
+    if (!ReadDecoderOutputInfo(transform_.get(), &output_buffer_size_,
+                               &output_provides_samples_))
+      return false;
+    if (mode_ == NativeCodecMode::Hardware &&
+        (converter_ == nullptr || !converter_->Configure(width, height))) {
       return false;
     }
     width_ = width;
@@ -200,8 +149,9 @@ class HardwareH264Decoder final {
     return true;
   }
 
-  bool Drain(winrt::com_ptr<ID3D11Texture2D>* output) {
-    while (true) {
+  bool Drain(DecodedVideoFrame* output) {
+    for (unsigned iteration = 0; iteration < 32; ++iteration) {
+      failure_stage_ = "output";
       winrt::com_ptr<IMFSample> supplied_sample;
       winrt::com_ptr<IMFMediaBuffer> supplied_buffer;
       MFT_OUTPUT_DATA_BUFFER output_buffer = {};
@@ -219,6 +169,14 @@ class HardwareH264Decoder final {
           transform_->ProcessOutput(0, 1, &output_buffer, &status);
       if (output_buffer.pEvents != nullptr) output_buffer.pEvents->Release();
       if (result == MF_E_TRANSFORM_NEED_MORE_INPUT) return true;
+      if (result == MF_E_TRANSFORM_STREAM_CHANGE) {
+        failure_stage_ = "output_layout";
+        if (!RefreshDecoderOutput(transform_.get(), width_, height_,
+                                  &output_buffer_size_,
+                                  &output_provides_samples_))
+          return false;
+        continue;
+      }
       if (FAILED(result) || output_buffer.pSample == nullptr) return false;
 
       winrt::com_ptr<IMFSample> produced_sample;
@@ -227,36 +185,26 @@ class HardwareH264Decoder final {
       } else {
         produced_sample.attach(output_buffer.pSample);
       }
-      winrt::com_ptr<IMFMediaBuffer> media_buffer;
-      if (FAILED(produced_sample->ConvertToContiguousBuffer(media_buffer.put()))) {
+      failure_stage_ = "pixel_conversion";
+      if (mode_ == NativeCodecMode::Cpu) {
+        if (!ConvertSoftwareDecodedSample(transform_.get(),
+                                          produced_sample.get(), width_,
+                                          height_, &output->pixels))
+          return false;
+      } else if (!ConvertDecodedSample(produced_sample.get(), converter_.get(),
+                                       &output->texture))
         return false;
-      }
-      winrt::com_ptr<IMFDXGIBuffer> dxgi_buffer;
-      if (FAILED(media_buffer->QueryInterface(IID_PPV_ARGS(dxgi_buffer.put())))) {
-        return false;
-      }
-      winrt::com_ptr<ID3D11Texture2D> texture;
-      if (FAILED(dxgi_buffer->GetResource(IID_PPV_ARGS(texture.put()))) ||
-          texture == nullptr) {
-        return false;
-      }
-      D3D11_TEXTURE2D_DESC description = {};
-      texture->GetDesc(&description);
-      if (description.Format != DXGI_FORMAT_NV12 || converter_ == nullptr ||
-          !converter_->Convert(texture.get(), output)) {
-        return false;
-      }
-      return true;
     }
+    return false;
   }
 
-  winrt::com_ptr<ID3D11Device> device_;
-  winrt::com_ptr<ID3D11DeviceContext> context_;
+  NativeCodecMode mode_;
+  const char* failure_stage_ = "decode";
   winrt::com_ptr<IMFDXGIDeviceManager> device_manager_;
   winrt::com_ptr<IMFTransform> transform_;
   uint32_t width_ = 0;
   uint32_t height_ = 0;
-  DWORD output_buffer_size_ = 0;
+  uint32_t output_buffer_size_ = 0;
   bool configured_ = false;
   bool output_provides_samples_ = false;
   std::unique_ptr<Nv12ToBgraConverter> converter_;
@@ -267,17 +215,25 @@ struct DecoderState final {
   H264PullCallback pull = nullptr;
   H264BufferFreeCallback free_buffer = nullptr;
   flutter::TextureRegistrar* registrar = nullptr;
-  std::unique_ptr<HardwareH264Decoder> decoder;
+  std::unique_ptr<NativeH264Decoder> decoder;
   std::unique_ptr<flutter::TextureVariant> texture;
   std::thread worker;
   std::mutex mutex;
   std::atomic<bool> stopped{false};
   std::atomic<bool> reset_requested{false};
   std::atomic<int> terminal_status{0};
+  std::atomic<const char*> failure_stage{"decode"};
   std::atomic<uint64_t> frames_decoded{0};
   std::atomic<uint64_t> frames_rendered{0};
   std::atomic<uint64_t> frames_dropped{0};
   winrt::com_ptr<ID3D11Texture2D> latest_texture;
+  std::shared_ptr<std::vector<uint8_t>> latest_pixels;
+  const FlutterDesktopPixelBuffer* DescribePixels() {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (stopped.load() || !latest_pixels) return nullptr;
+    frames_rendered.fetch_add(1);
+    return NativePixelFrameLease::Retain(latest_pixels, width, height);
+  }
   FlutterDesktopGpuSurfaceDescriptor descriptor = {};
   int64_t texture_id = -1;
   int width = 0;
@@ -290,9 +246,10 @@ struct DecoderState final {
   }
 
   const FlutterDesktopGpuSurfaceDescriptor* Describe(size_t width_hint,
-                                                       size_t height_hint) {
+                                                     size_t height_hint) {
     std::lock_guard<std::mutex> lock(mutex);
     if (stopped.load() || latest_texture == nullptr) return nullptr;
+    frames_rendered.fetch_add(1);
     latest_texture->AddRef();
     descriptor.struct_size = sizeof(descriptor);
     descriptor.handle = latest_texture.get();
@@ -320,6 +277,7 @@ struct DecoderState final {
         }
         std::lock_guard<std::mutex> lock(mutex);
         latest_texture = nullptr;
+        latest_pixels.reset();
       }
       NativeH264FrameMetadata metadata;
       NativeH264Buffer payload;
@@ -335,30 +293,37 @@ struct DecoderState final {
         stopped.store(true);
         break;
       }
-      winrt::com_ptr<ID3D11Texture2D> decoded_texture;
-      const bool decoded = decoder->Decode(metadata, payload.ptr, payload.len,
-                                           &decoded_texture);
+      DecodedVideoFrame decoded_frame;
+      const bool decoded =
+          decoder->Decode(metadata, payload.ptr, payload.len, &decoded_frame);
       free_buffer(payload);
+      if (stopped.load()) break;
       if (!decoded) {
+        failure_stage.store(decoder->FailureStage());
         frames_dropped.fetch_add(1);
         terminal_status.store(kDecoderTerminalFailed);
         stopped.store(true);
         break;
       }
-      if (decoded_texture == nullptr) continue;
+      if (decoded_frame.texture == nullptr && decoded_frame.pixels.empty())
+        continue;
       {
         std::lock_guard<std::mutex> lock(mutex);
-        latest_texture = std::move(decoded_texture);
+        latest_texture = std::move(decoded_frame.texture);
+        latest_pixels = decoded_frame.pixels.empty()
+                            ? nullptr
+                            : std::make_shared<std::vector<uint8_t>>(
+                                  std::move(decoded_frame.pixels));
         width = static_cast<int>(metadata.width);
         height = static_cast<int>(metadata.height);
         frames_decoded.fetch_add(1);
       }
-      if (registrar == nullptr || !registrar->MarkTextureFrameAvailable(texture_id)) {
-        terminal_status.store(kDecoderTerminalFailed);
+      if (registrar == nullptr ||
+          !registrar->MarkTextureFrameAvailable(texture_id)) {
+        if (!stopped.load()) terminal_status.store(kDecoderTerminalFailed);
         stopped.store(true);
         break;
       }
-      frames_rendered.fetch_add(1);
     }
     if (com_initialized) CoUninitialize();
   }
@@ -373,6 +338,7 @@ struct DecoderState final {
     }
     std::lock_guard<std::mutex> lock(mutex);
     latest_texture = nullptr;
+    latest_pixels.reset();
     texture.reset();
     decoder.reset();
   }
@@ -385,17 +351,9 @@ struct WindowsDecoderManager::Impl final {
       : registrar(texture_registrar) {
     const HRESULT com_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     com_initialized = com_result == S_OK || com_result == S_FALSE;
-    if (com_initialized) mf_initialized = SUCCEEDED(MFStartup(MF_VERSION, MFSTARTUP_LITE));
-    if (!mf_initialized) return;
-    constexpr D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1,
-                                            D3D_FEATURE_LEVEL_11_0};
-    D3D_FEATURE_LEVEL selected = D3D_FEATURE_LEVEL_11_0;
-    const HRESULT device_result = D3D11CreateDevice(
-        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-        levels, ARRAYSIZE(levels), D3D11_SDK_VERSION, d3d_device.put(),
-        &selected, d3d_context.put());
-    device_ready = SUCCEEDED(device_result) && d3d_device != nullptr &&
-                   d3d_context != nullptr;
+    if (com_initialized || com_result == RPC_E_CHANGED_MODE) {
+      mf_initialized = SUCCEEDED(MFStartup(MF_VERSION, MFSTARTUP_LITE));
+    }
   }
 
   ~Impl() {
@@ -430,26 +388,34 @@ WindowsDecoderManager::WindowsDecoderManager(
 
 WindowsDecoderManager::~WindowsDecoderManager() = default;
 
-void WindowsDecoderManager::SetNativeCallbacks(H264PullCallback pull_callback,
-                                                H264BufferFreeCallback free_callback) {
+void WindowsDecoderManager::SetNativeCallbacks(
+    H264PullCallback pull_callback, H264BufferFreeCallback free_callback) {
   std::lock_guard<std::mutex> lock(impl_->mutex);
   impl_->pull = pull_callback;
   impl_->free_buffer = free_callback;
 }
 
-DecoderStatus WindowsDecoderManager::Attach(uint64_t owner, int64_t* surface_id) {
-  if (owner == 0 || surface_id == nullptr) return DecoderStatus::kBackendFailure;
+DecoderStatus WindowsDecoderManager::Attach(uint64_t owner, int64_t* surface_id,
+                                            NativeCodecMode mode) {
+  if (owner == 0 || surface_id == nullptr)
+    return DecoderStatus::kBackendFailure;
   *surface_id = -1;
   std::lock_guard<std::mutex> lock(impl_->mutex);
   if (impl_->decoders.find(owner) != impl_->decoders.end()) {
     return DecoderStatus::kDuplicate;
   }
-  if (!impl_->device_ready || !impl_->mf_initialized || impl_->registrar == nullptr ||
+  if (mode == NativeCodecMode::Hardware && !impl_->device_ready &&
+      impl_->mf_initialized) {
+    impl_->device_ready = CreateHardwareDecoderGraphicsDevice(
+        impl_->d3d_device.put(), impl_->d3d_context.put());
+  }
+  if ((mode == NativeCodecMode::Hardware && !impl_->device_ready) ||
+      !impl_->mf_initialized || impl_->registrar == nullptr ||
       impl_->pull == nullptr || impl_->free_buffer == nullptr) {
     return DecoderStatus::kDecoderUnavailable;
   }
-  auto decoder = HardwareH264Decoder::Create(impl_->d3d_device.get(),
-                                              impl_->d3d_context.get());
+  auto decoder = NativeH264Decoder::Create(impl_->d3d_device.get(),
+                                           impl_->d3d_context.get(), mode);
   if (decoder == nullptr) return DecoderStatus::kDecoderUnavailable;
   auto state = std::make_shared<DecoderState>();
   state->owner = owner;
@@ -458,13 +424,16 @@ DecoderStatus WindowsDecoderManager::Attach(uint64_t owner, int64_t* surface_id)
   state->registrar = impl_->registrar;
   state->decoder = std::move(decoder);
   const std::weak_ptr<DecoderState> weak_state = state;
-  state->texture = std::make_unique<flutter::TextureVariant>(
-      flutter::GpuSurfaceTexture(
-          kFlutterDesktopGpuSurfaceTypeD3d11Texture2D,
-          [weak_state](size_t width, size_t height) {
-            const auto state = weak_state.lock();
-            return state == nullptr ? nullptr : state->Describe(width, height);
-          }));
+  state->texture = MakeDecodedVideoTexture(
+      mode,
+      [weak_state](size_t width, size_t height) {
+        const auto state = weak_state.lock();
+        return state == nullptr ? nullptr : state->Describe(width, height);
+      },
+      [weak_state](size_t, size_t) {
+        const auto state = weak_state.lock();
+        return state == nullptr ? nullptr : state->DescribePixels();
+      });
   state->texture_id = impl_->registrar->RegisterTexture(state->texture.get());
   if (state->texture_id < 0) return DecoderStatus::kBackendFailure;
   *surface_id = state->texture_id;
@@ -484,7 +453,7 @@ DecoderStatus WindowsDecoderManager::Detach(uint64_t owner) {
   }
   state->Stop();
   return state->terminal_status.load() == 0 ? DecoderStatus::kOk
-                                             : DecoderStatus::kNativeFailure;
+                                            : DecoderStatus::kNativeFailure;
 }
 
 DecoderStatus WindowsDecoderManager::Release(uint64_t owner) {
@@ -517,6 +486,7 @@ DecoderStatus WindowsDecoderManager::ReadStats(uint64_t owner,
   stats->frames_rendered = state->frames_rendered.load();
   stats->frames_dropped = state->frames_dropped.load();
   stats->terminal_status = state->terminal_status.load();
+  stats->failure_stage = state->failure_stage.load();
   return stats->terminal_status == 0 ? DecoderStatus::kOk
                                      : DecoderStatus::kNativeFailure;
 }

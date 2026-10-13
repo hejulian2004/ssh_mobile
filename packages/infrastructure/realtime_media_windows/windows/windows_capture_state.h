@@ -20,13 +20,21 @@ using winrt::Windows::Graphics::Capture::GraphicsCaptureItem;
 using winrt::Windows::Graphics::Capture::GraphicsCaptureSession;
 using winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 
+struct CaptureGraphicsDevice {
+  winrt::com_ptr<ID3D11Device> d3d_device;
+  winrt::com_ptr<ID3D11DeviceContext> d3d_context;
+  IDirect3DDevice winrt_device{nullptr};
+};
+bool EnsureCaptureGraphicsDevice(NativeCodecMode mode,
+                                 CaptureGraphicsDevice* graphics);
+
 struct CaptureState final {
   ~CaptureState();
 
   uint64_t owner = 0;
   H264PushCallback push_h264 = nullptr;
   std::mutex encoder_mutex;
-  std::unique_ptr<HardwareH264Encoder> encoder;
+  std::unique_ptr<NativeH264Encoder> encoder;
   std::chrono::steady_clock::time_point started_at;
   std::atomic<bool> stopped{false};
   std::atomic<bool> teardown_started{false};
@@ -68,7 +76,7 @@ struct CaptureState final {
 // Installs the native FrameArrived/Closed callbacks after all capture resources
 // have been assigned to the state. The callback owns the capture→encode→push
 // hot path and never posts frame bytes to Dart.
-void InstallCaptureCallbacks(const std::shared_ptr<CaptureState> &state);
+void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state);
 
 }  // namespace realtime_media_windows
 

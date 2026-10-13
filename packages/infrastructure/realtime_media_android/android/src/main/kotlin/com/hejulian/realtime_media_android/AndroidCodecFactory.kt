@@ -6,9 +6,40 @@ import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Build
 
-/** Hardware-only MediaCodec selection. Software codec names are rejected. */
+internal enum class AndroidCodecMode { HARDWARE, CPU }
+
+/** Explicit, request-scoped native H.264 selection. */
 internal object AndroidCodecFactory {
     private const val MIME_AVC = "video/avc"
+    private val requestMode = ThreadLocal<AndroidCodecMode>()
+
+    fun parseCodecMode(value: Any?): AndroidCodecMode? = when (value) {
+        null, "hardware" -> AndroidCodecMode.HARDWARE
+        "cpu" -> AndroidCodecMode.CPU
+        else -> null
+    }
+
+    fun <T> withCodecMode(mode: AndroidCodecMode, action: () -> T): T {
+        val previous = requestMode.get()
+        requestMode.set(mode)
+        try { return action() } finally {
+            if (previous == null) requestMode.remove() else requestMode.set(previous)
+        }
+    }
+
+    fun isCodecAllowed(hardware: Boolean, software: Boolean): Boolean =
+        when (requestMode.get() ?: AndroidCodecMode.HARDWARE) {
+            AndroidCodecMode.HARDWARE -> hardware
+            AndroidCodecMode.CPU -> software
+        }
+
+    fun boundedNonNegativeInt(value: Any?): Int? {
+        val number = value as? Number ?: return null
+        val normalized = number.toDouble()
+        if (!normalized.isFinite() || normalized < 0.0 ||
+            normalized > Int.MAX_VALUE || normalized % 1.0 != 0.0) return null
+        return normalized.toInt()
+    }
 
     fun createEncoder(width: Int, height: Int): MediaCodec? {
         val info = findCodec(isEncoder = true) ?: return null
@@ -20,6 +51,7 @@ internal object AndroidCodecFactory {
         format.setInteger(MediaFormat.KEY_BIT_RATE, initialBitrateKbps(width, height) * 1_000)
         format.setInteger(MediaFormat.KEY_FRAME_RATE, 30)
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
+        format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
         return try {
             MediaCodec.createByCodecName(info.name).also {
                 it.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -49,12 +81,16 @@ internal object AndroidCodecFactory {
             if (!info.supportedTypes.any { it.equals(MIME_AVC, ignoreCase = true) }) {
                 return@firstOrNull false
             }
-            isHardware(info)
+            val hardware = isHardware(info)
+            val software = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                info.isSoftwareOnly
+            } else { !hardware }
+            isCodecAllowed(hardware, software)
         }
     }
 
     private fun isHardware(info: MediaCodecInfo): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && info.isHardwareAccelerated) return true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) return info.isHardwareAccelerated
         val name = info.name.lowercase()
         return !name.startsWith("omx.google.") &&
             !name.startsWith("c2.android.") &&

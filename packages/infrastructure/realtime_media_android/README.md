@@ -1,23 +1,25 @@
-Last updated: 2026-09-11
+Last updated: 2026-10-13
 
 # realtime_media_android
 
 `realtime_media_android` is the Android platform owner for the public
 `realtime_media` endpoint lifecycle. Kotlin owns MediaProjection, the typed
-foreground service, hardware H.264 MediaCodec instances, and Flutter
+foreground service, selected H.264 MediaCodec instances, and Flutter
 SurfaceTexture resources. A small JNI bridge invokes the existing native-only
 owner-token ABI; encoded H.264 never enters Dart.
 
 The Dart method channel carries bounded endpoint identity, source metadata,
 projection/lifecycle commands, opaque texture IDs, and low-frequency counters.
 No runtime pointer, raw/encoded frame, `Uint8List` media API, or Surface handle
-is exposed. Hardware encoder/decoder unavailability is reported as a typed
-failure; there is no software or alternate-codec fallback.
+is exposed. Hardware mode is the default. Explicit CPU mode selects software
+H.264 using a scoped factory choice; it preserves system recording consent,
+owner cleanup, and the native frame path. Unknown modes and unavailable selected
+codecs fail with typed errors; there is no silent or alternate-codec fallback.
 
 Generation-bound owner tokens also carry payload-free `requestKeyframe`,
 `resetDecoder`, and bounded `applyAdaptation` commands. Kotlin/JNI and the
 native runtime validate the token before touching a codec. Android applies
-bitrate and frame-rate targets through the hardware MediaCodec; a resolution
+bitrate and frame-rate targets through the selected MediaCodec; a resolution
 change is rejected until an explicit stop/release/recreate path is used. Send
 owners request a MediaCodec sync frame and receive owners use the native
 WebRTC RTCP path; neither path exposes Dart bytes. Device capability and E2E
@@ -42,6 +44,14 @@ under MediaCodec input backpressure; a pending frame blocks another native
 pull, and reset clears it so pre-reset deltas are never replayed.
 
 ## Projection lease and teardown
+
+After system consent, the plugin waits for the typed foreground service's ready
+callback before obtaining `MediaProjection`. Android requires this ordering;
+requesting the projection before `startForeground()` can reject a granted
+session. Pending callbacks remain bound to their request and cannot create a
+lease after plugin disposal. An unconsumed grant keeps the service alive until
+capture starts or the grant is abandoned; release stops it when no capture
+owner still needs it.
 
 Each user grant is a one-shot `ProjectionLease`:
 

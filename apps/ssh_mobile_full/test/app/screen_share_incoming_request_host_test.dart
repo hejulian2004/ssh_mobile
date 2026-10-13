@@ -5,7 +5,7 @@ import 'package:feature_lan_share/feature_lan_share.dart' as lan;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:network_sdk/network_sdk.dart';
+import 'package:realtime_media/realtime_media.dart';
 import 'package:network_transport/network_transport.dart';
 import 'package:ssh_mobile_network_native/ssh_mobile_network_native.dart';
 import 'package:ssh_mobile/app/app_runtime.dart';
@@ -42,6 +42,7 @@ void main() {
     final navigatorKey = GlobalKey<NavigatorState>();
     final arbitration = AppScreenSharePeerArbitrationRegistry();
     final installedOperations = <String>[];
+    final installedModes = <RealtimeMediaCodecMode>[];
     final disposedOperations = <String>[];
     const claimRealtimeIds = <String>[
       '00112233445566778899aabbccddee11',
@@ -66,6 +67,7 @@ void main() {
       navigatorKey: navigatorKey,
       routeBuilder: (arguments) {
         installedOperations.add(arguments.operationId!);
+        installedModes.add(arguments.codecMode);
         return _ControlledScreenShareRoute(
           arguments: arguments,
           onDisposed: (operationId) => disposedOperations.add(operationId!),
@@ -100,6 +102,8 @@ void main() {
       operationId: 'operation-z',
       bindingExpiry: now.add(const Duration(seconds: 30)),
     );
+    await tester.tap(find.text('CPU mode'));
+    await tester.pump();
     await tester.tap(find.text('Accept'));
     await _settle(tester);
     expect(
@@ -107,6 +111,7 @@ void main() {
       1,
     );
     expect(installedOperations, <String>['operation-z']);
+    expect(installedModes, [RealtimeMediaCodecMode.cpu]);
 
     // operation-a wins over operation-z for the same initiator. A's route is
     // popped, but its navigation completion must not touch B's Host owner.
@@ -146,6 +151,10 @@ void main() {
       2,
     );
     expect(installedOperations, <String>['operation-z', 'operation-a']);
+    expect(installedModes, [
+      RealtimeMediaCodecMode.cpu,
+      RealtimeMediaCodecMode.hardware,
+    ]);
     await cleanUp();
   });
 
@@ -569,35 +578,6 @@ void _installCommandAutomation(
     }
     return true;
   };
-}
-
-RealtimeIncomingSessionOffer _testOffer({
-  required String realtimeId,
-  required String sharedSessionInstanceId,
-  required String operationId,
-  required DateTime bindingExpiry,
-  required String offerId,
-  required String claimToken,
-}) {
-  final now = DateTime.now().toUtc();
-  return RealtimeIncomingSessionOffer(
-    offerId: offerId,
-    claimToken: claimToken,
-    realtimeId: realtimeId,
-    authenticatedPeerId: 'peer-a',
-    sharedSessionInstanceId: sharedSessionInstanceId,
-    bindingExpiresAt: bindingExpiry,
-    request: RealtimeConsent(
-      operationId: operationId,
-      realtimeId: realtimeId,
-      sharedSessionInstanceId: sharedSessionInstanceId,
-      issuedAt: now,
-      expiresAt: now.add(const Duration(seconds: 2)),
-      decision: RealtimeConsentDecision.request,
-      senderPeerId: 'peer-a',
-      actionRevision: 1,
-    ),
-  );
 }
 
 Uint8List _realtimeStateEvent({

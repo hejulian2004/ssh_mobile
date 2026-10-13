@@ -41,6 +41,7 @@ final class MethodChannelWindowsRealtimeMediaPlatform
       'peer_id': identity.peerId,
       'generation': identity.generation,
       'direction': identity.direction.name,
+      'codec_mode': identity.codecMode.name,
       'source_id': source.id.value,
       'source_kind': source.kind.name,
       'owner_token': ownerToken?.value,
@@ -61,6 +62,7 @@ final class MethodChannelWindowsRealtimeMediaPlatform
         'peer_id': identity.peerId,
         'generation': identity.generation,
         'direction': identity.direction.name,
+        'codec_mode': identity.codecMode.name,
         'owner_token': ownerToken?.value,
       },
     );
@@ -192,6 +194,7 @@ final class MethodChannelWindowsRealtimeMediaPlatform
     'peer_id': identity.peerId,
     'generation': identity.generation,
     'direction': identity.direction.name,
+    'codec_mode': identity.codecMode.name,
     'owner_token': ownerToken?.value,
   };
 

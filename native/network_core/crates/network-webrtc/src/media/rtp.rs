@@ -211,6 +211,10 @@ impl RtpReassembler {
             .pending_timestamp
             .expect("pending timestamp is set before depacketization");
         let payload = self.pending_payload.to_vec();
+        if let Some((width, height)) = access_unit_dimensions(&payload) {
+            self.width = width;
+            self.height = height;
+        }
         let frame = EncodedVideoFrame::new(
             VideoCodec::H264,
             self.next_frame_sequence,
@@ -308,4 +312,123 @@ fn next_start_code(payload: &[u8], from: usize) -> Option<(usize, usize)> {
 
 fn is_newer_timestamp(candidate: u32, previous: u32) -> bool {
     candidate != previous && candidate.wrapping_sub(previous) < (u32::MAX / 2 + 1)
+}
+
+// Screen SDP advertises constrained Baseline. Read its SPS geometry in the
+// native owner, including emulation-prevention bytes and macroblock cropping.
+// Never infer dimensions from the sending queue's out-of-band metadata: RTP
+// does not transmit that metadata. Unsupported/truncated SPS remains subject
+// to the platform decoder's typed failure rather than an unchecked allocation.
+fn access_unit_dimensions(payload: &[u8]) -> Option<(u32, u32)> {
+    let mut from = 0;
+    while let Some((start, code)) = next_start_code(payload, from) {
+        let nalu = start + code;
+        let end = next_start_code(payload, nalu).map_or(payload.len(), |(next, _)| next);
+        if payload.get(nalu).is_some_and(|header| header & 31 == 7) {
+            return baseline_sps_dimensions(&payload[nalu..end]);
+        }
+        from = end;
+    }
+    None
+}
+
+struct SpsBits {
+    bytes: Vec<u8>,
+    offset: usize,
+}
+impl SpsBits {
+    fn read(&mut self, count: usize) -> Option<u32> {
+        if count > 32 || self.offset.checked_add(count)? > self.bytes.len() * 8 {
+            return None;
+        }
+        let mut value = 0;
+        for _ in 0..count {
+            value = (value << 1)
+                | u32::from((self.bytes[self.offset / 8] >> (7 - self.offset % 8)) & 1);
+            self.offset += 1;
+        }
+        Some(value)
+    }
+    fn ue(&mut self) -> Option<u32> {
+        let mut zeros = 0usize;
+        while self.read(1)? == 0 {
+            zeros += 1;
+            if zeros > 31 {
+                return None;
+            }
+        }
+        (1u32 << zeros)
+            .checked_sub(1)?
+            .checked_add(self.read(zeros)?)
+    }
+}
+
+fn baseline_sps_dimensions(nalu: &[u8]) -> Option<(u32, u32)> {
+    if nalu.len() < 5 || nalu.len() > 4096 {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(nalu.len());
+    let mut zeros = 0;
+    for (index, &byte) in nalu[1..].iter().enumerate() {
+        if zeros == 2 && byte == 3 {
+            if nalu.get(index + 2).is_none_or(|next| *next > 3) {
+                return None;
+            }
+            zeros = 0;
+            continue;
+        }
+        bytes.push(byte);
+        zeros = if byte == 0 { zeros + 1 } else { 0 };
+    }
+    let mut bits = SpsBits { bytes, offset: 0 };
+    if !matches!(bits.read(8)?, 66 | 77 | 88) {
+        return None;
+    }
+    bits.read(16)?; // constraint flags and level
+    bits.ue()?; // SPS id
+    bits.ue()?; // log2_max_frame_num_minus4
+    match bits.ue()? {
+        0 => {
+            bits.ue()?;
+        }
+        1 => {
+            bits.read(1)?;
+            bits.ue()?; // signed Exp-Golomb has the same bit extent
+            bits.ue()?;
+            let cycles = bits.ue()?;
+            if cycles > 255 {
+                return None;
+            }
+            for _ in 0..cycles {
+                bits.ue()?;
+            }
+        }
+        2 => {}
+        _ => return None,
+    }
+    bits.ue()?; // reference frames
+    bits.read(1)?;
+    let width = bits.ue()?.checked_add(1)?.checked_mul(16)?;
+    let map_height = bits.ue()?.checked_add(1)?;
+    let frame_only = bits.read(1)?;
+    if frame_only == 0 {
+        bits.read(1)?;
+    }
+    bits.read(1)?;
+    let height = map_height.checked_mul(16)?.checked_mul(2 - frame_only)?;
+    let (mut crop_x, mut crop_y) = (0u32, 0u32);
+    if bits.read(1)? != 0 {
+        crop_x = bits.ue()?.checked_add(bits.ue()?)?.checked_mul(2)?;
+        crop_y = bits
+            .ue()?
+            .checked_add(bits.ue()?)?
+            .checked_mul(2 * (2 - frame_only))?;
+    }
+    let width = width.checked_sub(crop_x)?;
+    let height = height.checked_sub(crop_y)?;
+    (width > 0
+        && height > 0
+        && width <= MAX_SCREEN_VIDEO_WIDTH
+        && height <= MAX_SCREEN_VIDEO_HEIGHT)
+        .then_some((width, height))
 }

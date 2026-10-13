@@ -3,10 +3,7 @@ package com.hejulian.realtime_media_android
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
-import android.os.Handler
-import android.os.Looper
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -78,48 +75,57 @@ class RealtimeMediaAndroidPlugin :
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         if (requestCode != PROJECTION_REQUEST_CODE) return false
         val pending = pendingProjectionResult ?: return true
-        pendingProjectionResult = null
         if (resultCode != Activity.RESULT_OK || data == null) {
+            pendingProjectionResult = null
+            stopForegroundServiceIfUnused()
             pending.error("permission_denied", "MediaProjection permission was denied.", null)
             return true
         }
         val appContext = context
         val manager = projectionManager
         if (appContext == null || manager == null) {
+            pendingProjectionResult = null
             pending.error("backend_failure", "Android projection manager is unavailable.", null)
             return true
         }
         try {
-            val mediaProjection = manager.getMediaProjection(resultCode, data)
-            if (mediaProjection == null) {
-                pending.error("permission_denied", "MediaProjection grant is unavailable.", null)
-                return true
-            }
-            lateinit var lease: ProjectionLease
-            val callback = object : MediaProjection.Callback() {
-                override fun onStop() {
-                    lease.revoke()
+            ScreenCaptureForegroundService.startWhenReady(appContext) { code ->
+                if (pendingProjectionResult !== pending) {
+                    stopForegroundServiceIfUnused()
+                    return@startWhenReady
                 }
+                pendingProjectionResult = null
+                if (code != ScreenCaptureForegroundService.READY) {
+                    stopForegroundServiceIfUnused()
+                    pending.error(if (code == ScreenCaptureForegroundService.PERMISSION_DENIED)
+                        "permission_denied" else "backend_failure",
+                        "Android projection foreground service was not ready.", null)
+                    return@startWhenReady
+                }
+                completeProjectionGrant(manager, resultCode, data, pending)
             }
-            lease = ProjectionLease(
-                mediaProjection = mediaProjection,
-                callback = callback,
-                onRevoked = { ownerToken -> revokeProjection(lease, ownerToken) },
-                onReleased = {
-                    if (projectionLease === lease) projectionLease = null
-                },
-            )
-            projectionLease = lease
-            mediaProjection.registerCallback(callback, Handler(Looper.getMainLooper()))
-            pending.success(null)
-        } catch (_: SecurityException) {
-            projectionLease?.releaseAfterResources()
-            pending.error("permission_denied", "MediaProjection permission was rejected.", null)
-        } catch (_: Exception) {
-            projectionLease?.releaseAfterResources()
-            pending.error("backend_failure", "MediaProjection could not be initialized.", null)
+        } catch (error: Exception) {
+            pendingProjectionResult = null
+            stopForegroundServiceIfUnused()
+            pending.error(projectionFailureCode(error), "MediaProjection could not be initialized.", null)
         }
         return true
+    }
+
+    private fun completeProjectionGrant(manager: MediaProjectionManager, resultCode: Int,
+        data: Intent, pending: MethodChannel.Result) {
+        try {
+            projectionLease = ProjectionLease.create(manager, resultCode, data,
+                onRevoked = { lease, owner -> revokeProjection(lease, owner) },
+                onReleased = { lease ->
+                    if (projectionLease === lease) projectionLease = null
+                    stopForegroundServiceIfUnused()
+                })
+            pending.success(null)
+        } catch (error: Exception) {
+            stopForegroundServiceIfUnused()
+            pending.error(projectionFailureCode(error), "MediaProjection could not be initialized.", null)
+        }
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -207,7 +213,7 @@ class RealtimeMediaAndroidPlugin :
                 if (failure == null) result.success(null) else error(
                     result,
                     failure,
-                    "Android hardware encoder rejected the adaptation target.",
+                    "Android H.264 encoder rejected the adaptation target.",
                 )
             }
             else -> result.notImplemented()
@@ -368,7 +374,8 @@ class RealtimeMediaAndroidPlugin :
         val args = arguments(call)
         val token = ownerToken(args)
         val identity = parseIdentity(args)
-        if (token == null || identity == null) {
+        val codecMode = AndroidCodecFactory.parseCodecMode(args["codec_mode"])
+        if (token == null || identity == null || codecMode == null) {
             error(result, "invalid_argument", "A complete media owner identity is required.")
             return
         }
@@ -391,7 +398,7 @@ class RealtimeMediaAndroidPlugin :
             }
             AndroidMediaOwner(appContext, registry, token, identity).also { owners[token] = it }
         }
-        block(owner, args)
+        AndroidCodecFactory.withCodecMode(codecMode) { block(owner, args) }
     }
 
     private fun arguments(call: MethodCall): Map<String, Any?> =
@@ -420,17 +427,7 @@ class RealtimeMediaAndroidPlugin :
         return normalized.takeIf { it.isNotEmpty() && it.length <= MAX_ID_LENGTH }
     }
 
-    private fun boundedNonNegativeInt(value: Any?): Int? {
-        val number = value as? Number ?: return null
-        val normalized = number.toDouble()
-        if (!normalized.isFinite() || normalized < 0.0 ||
-            normalized > Int.MAX_VALUE || normalized % 1.0 != 0.0
-        ) {
-            return null
-        }
-        return normalized.toInt()
-    }
-
+    private fun boundedNonNegativeInt(value: Any?): Int? = AndroidCodecFactory.boundedNonNegativeInt(value)
     private fun revokeProjection(lease: ProjectionLease, ownerToken: Long?) {
         if (projectionLease !== lease) return
         val owner = ownerToken?.let { owners[it] }
@@ -445,7 +442,8 @@ class RealtimeMediaAndroidPlugin :
     }
 
     private fun stopForegroundServiceIfUnused() {
-        if (owners.values.none { it.isCaptureOwnerActive() }) {
+        if (pendingProjectionResult == null && projectionLease?.state != ProjectionLeaseState.GRANTED &&
+            owners.values.none { it.isCaptureOwnerActive() }) {
             context?.let { ScreenCaptureForegroundService.stop(it) }
         }
     }

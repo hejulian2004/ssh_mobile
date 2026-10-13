@@ -1,4 +1,4 @@
-Last updated: 2026-09-08
+Last updated: 2026-10-13
 
 # realtime_media_windows maintenance contract
 
@@ -10,6 +10,10 @@ Last updated: 2026-09-08
   surfaces, and Flutter texture registration native-owned.
 - Carry only bounded identity/source metadata, lifecycle commands, opaque
   surface IDs, and payload-free statistics over the platform channel.
+- Hardware is the default. Explicit CPU mode uses synchronous software H.264,
+  WARP capture resources, and native pixel-buffer texture rendering. CPU receive
+  must not require a hardware D3D device or DXGI decoder manager. Unknown modes
+  fail before starting an owner; a missing selected codec remains a typed error.
 
 ## Forbidden changes
 

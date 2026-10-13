@@ -1,4 +1,4 @@
-最新更新时间：2026-09-04
+最新更新时间：2026-10-13
 
 # ADR-034：WebRTC 实时屏幕共享媒体边界与生命周期
 
@@ -20,6 +20,19 @@ Screen Share slice；M8 中 Voice、Camera/一般 Video 或其他 RTC 工作不�
 验收门禁。
 
 ## 背景与当前事实
+
+2026-10-13 补充决策：Windows/Android 允许用户显式选择 CPU H.264 编解码模式，
+默认硬件模式不变，不进行静默软件回退。模式属于本地媒体端点身份，由 App 在
+选择屏幕或接受邀请前固定；两端可独立选择，不改变信令或 SDP codec。
+Windows CPU 采集使用 WARP，接收使用软件 MFT 与原生 PixelBufferTexture，
+无需硬件解码设备；Android 使用软件 MediaCodec。系统录屏许可、业务 consent、
+唯一 native runtime、三帧队列、停止/释放和 DTLS-SRTP 加密约束继续适用。
+缺少所选编码器/解码器仍返回类型化能力失败；CPU 模式不保证任意设备的实时帧率。
+接收尺寸以有界 SPS 解析出的有效区域为准，RTP 默认值不是发送端尺寸；
+原生平台解码器只接受与该区域一致的输出，不通过放宽尺寸核验绕过错误。
+
+本节其余基线事实和文末对照表记录最初冻结时的状态（2026-09-04），不替代
+当前 owning package 的代码与 README 合同。
 
 现有基线已经提供以下能力：
 
@@ -367,7 +380,8 @@ Flutter Widget 只观察 surface ready、resolution、pause/resume、stats 和 e
 Phase 0～7 的平台计划范围为：
 
 - Windows：Windows Graphics Capture（必要时由 owning platform contract 评审 DXGI
-  fallback）+ Media Foundation/H.264 hardware encoder；
+  fallback）+ Media Foundation/H.264 encoder/decoder，默认硬件模式，显式 CPU 模式
+  使用 WARP 采集和软件编解码；
 - Android：MediaProjection + foreground service + MediaCodec H.264 encoder/decoder，
   permission revoke 必须立即停止；
 - macOS、iOS/ReplayKit 和 Flutter Web 不在 Phase 0～7 的实现门禁内。它们未来若要

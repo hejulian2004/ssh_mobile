@@ -1,4 +1,4 @@
-Last updated: 2026-09-11
+Last updated: 2026-10-13
 
 # realtime_media_android maintenance contract
 
@@ -21,10 +21,18 @@ Last updated: 2026-09-11
 - Do not silently fall back to software codecs, VP8/AV1, or an unbounded queue.
 - Do not add consent, TURN credentials, business state, or QoS policy here.
 
+Hardware codecs remain the default. Explicit CPU mode selects only software
+H.264 MediaCodec instances within the synchronous owner operation. Nested and
+concurrent requests must not leak a mode to another owner. Unknown modes fail
+closed. CPU mode preserves system recording consent and the same native ABI.
+
 ## Lifecycle contract
 
 Projection permission and the typed foreground service must be active before
-capture starts. A `ProjectionLease` is single-use: `granted → consumed →
+`getMediaProjection()` and capture start. Service readiness follows system
+consent and remains bound to the pending request. Disposal invalidates a late
+ready callback; an unconsumed grant retains the service until consumption or
+abandonment. A `ProjectionLease` is single-use: `granted → consumed →
 released`, and one consumed `MediaProjection` may create only one
 VirtualDisplay. Native owner start validates the generation; capture stops
 before encoder/decoder and SurfaceTexture release; owner close remains separate

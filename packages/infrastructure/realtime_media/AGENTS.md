@@ -1,4 +1,4 @@
-Last updated: 2026-09-07
+Last updated: 2026-10-13
 
 # realtime_media maintenance contract
 
@@ -12,7 +12,7 @@ Last updated: 2026-09-07
 - `RealtimeMediaSessionController` owns only endpoint leases borrowed from the app-owned native runtime.
 - Future platform adapters own capture, encoder/decoder, and renderer resources for their session scope; their release order is detach → close platform resource → release endpoint.
 - `RemoteVideoSurface` is an opaque renderer capability. It has no payload or native-address API.
-- Every endpoint operation must preserve the `(realtimeId, peerId, generation, direction)` binding. Old generations fail closed.
+- Every endpoint operation must preserve the `(realtimeId, peerId, generation, direction, codecMode)` binding. Old generations and changed codec modes fail closed. Hardware remains the default; CPU is an explicit local selection fixed for the controller lifetime.
 
 ## Tests and validation
 

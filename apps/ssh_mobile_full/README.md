@@ -43,11 +43,22 @@ Windows 屏幕选择使用原生目录绑定的源标识；接受邀请后直接
 核验目标是否仍有效，不重新枚举并替换已选择的目录。媒体失败日志只记录阶段和
 类型化错误码，不记录屏幕内容、源标签或会话标识。
 
+接收端从 H.264 SPS 读取有效尺寸（含编码块裁剪），后续帧保留该尺寸，避免把
+手机竖屏或不同分辨率显示器误当作默认横屏尺寸。
+
 设备级验证入口为 `test/device/screen_share_device_probe.dart`，通过
 `flutter run -t test/device/screen_share_device_probe.dart` 在 Windows 和 Android
 模拟器分别启动。测试使用隔离临时目录与固定测试身份，自动邀请和接受，检查
 发送、解码和渲染计数；模拟器运行前设置 `adb forward tcp:47831 tcp:47831`。
+两端使用 `--dart-define=SCREEN_PROBE_REVERSE=true` 可验证 Android → Windows；
+模拟器通过 `10.0.2.2` 访问主机，仍需完成 Android 系统录屏授权。
+两端增加 `--dart-define=SCREEN_PROBE_CPU=true` 可强制验证 CPU 编解码路径；
+未开启时保留硬件模式，缺少所选编解码器会报告能力失败，不能计作视频验收通过。
 此入口只用于设备测试，不进入正式应用；模拟器验证不能替代真机硬件能力验收。
+
+正式共享可在屏幕选择或来访邀请卡片中开启 CPU 模式，两端独立选择。选择在
+路由创建时固定，连接处理中禁用切换；取消选择不申请录屏授权。默认使用硬件
+编解码；CPU 模式适用于无硬件编解码能力的设备，并可能增加 CPU 占用。
 
 启动品牌资源为 `assets/app_icon.svg`：透明边缘、浅蓝面板、蓝色终端提示符和青绿色
 光标。`StartupBranding` 使用 SVG 等比显示，按可用短边限制在 64–128 逻辑像素，

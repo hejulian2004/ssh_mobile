@@ -66,10 +66,8 @@ async fn an_unanswered_offer_survives_the_driver_fallback_wakeup() {
 }
 
 fn synthetic_h264_access_unit(sequence: u64, timestamp: u64) -> EncodedVideoFrame {
-    let mut payload = vec![
-        0, 0, 0, 1, 0x67, 0x42, 0, 0x1f, 0xe5, 0x88, 0x68, 0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80, 0,
-        0, 0, 1, 0x65,
-    ];
+    let mut payload = crate::rtp_media_tests::baseline_sps(1920, 1080);
+    payload.extend_from_slice(&[0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80, 0, 0, 0, 1, 0x65]);
     payload.extend((0..2_048).map(|index| (index as u8).wrapping_mul(17)));
     EncodedVideoFrame::new(
         VideoCodec::H264,

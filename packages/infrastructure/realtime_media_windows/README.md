@@ -6,8 +6,9 @@ Last updated: 2026-10-13
 `realtime_media` endpoint lifecycle. It composes the App Shell's native
 endpoint lease backend with a Windows platform owner. The native owner now
 implements Windows Graphics Capture for display/window sources, a native Media
-Foundation H.264 hardware send-ingress worker, and a hardware receive decoder
-with D3D11/Flutter Texture ownership.
+Foundation H.264 send-ingress worker, and a receive decoder with native Flutter
+Texture ownership. Hardware is the default; explicit CPU mode selects software
+H.264 without changing the native media ABI or codec negotiation.
 
 The Dart side deliberately carries no frame bytes, encoded data, native
 addresses, or GPU buffers. Its method channel contains only bounded endpoint
@@ -24,7 +25,7 @@ H.264 push/pull port remain entirely native.
 The same owner token carries payload-free `requestKeyframe`, `resetDecoder`,
 and bounded `applyAdaptation` commands. Native rate limiting and generation
 checks apply before a platform owner touches the encoder or decoder. Windows
-applies bitrate targets through the Media Foundation hardware MFT and bounds
+applies bitrate targets through the selected Media Foundation MFT and bounds
 frame-rate in the native capture state; a resolution target that differs from
 the source is rejected and requires an explicit stop/release/recreate. PLI and
 IDR requests stay on the native WebRTC/codec path and never become Dart bytes.
@@ -39,16 +40,38 @@ COM only when it acquired its own reference. Selected source tokens stay bound
 to the native catalog; capture start validates the original target's liveness.
 The hardware encoder follows Media Foundation's asynchronous input/output
 events, honors transform-owned output samples, and uses the Baseline H.264
-profile advertised by the screen-track SDP. It never selects a software codec.
+profile advertised by the screen-track SDP. Explicit CPU capture uses a separate
+WARP device and synchronous software MFT, without requiring a physical GPU.
+Software encoding requests low-latency output rather than buffering a full
+look-ahead window before the first frame.
 `test/windows/hardware_h264_encoder_probe.cpp` verifies encoding with a fixed
-native texture on a GPU-equipped Windows host; absent hardware is a GAP.
+native texture; `--cpu` forces WARP and software encoding. Absent selected
+hardware or software capability is a GAP, not a successful fallback.
+
+Receive initialization also borrows Flutter's existing COM apartment. Decoder
+enumeration includes D3D11-aware H.264 transforms: synchronous MFT registration
+does not by itself mean software decoding. The owner verifies the GPU's H.264
+NV12 profile, requires the DXGI device-manager handshake, and accepts only GPU
+output buffers. Parameter-set output-layout updates retain the negotiated
+dimensions; GPU conversion uses the returned surface array slice. Missing GPU
+capability remains `decoder_unavailable` in hardware mode. Integrated
+GPUs can satisfy this contract; a discrete GPU is not required.
+`test/windows/hardware_h264_decoder_probe.cpp` exercises the receive owner with
+fixed hardware-encoded fixtures in an existing STA and verifies GPU surface
+registration and release. `--cpu` verifies software decoding with hardware
+acceleration disabled and native RGBA PixelBufferTexture registration; that
+receive path creates no hardware graphics device. `--cropped` verifies visible
+dimensions within a padded coded frame. Native buffers stay alive until
+Flutter releases its frame lease, including during stop.
+Rendering counters advance when Flutter obtains a frame descriptor, not merely
+when the worker announces an available texture.
 
 ## Current phase boundary
 
 This package now includes the runtime owner-token bridge and a native Windows
 Graphics Capture lifecycle owner for monitor/window sources, the native Media
-Foundation H.264 send ingress, and the receive-side hardware decoder/GPU
-surface owner. Capture buffers, encoded access units, decoded textures, and
+Foundation H.264 send ingress, and the selected hardware or CPU receive
+surface owner. Capture buffers, encoded access units, decoded pixels/textures, and
 texture handles remain native; source close, resolution-change restart
 boundaries, stop, and release are handled without a Dart frame path. Hardware
 availability and Windows E2E acceptance remain separate gates; this package

@@ -51,7 +51,7 @@ struct NativeSource {
   HWND window = nullptr;
 };
 
-std::string Utf8FromWide(const wchar_t *value, int length) {
+std::string Utf8FromWide(const wchar_t* value, int length) {
   if (value == nullptr || length <= 0) return {};
   const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value,
                                        length, nullptr, 0, nullptr, nullptr);
@@ -95,9 +95,7 @@ struct WindowsCaptureManager::Impl final {
   std::mutex mutex;
   std::vector<NativeSource> sources;
   std::unordered_map<uint64_t, std::shared_ptr<CaptureState>> captures;
-  winrt::com_ptr<ID3D11Device> d3d_device;
-  winrt::com_ptr<ID3D11DeviceContext> d3d_context;
-  IDirect3DDevice winrt_device{nullptr};
+  CaptureGraphicsDevice hardware_graphics, cpu_graphics;
   H264PushCallback push_h264 = nullptr;
   bool com_initialized = false;
   bool mf_initialized = false;
@@ -116,57 +114,19 @@ struct WindowsCaptureManager::Impl final {
     std::vector<std::shared_ptr<CaptureState>> captures_to_stop;
     {
       std::lock_guard<std::mutex> lock(mutex);
-      for (auto &entry : captures) captures_to_stop.push_back(entry.second);
+      for (auto& entry : captures) captures_to_stop.push_back(entry.second);
       captures.clear();
       sources.clear();
     }
-    for (const auto &capture : captures_to_stop) capture->Stop();
-    winrt_device = nullptr;
-    d3d_context = nullptr;
-    d3d_device = nullptr;
+    for (const auto& capture : captures_to_stop) capture->Stop();
+    hardware_graphics = {};
+    cpu_graphics = {};
     if (mf_initialized) MFShutdown();
     if (com_initialized) CoUninitialize();
   }
 
-  bool EnsureDevice() {
-    if (winrt_device != nullptr) return true;
-    constexpr D3D_FEATURE_LEVEL kFeatureLevels[] = {
-        D3D_FEATURE_LEVEL_11_1,
-        D3D_FEATURE_LEVEL_11_0,
-    };
-    D3D_FEATURE_LEVEL feature_level = D3D_FEATURE_LEVEL_11_0;
-    const HRESULT device_result =
-        D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-                          D3D11_CREATE_DEVICE_BGRA_SUPPORT, kFeatureLevels,
-                          ARRAYSIZE(kFeatureLevels), D3D11_SDK_VERSION,
-                          d3d_device.put(), &feature_level, d3d_context.put());
-    if (FAILED(device_result) || d3d_device == nullptr) return false;
-
-    winrt::com_ptr<IDXGIDevice> dxgi_device;
-    if (FAILED(d3d_device->QueryInterface(IID_PPV_ARGS(dxgi_device.put())))) {
-      d3d_device = nullptr;
-      d3d_context = nullptr;
-      return false;
-    }
-    winrt::com_ptr<IInspectable> inspectable_device;
-    if (FAILED(CreateDirect3D11DeviceFromDXGIDevice(
-            dxgi_device.get(), inspectable_device.put()))) {
-      d3d_device = nullptr;
-      d3d_context = nullptr;
-      return false;
-    }
-    try {
-      winrt_device = inspectable_device.as<IDirect3DDevice>();
-    } catch (...) {
-      d3d_device = nullptr;
-      d3d_context = nullptr;
-      return false;
-    }
-    return winrt_device != nullptr;
-  }
-
   static std::optional<GraphicsCaptureItem> CreateCaptureItem(
-      const NativeSource &source) {
+      const NativeSource& source) {
     try {
       auto interop =
           winrt::get_activation_factory<GraphicsCaptureItem,
@@ -193,10 +153,10 @@ struct WindowsCaptureManager::Impl final {
     }
   }
 
-  std::optional<NativeSource> FindSource(const std::string &source_id,
-                                         const std::string &source_kind) {
+  std::optional<NativeSource> FindSource(const std::string& source_id,
+                                         const std::string& source_kind) {
     const auto source = std::find_if(
-        sources.begin(), sources.end(), [&](const NativeSource &candidate) {
+        sources.begin(), sources.end(), [&](const NativeSource& candidate) {
           return candidate.descriptor.id == source_id &&
                  candidate.descriptor.kind == source_kind;
         });
@@ -222,19 +182,19 @@ void WindowsCaptureManager::SetPushCallback(H264PushCallback callback) {
 }
 
 bool WindowsCaptureManager::EnumerateSources(
-    std::vector<CaptureSourceDescriptor> *output) {
+    std::vector<CaptureSourceDescriptor>* output) {
   if (output == nullptr) return false;
   std::vector<NativeSource> sources;
   const uint64_t generation = next_source_generation.fetch_add(1);
   struct MonitorContext {
-    std::vector<NativeSource> *sources;
+    std::vector<NativeSource>* sources;
     uint64_t generation;
     int ordinal = 0;
   } monitor_context{&sources, generation};
   EnumDisplayMonitors(
       nullptr, nullptr,
       [](HMONITOR monitor, HDC, LPRECT rect, LPARAM data) -> BOOL {
-        auto *context = reinterpret_cast<MonitorContext *>(data);
+        auto* context = reinterpret_cast<MonitorContext*>(data);
         NativeSource source;
         const int ordinal = context->ordinal++;
         source.descriptor.id = "display:source-" +
@@ -251,13 +211,13 @@ bool WindowsCaptureManager::EnumerateSources(
       reinterpret_cast<LPARAM>(&monitor_context));
 
   struct WindowContext {
-    std::vector<NativeSource> *sources;
+    std::vector<NativeSource>* sources;
     uint64_t generation;
     int ordinal = 0;
   } window_context{&sources, generation};
   EnumWindows(
       [](HWND window, LPARAM data) -> BOOL {
-        auto *context = reinterpret_cast<WindowContext *>(data);
+        auto* context = reinterpret_cast<WindowContext*>(data);
         if (!IsLiveWindow(window)) return TRUE;
         wchar_t title[256] = {};
         const int length = GetWindowTextW(window, title, ARRAYSIZE(title));
@@ -288,7 +248,7 @@ bool WindowsCaptureManager::EnumerateSources(
     impl_->sources = std::move(sources);
     output->clear();
     output->reserve(impl_->sources.size());
-    for (const auto &source : impl_->sources) {
+    for (const auto& source : impl_->sources) {
       output->push_back(source.descriptor);
     }
   }
@@ -296,8 +256,9 @@ bool WindowsCaptureManager::EnumerateSources(
 }
 
 CaptureStatus WindowsCaptureManager::Start(uint64_t owner,
-                                           const std::string &source_id,
-                                           const std::string &source_kind) {
+                                           const std::string& source_id,
+                                           const std::string& source_kind,
+                                           NativeCodecMode mode) {
   if (owner == 0 || source_id.empty() ||
       (source_kind != "display" && source_kind != "window")) {
     return CaptureStatus::kBackendFailure;
@@ -309,7 +270,10 @@ CaptureStatus WindowsCaptureManager::Start(uint64_t owner,
   if (impl_->push_h264 == nullptr || !impl_->mf_initialized) {
     return CaptureStatus::kBackendFailure;
   }
-  if (!GraphicsCaptureSession::IsSupported() || !impl_->EnsureDevice()) {
+  auto& graphics = mode == NativeCodecMode::Cpu ? impl_->cpu_graphics
+                                                : impl_->hardware_graphics;
+  if (!GraphicsCaptureSession::IsSupported() ||
+      !EnsureCaptureGraphicsDevice(mode, &graphics)) {
     return CaptureStatus::kUnsupported;
   }
   const auto source = impl_->FindSource(source_id, source_kind);
@@ -318,12 +282,12 @@ CaptureStatus WindowsCaptureManager::Start(uint64_t owner,
   if (!item) return CaptureStatus::kBackendFailure;
 
   try {
-    auto encoder = HardwareH264Encoder::Create(impl_->d3d_device.get(),
-                                               impl_->d3d_context.get());
+    auto encoder = NativeH264Encoder::Create(graphics.d3d_device.get(),
+                                             graphics.d3d_context.get(), mode);
     if (encoder == nullptr) return CaptureStatus::kEncoderUnavailable;
     const auto size = item->Size();
     auto frame_pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
-        impl_->winrt_device, DirectXPixelFormat::B8G8R8A8UIntNormalized,
+        graphics.winrt_device, DirectXPixelFormat::B8G8R8A8UIntNormalized,
         kFramePoolBufferCount, size);
     auto session = frame_pool.CreateCaptureSession(*item);
     session.IsCursorCaptureEnabled(false);
@@ -334,7 +298,7 @@ CaptureStatus WindowsCaptureManager::Start(uint64_t owner,
     state->push_h264 = impl_->push_h264;
     state->encoder = std::move(encoder);
     state->started_at = std::chrono::steady_clock::now();
-    state->device = impl_->winrt_device;
+    state->device = graphics.winrt_device;
     state->item = *item;
     state->frame_pool = frame_pool;
     state->session = session;
@@ -421,15 +385,15 @@ CaptureStatus WindowsCaptureManager::ApplyAdaptation(uint64_t owner,
 }
 
 CaptureStatus WindowsCaptureManager::CurrentAdaptation(uint64_t owner,
-                                                       uint32_t *bitrate_kbps,
-                                                       uint32_t *framerate) {
+                                                       uint32_t* bitrate_kbps,
+                                                       uint32_t* framerate) {
   if (owner == 0 || bitrate_kbps == nullptr || framerate == nullptr) {
     return CaptureStatus::kBackendFailure;
   }
   std::lock_guard<std::mutex> lock(impl_->mutex);
   const auto it = impl_->captures.find(owner);
   if (it == impl_->captures.end()) return CaptureStatus::kNotFound;
-  const auto &capture = it->second;
+  const auto& capture = it->second;
   if (capture == nullptr || capture->stopped.load()) {
     return CaptureStatus::kSourceEnded;
   }
@@ -471,12 +435,12 @@ CaptureStatus WindowsCaptureManager::RequestKeyframe(uint64_t owner) {
 }
 
 CaptureStatus WindowsCaptureManager::ReadStats(uint64_t owner,
-                                               CaptureStats *stats) {
+                                               CaptureStats* stats) {
   if (stats == nullptr) return CaptureStatus::kBackendFailure;
   std::lock_guard<std::mutex> lock(impl_->mutex);
   const auto it = impl_->captures.find(owner);
   if (it == impl_->captures.end()) return CaptureStatus::kNotFound;
-  const auto &capture = it->second;
+  const auto& capture = it->second;
   stats->width = capture->width.load();
   stats->height = capture->height.load();
   stats->frames_captured = capture->frames_captured.load();

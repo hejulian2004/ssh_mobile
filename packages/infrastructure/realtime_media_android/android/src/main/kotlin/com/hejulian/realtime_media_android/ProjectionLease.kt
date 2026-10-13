@@ -1,6 +1,13 @@
 package com.hejulian.realtime_media_android
 
 import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.content.Intent
+import android.os.Handler
+import android.os.Looper
+
+internal fun projectionFailureCode(error: Exception): String =
+    if (error is SecurityException) "permission_denied" else "backend_failure"
 
 internal enum class ProjectionLeaseState {
     GRANTED,
@@ -87,6 +94,33 @@ internal class ProjectionLease(
     private val onRevoked: (Long?) -> Unit,
     private val onReleased: () -> Unit,
 ) {
+    companion object {
+        fun create(
+            manager: MediaProjectionManager,
+            resultCode: Int,
+            data: Intent,
+            onRevoked: (ProjectionLease, Long?) -> Unit,
+            onReleased: (ProjectionLease) -> Unit,
+        ): ProjectionLease {
+            val projection = manager.getMediaProjection(resultCode, data)
+                ?: throw SecurityException("Projection grant unavailable")
+            lateinit var lease: ProjectionLease
+            val callback = object : MediaProjection.Callback() {
+                override fun onStop() { lease.revoke() }
+            }
+            lease = ProjectionLease(projection, callback,
+                onRevoked = { onRevoked(lease, it) },
+                onReleased = { onReleased(lease) })
+            try {
+                projection.registerCallback(callback, Handler(Looper.getMainLooper()))
+            } catch (error: Exception) {
+                lease.releaseAfterResources()
+                throw error
+            }
+            return lease
+        }
+    }
+
     private val stateMachine = ProjectionLeaseStateMachine()
 
     val state: ProjectionLeaseState

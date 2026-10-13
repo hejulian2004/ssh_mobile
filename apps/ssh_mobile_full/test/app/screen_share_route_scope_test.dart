@@ -638,6 +638,33 @@ void main() {
     expect(backend.operations, contains('release:1'));
   });
 
+  testWidgets('CPU route freezes the choice into native receive identity', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _routeApp(
+        backend,
+        session,
+        capabilities,
+        arguments: AppScreenShareRouteArguments(
+          session: session,
+          localPeerId: 'peer-local',
+          codecMode: RealtimeMediaCodecMode.cpu,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    session.emitConsent(_incomingConsent());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Accept screen share'));
+    await tester.pumpAndSettle();
+    expect(backend.identities.single.codecMode, RealtimeMediaCodecMode.cpu);
+    expect(find.text('Screen sharing active'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(backend.operations, contains('release:1'));
+  });
+
   testWidgets('incoming route can reject without creating media', (
     tester,
   ) async {
@@ -811,6 +838,7 @@ final class _NativeOwnerBackend extends _RecordingMediaBackend
 
 class _RecordingMediaBackend implements RealtimeMediaBackend {
   final List<String> operations = <String>[];
+  final List<RealtimeMediaEndpointIdentity> identities = [];
   int _nextEndpoint = 0;
   Completer<void>? startGate;
   void Function()? afterAttach;
@@ -823,6 +851,7 @@ class _RecordingMediaBackend implements RealtimeMediaBackend {
     if (gate != null) await gate.future;
     final id = RealtimeMediaEndpointId('${++_nextEndpoint}');
     operations.add('start:${identity.direction.name}');
+    identities.add(identity);
     return id;
   }
 

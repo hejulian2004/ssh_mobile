@@ -14,6 +14,7 @@ import 'navigation/app_route_contributions.dart';
 import 'screen_share_peer_arbitration.dart';
 import 'screen_share_route_scope.dart';
 import 'screen_share_session_lease.dart';
+import 'screen_share_codec_mode_picker.dart';
 
 /// App-owned peer action that turns the LAN secondary action into a route.
 final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
@@ -144,6 +145,7 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
         localPeerId: runtime.lanShareSettingsAdapter.lanDeviceId,
         source: selectedSource.nativeSource,
         sourceOption: selectedSource.option,
+        codecMode: selectedSource.codecMode,
         operationId: operationId,
         mode: AppScreenShareRouteMode.send,
         startOutgoing: true,
@@ -227,13 +229,20 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
     ];
     return showModalBottomSheet<_SelectedScreenShareSource>(
       context: context,
-      builder: (context) => ScreenShareSourcePicker(
+      builder: (context) => AppScreenShareSourcePicker(
         options: [for (final selected in options) selected.option],
-        onSelected: (option) {
+        onSelected: (option, codecMode) {
           final selected = options.firstWhere(
             (candidate) => candidate.option.opaqueId == option.opaqueId,
           );
-          Navigator.pop(context, selected);
+          Navigator.pop(
+            context,
+            _SelectedScreenShareSource(
+              nativeSource: selected.nativeSource,
+              option: selected.option,
+              codecMode: codecMode,
+            ),
+          );
         },
       ),
     );
@@ -309,8 +318,10 @@ final class _SelectedScreenShareSource {
   const _SelectedScreenShareSource({
     required this.nativeSource,
     required this.option,
+    this.codecMode = RealtimeMediaCodecMode.hardware,
   });
 
   final ScreenCaptureSource nativeSource;
   final ScreenShareSourceOption option;
+  final RealtimeMediaCodecMode codecMode;
 }

@@ -1,6 +1,7 @@
 #include "windows_capture_state.h"
 
 #include <d3d11.h>
+#include <dxgi1_2.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Graphics.Capture.h>
@@ -13,6 +14,48 @@
 #include <vector>
 
 namespace realtime_media_windows {
+bool EnsureCaptureGraphicsDevice(NativeCodecMode mode,
+                                 CaptureGraphicsDevice* graphics) {
+  auto& d3d_device = graphics->d3d_device;
+  auto& d3d_context = graphics->d3d_context;
+  auto& winrt_device = graphics->winrt_device;
+  if (winrt_device != nullptr) return true;
+  constexpr D3D_FEATURE_LEVEL kFeatureLevels[] = {
+      D3D_FEATURE_LEVEL_11_1,
+      D3D_FEATURE_LEVEL_11_0,
+  };
+  D3D_FEATURE_LEVEL feature_level = D3D_FEATURE_LEVEL_11_0;
+  const HRESULT device_result = D3D11CreateDevice(
+      nullptr,
+      mode == NativeCodecMode::Cpu ? D3D_DRIVER_TYPE_WARP
+                                   : D3D_DRIVER_TYPE_HARDWARE,
+      nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, kFeatureLevels,
+      ARRAYSIZE(kFeatureLevels), D3D11_SDK_VERSION, d3d_device.put(),
+      &feature_level, d3d_context.put());
+  if (FAILED(device_result) || d3d_device == nullptr) return false;
+
+  winrt::com_ptr<IDXGIDevice> dxgi_device;
+  if (FAILED(d3d_device->QueryInterface(IID_PPV_ARGS(dxgi_device.put())))) {
+    d3d_device = nullptr;
+    d3d_context = nullptr;
+    return false;
+  }
+  winrt::com_ptr<IInspectable> inspectable_device;
+  if (FAILED(CreateDirect3D11DeviceFromDXGIDevice(dxgi_device.get(),
+                                                  inspectable_device.put()))) {
+    d3d_device = nullptr;
+    d3d_context = nullptr;
+    return false;
+  }
+  try {
+    winrt_device = inspectable_device.as<IDirect3DDevice>();
+  } catch (...) {
+    d3d_device = nullptr;
+    d3d_context = nullptr;
+    return false;
+  }
+  return winrt_device != nullptr;
+}
 
 CaptureState::~CaptureState() {
   if (Stop()) return;
@@ -87,11 +130,11 @@ bool CaptureState::Stop() {
   return ReleaseResources();
 }
 
-void InstallCaptureCallbacks(const std::shared_ptr<CaptureState> &state) {
+void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
   const std::weak_ptr<CaptureState> weak_state = state;
   state->frame_arrived_token = state->frame_pool.FrameArrived(
-      [weak_state](Direct3D11CaptureFramePool const &pool,
-                   winrt::Windows::Foundation::IInspectable const &) {
+      [weak_state](Direct3D11CaptureFramePool const& pool,
+                   winrt::Windows::Foundation::IInspectable const&) {
         const auto state = weak_state.lock();
         if (!state) return;
         state->EnterCallback();
@@ -168,7 +211,7 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState> &state) {
               state->stopped.store(true);
               break;
             }
-            for (const auto &access_unit : access_units) {
+            for (const auto& access_unit : access_units) {
               if (state->stopped.load()) break;
               NativeH264FrameMetadata metadata;
               metadata.sequence = state->sequence.fetch_add(1);
@@ -217,8 +260,8 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState> &state) {
         }
       });
   state->closed_token = state->item.Closed(
-      [weak_state](GraphicsCaptureItem const &,
-                   winrt::Windows::Foundation::IInspectable const &) {
+      [weak_state](GraphicsCaptureItem const&,
+                   winrt::Windows::Foundation::IInspectable const&) {
         const auto state = weak_state.lock();
         if (!state) return;
         state->EnterCallback();

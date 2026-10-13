@@ -52,9 +52,11 @@ void _require<T>(SdkResult<T> result) {
 }
 
 Future<void> _probe() async {
-  final sender = Platform.isWindows;
-  final local = sender ? 'probe-windows' : 'probe-android';
-  final remote = sender ? 'probe-android' : 'probe-windows';
+  const reverse = bool.fromEnvironment('SCREEN_PROBE_REVERSE');
+  final windows = Platform.isWindows;
+  final sender = reverse ? !windows : windows;
+  final local = windows ? 'probe-windows' : 'probe-android';
+  final remote = windows ? 'probe-android' : 'probe-windows';
   final root = await Directory.systemTemp.createTemp('screen-device-probe-');
   final runtime = NetworkRuntimeImpl();
   NativeNetworkService? service;
@@ -65,15 +67,15 @@ Future<void> _probe() async {
     service = NativeNetworkService.fromGateway(
       await runtime.openCommandGateway(),
     );
-    final seed = Uint8List.fromList(List.filled(32, sender ? 61 : 62));
-    final e2e = Uint8List.fromList(List.filled(32, sender ? 71 : 72));
+    final seed = Uint8List.fromList(List.filled(32, windows ? 61 : 62));
+    final e2e = Uint8List.fromList(List.filled(32, windows ? 71 : 72));
     _require(
       await service.start(
         SdkRuntimeConfig(
           deviceId: local,
           identityPrivateKey: seed,
           e2ePrivateKey: e2e,
-          listenAddress: sender ? '0.0.0.0:47832' : '0.0.0.0:47831',
+          listenAddress: windows ? '0.0.0.0:47832' : '0.0.0.0:47831',
           receiveDirectory: root.path,
         ),
       ),
@@ -84,15 +86,17 @@ Future<void> _probe() async {
       await service.upsertPeer(
         SdkPeerConfig(
           peerId: remote,
-          endpointAddress: sender ? '127.0.0.1:47831' : '',
+          endpointAddress: sender
+              ? (windows ? '127.0.0.1:47831' : '10.0.2.2:47832')
+              : '',
           identityPublicKey: await public(
             await Ed25519().newKeyPairFromSeed(
-              Uint8List.fromList(List.filled(32, sender ? 62 : 61)),
+              Uint8List.fromList(List.filled(32, windows ? 62 : 61)),
             ),
           ),
           e2ePublicKey: await public(
             await X25519().newKeyPairFromSeed(
-              Uint8List.fromList(List.filled(32, sender ? 72 : 71)),
+              Uint8List.fromList(List.filled(32, windows ? 72 : 71)),
             ),
           ),
         ),
@@ -172,7 +176,7 @@ Future<void> _probe() async {
     final endpointBackend = _ProbeEndpointBackend(
       AppRealtimeMediaBackend(networkRuntime: runtime),
     );
-    final RealtimeMediaBackend mediaBackend = sender
+    final RealtimeMediaBackend mediaBackend = windows
         ? WindowsRealtimeMediaBackend(
             endpointBackend: endpointBackend,
             platform: const MethodChannelWindowsRealtimeMediaPlatform(),
@@ -189,6 +193,9 @@ Future<void> _probe() async {
         : null;
     coordinator = AppScreenShareMediaCoordinator(
       session: session,
+      codecMode: const bool.fromEnvironment('SCREEN_PROBE_CPU')
+          ? RealtimeMediaCodecMode.cpu
+          : RealtimeMediaCodecMode.hardware,
       resources: AppRealtimeMediaResources(
         backend: mediaBackend,
         sessionFactory: AppRealtimeMediaSessionFactory(backend: mediaBackend),
@@ -212,7 +219,11 @@ Future<void> _probe() async {
       _surface.value = coordinator.remoteSurface;
     }
     _report('media_started');
-    for (var attempt = 0; attempt < 30; attempt++) {
+    for (
+      var attempt = 0;
+      attempt < (reverse && !sender ? 120 : 30);
+      attempt++
+    ) {
       await Future<void>.delayed(const Duration(seconds: 1));
       final stats = await mediaBackend.readStats(
         endpointId: endpointBackend.endpointId!,
@@ -234,6 +245,10 @@ Future<void> _probe() async {
     _report('FAIL no_video_frames');
   } on RealtimeMediaException catch (error) {
     _report('FAIL ${error.code.name}');
+    if (error.code == RealtimeMediaErrorCode.decoderFailed &&
+        error.message.startsWith('Windows H.264 decoder failed at ')) {
+      _report(error.message);
+    }
   } on TimeoutException {
     _report('FAIL timeout');
   } catch (_) {

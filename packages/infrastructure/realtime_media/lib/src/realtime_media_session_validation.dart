@@ -23,6 +23,7 @@ extension RealtimeMediaSessionValidation on RealtimeMediaSessionController {
         peerId: peerId,
         generation: generation,
         direction: direction,
+        codecMode: codecMode,
       );
 
   void _ensureSessionCanStart() {

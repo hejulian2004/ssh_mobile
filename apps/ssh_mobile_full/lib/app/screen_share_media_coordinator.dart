@@ -3,73 +3,17 @@ import 'dart:async';
 import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'package:realtime_media/realtime_media.dart';
-import 'package:realtime_media_android/realtime_media_android.dart';
 import 'package:realtime_media_windows/realtime_media_windows.dart';
 
 import 'realtime_media_feature_adapters.dart';
 import 'screen_share_feature_adapters.dart';
 
-typedef AppScreenShareOperationGuard = bool Function();
-
-/// Result of the App Shell's capture-preparation lifecycle.
-enum AppScreenSharePreparationResult {
-  /// The caller owns the prepared platform lease until attach or abandon.
-  acquired,
-
-  /// The platform owner invalidated and cleaned the preparation already.
-  invalidated,
-}
-
-/// App-owned platform capability boundary for one screen-share route.
-///
-/// It carries only source metadata and permission/lifecycle results. Platform
-/// adapters retain capture, codec, surface and native-owner ownership.
-abstract interface class AppScreenSharePlatformCapabilities {
-  factory AppScreenSharePlatformCapabilities({
-    required Future<AppScreenSharePreparationResult> Function(
-      AppScreenShareOperationGuard guard,
-    )
-    prepareCapture,
-    required Future<void> Function() abandonCapturePreparation,
-    required Future<List<ScreenCaptureSource>> Function() listCaptureSources,
-  }) = _AppScreenSharePlatformCapabilities;
-
-  Future<AppScreenSharePreparationResult> prepareCapture(
-    AppScreenShareOperationGuard guard,
-  );
-
-  Future<void> abandonCapturePreparation();
-
-  Future<List<ScreenCaptureSource>> listCaptureSources();
-}
-
-final class _AppScreenSharePlatformCapabilities
-    implements AppScreenSharePlatformCapabilities {
-  const _AppScreenSharePlatformCapabilities({
-    required this._prepareCapture,
-    required this._abandonCapturePreparation,
-    required this._listCaptureSources,
-  });
-
-  final Future<AppScreenSharePreparationResult> Function(
-    AppScreenShareOperationGuard guard,
-  )
-  _prepareCapture;
-  final Future<void> Function() _abandonCapturePreparation;
-  final Future<List<ScreenCaptureSource>> Function() _listCaptureSources;
-
-  @override
-  Future<AppScreenSharePreparationResult> prepareCapture(
-    AppScreenShareOperationGuard guard,
-  ) => _prepareCapture(guard);
-
-  @override
-  Future<void> abandonCapturePreparation() => _abandonCapturePreparation();
-
-  @override
-  Future<List<ScreenCaptureSource>> listCaptureSources() =>
-      _listCaptureSources();
-}
+export 'realtime_media_feature_adapters.dart'
+    show
+        AppScreenShareOperationGuard,
+        AppScreenSharePreparationResult,
+        AppScreenSharePlatformCapabilities,
+        appScreenSharePlatformCapabilitiesFor;
 
 /// Route-scoped owner that connects Feature consent to opaque media leases.
 final class AppScreenShareMediaCoordinator {
@@ -78,6 +22,7 @@ final class AppScreenShareMediaCoordinator {
     required this.resources,
     required this.capabilities,
     this.source,
+    this.codecMode = RealtimeMediaCodecMode.hardware,
   }) {
     _port = AppScreenShareMediaPort(
       logger: resources.logger,
@@ -89,6 +34,7 @@ final class AppScreenShareMediaCoordinator {
   }
 
   final RealtimeSession session;
+  final RealtimeMediaCodecMode codecMode;
   final AppRealtimeMediaResources resources;
   final AppScreenSharePlatformCapabilities capabilities;
   final ScreenCaptureSource? source;
@@ -121,7 +67,10 @@ final class AppScreenShareMediaCoordinator {
         'Native Realtime generation is not available.',
       );
     }
-    _mediaSession ??= resources.sessionFactory.create(session);
+    _mediaSession ??= resources.sessionFactory.create(
+      session,
+      codecMode: codecMode,
+    );
     if (capture && source == null) {
       throw const RealtimeMediaException(
         RealtimeMediaErrorCode.invalidArgument,
@@ -464,37 +413,4 @@ final class AppScreenShareMediaCoordinator {
       );
     }
   }
-}
-
-AppScreenSharePlatformCapabilities appScreenSharePlatformCapabilitiesFor(
-  RealtimeMediaBackend backend,
-) {
-  if (backend is WindowsRealtimeMediaBackend) {
-    final windows = backend;
-    return AppScreenSharePlatformCapabilities(
-      prepareCapture: (_) async => AppScreenSharePreparationResult.acquired,
-      abandonCapturePreparation: () async {},
-      listCaptureSources: windows.listCaptureSources,
-    );
-  }
-  if (backend is AndroidRealtimeMediaBackend) {
-    final android = backend;
-    return AppScreenSharePlatformCapabilities(
-      prepareCapture: (guard) async {
-        final result = await android.requestProjection(isCurrent: guard);
-        return switch (result) {
-          AndroidProjectionPreparationResult.acquired =>
-            AppScreenSharePreparationResult.acquired,
-          AndroidProjectionPreparationResult.invalidated =>
-            AppScreenSharePreparationResult.invalidated,
-        };
-      },
-      abandonCapturePreparation: android.abandonProjectionGrant,
-      listCaptureSources: android.listCaptureSources,
-    );
-  }
-  throw const RealtimeMediaException(
-    RealtimeMediaErrorCode.driverUnavailable,
-    'Screen sharing is unavailable on this platform.',
-  );
 }

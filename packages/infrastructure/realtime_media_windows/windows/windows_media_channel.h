@@ -48,16 +48,16 @@ static_assert(offsetof(NativeMediaStats, rtt_ms) == 72);
 static_assert(offsetof(NativeMediaStats, queue_depth) == 80);
 static_assert(offsetof(NativeMediaStats, queue_capacity) == 84);
 
-using OwnerCloseFunction = int(__cdecl *)(uint64_t);
-using OwnerAbiVersionFunction = uint32_t(__cdecl *)();
-using OwnerStartFunction = int(__cdecl *)(uint64_t);
-using OwnerStopFunction = int(__cdecl *)(uint64_t);
-using OwnerValidateFunction = int(__cdecl *)(uint64_t);
-using OwnerRecoveryFunction = int(__cdecl *)(uint64_t);
-using OwnerStatsFunction = int(__cdecl *)(uint64_t, NativeMediaStats*);
-using OwnerAdaptationFunction = int(__cdecl *)(uint64_t, uint32_t, uint32_t,
-                                                uint32_t, uint32_t, uint32_t);
-using OwnerRendererFunction = int(__cdecl *)(uint64_t);
+using OwnerCloseFunction = int(__cdecl*)(uint64_t);
+using OwnerAbiVersionFunction = uint32_t(__cdecl*)();
+using OwnerStartFunction = int(__cdecl*)(uint64_t);
+using OwnerStopFunction = int(__cdecl*)(uint64_t);
+using OwnerValidateFunction = int(__cdecl*)(uint64_t);
+using OwnerRecoveryFunction = int(__cdecl*)(uint64_t);
+using OwnerStatsFunction = int(__cdecl*)(uint64_t, NativeMediaStats*);
+using OwnerAdaptationFunction = int(__cdecl*)(uint64_t, uint32_t, uint32_t,
+                                              uint32_t, uint32_t, uint32_t);
+using OwnerRendererFunction = int(__cdecl*)(uint64_t);
 using OwnerPushFunction = H264PushCallback;
 using OwnerPullFunction = H264PullCallback;
 using BufferFreeFunction = H264BufferFreeCallback;
@@ -107,20 +107,28 @@ struct NativeMediaApi {
 };
 
 std::optional<std::string> StringArgument(
-    const flutter::EncodableMap& arguments,
-    const char* key);
+    const flutter::EncodableMap& arguments, const char* key);
 std::optional<uint64_t> OwnerIdArgument(const flutter::EncodableMap& arguments);
-void ReplyError(
-    const std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>&
-        result,
-    const char* code,
-    const char* message);
+std::optional<NativeCodecMode> CodecModeArgument(
+    const flutter::EncodableMap& arguments);
+void ReplyError(const std::unique_ptr<
+                    flutter::MethodResult<flutter::EncodableValue>>& result,
+                const char* code, const char* message);
 const char* NativeStatusCode(int status);
 const char* CaptureStatusCode(CaptureStatus status);
 const char* DecoderStatusCode(DecoderStatus status);
 flutter::EncodableMap StatsMap(const CaptureStats& stats,
                                const DecoderStats* decoder = nullptr,
                                const NativeMediaStats* native = nullptr);
+void AttachMediaSurface(
+    const flutter::EncodableMap& arguments,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result,
+    NativeMediaApi& api, WindowsDecoderManager& decoder);
+void ReplyMediaStats(
+    const flutter::EncodableMap& arguments,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result,
+    NativeMediaApi& api, WindowsCaptureManager& capture,
+    WindowsDecoderManager& decoder);
 
 }  // namespace realtime_media_windows
 

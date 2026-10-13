@@ -5,6 +5,9 @@ import 'screen_capture_source.dart';
 /// Direction of one opaque native media endpoint.
 enum RealtimeMediaDirection { send, receive }
 
+/// Local native codec choice, fixed for the lifetime of an endpoint.
+enum RealtimeMediaCodecMode { hardware, cpu }
+
 /// Stable Dart-side value for a native endpoint lease, never a native address.
 final class RealtimeMediaEndpointId {
   RealtimeMediaEndpointId(String value) : value = _validateEndpointId(value);
@@ -26,6 +29,7 @@ final class RealtimeMediaEndpointIdentity {
     required String peerId,
     required this.generation,
     required this.direction,
+    this.codecMode = RealtimeMediaCodecMode.hardware,
   }) : realtimeId = _validateIdentity(realtimeId, 'realtime ID'),
        peerId = _validateIdentity(peerId, 'peer ID') {
     if (generation <= 0) {
@@ -37,12 +41,14 @@ final class RealtimeMediaEndpointIdentity {
   final String peerId;
   final int generation;
   final RealtimeMediaDirection direction;
+  final RealtimeMediaCodecMode codecMode;
 
   bool matches(RealtimeMediaEndpointIdentity other) =>
       realtimeId == other.realtimeId &&
       peerId == other.peerId &&
       generation == other.generation &&
-      direction == other.direction;
+      direction == other.direction &&
+      codecMode == other.codecMode;
 }
 
 /// Borrowed endpoint lease owned by a [RealtimeMediaSessionController].
