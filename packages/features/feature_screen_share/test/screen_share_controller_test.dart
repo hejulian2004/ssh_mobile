@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:feature_screen_share/feature_screen_share.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_sdk/network_sdk.dart';
 
@@ -28,6 +29,190 @@ void main() {
   });
 
   tearDown(() => controller.dispose());
+
+  for (final sender in [true, false]) {
+    test(
+      'fatal ${sender ? 'encoder' : 'decoder'} failure stops and cancels once',
+      () {
+        fakeAsync((clock) {
+          final timed = _timedController(
+            consent,
+            media,
+            () => issued.add(clock.elapsed),
+          );
+          unawaited(timed.setMediaReady(true));
+          if (sender) {
+            unawaited(timed.startOutgoing(operationId: 'operation-a'));
+            clock.flushMicrotasks();
+            consent.emit(
+              _consent(
+                issued: issued,
+                expires: issued.add(const Duration(minutes: 2)),
+                decision: RealtimeConsentDecision.accept,
+                senderPeerId: 'remote-peer',
+                actionRevision: 1,
+              ),
+            );
+          } else {
+            timed.seedIncomingRequest(
+              _consent(
+                issued: issued,
+                expires: issued.add(const Duration(minutes: 2)),
+                decision: RealtimeConsentDecision.request,
+                senderPeerId: 'remote-peer',
+                actionRevision: 1,
+              ),
+            );
+            unawaited(timed.acceptIncoming());
+          }
+          clock.flushMicrotasks();
+          expect(timed.state, ScreenShareOperationState.active);
+          clock.elapse(const Duration(minutes: 3));
+          final failure = ScreenShareMediaEvent(
+            operationId: 'operation-a',
+            realtimeId: realtimeId,
+            generation: 7,
+            kind: sender
+                ? ScreenShareMediaEventKind.encoderFailed
+                : ScreenShareMediaEventKind.decoderFailed,
+          );
+          media._controller.add(failure);
+          clock.flushMicrotasks();
+          expect(timed.state, ScreenShareOperationState.failed);
+          expect(media.stops, ['operation-a']);
+          expect(consent.sent.last.decision, RealtimeConsentDecision.cancel);
+          expect(consent.sent.last.isFresh(issued.add(clock.elapsed)), isTrue);
+          expect(consent.sent.last.actionRevision, 2);
+          final sent = consent.sent.length;
+          media._controller.add(failure);
+          clock.flushMicrotasks();
+          expect(consent.sent, hasLength(sent));
+          expect(media.stops, ['operation-a']);
+          timed.dispose();
+        });
+      },
+    );
+  }
+
+  for (final sender in [true, false]) {
+    test(
+      'accepted ${sender ? 'sender' : 'receiver'} survives request expiry and can stop',
+      () {
+        fakeAsync((clock) {
+          final timed = _timedController(
+            consent,
+            media,
+            () => issued.add(clock.elapsed),
+          );
+          unawaited(timed.setMediaReady(true));
+          clock.flushMicrotasks();
+          if (sender) {
+            unawaited(timed.startOutgoing(operationId: 'operation-a'));
+            clock.flushMicrotasks();
+            consent.emit(
+              _consent(
+                issued: issued,
+                expires: issued.add(const Duration(minutes: 2)),
+                decision: RealtimeConsentDecision.accept,
+                senderPeerId: 'remote-peer',
+                actionRevision: 1,
+              ),
+            );
+          } else {
+            timed.seedIncomingRequest(
+              _consent(
+                issued: issued,
+                expires: issued.add(const Duration(minutes: 2)),
+                decision: RealtimeConsentDecision.request,
+                senderPeerId: 'remote-peer',
+                actionRevision: 1,
+              ),
+            );
+            unawaited(timed.acceptIncoming());
+          }
+          clock.flushMicrotasks();
+          expect(timed.state, ScreenShareOperationState.active);
+          clock.elapse(const Duration(minutes: 3));
+          clock.flushMicrotasks();
+          expect(timed.state, ScreenShareOperationState.active);
+          expect(media.stops, isEmpty);
+          unawaited(timed.cancel());
+          clock.flushMicrotasks();
+          expect(timed.state, ScreenShareOperationState.cancelled);
+          expect(media.stops, ['operation-a']);
+          final stop = consent.sent.last;
+          expect(stop.decision, RealtimeConsentDecision.cancel);
+          expect(stop.isFresh(issued.add(clock.elapsed)), isTrue);
+          expect(stop.actionRevision, 2);
+          timed.dispose();
+          clock.flushMicrotasks();
+        });
+      },
+    );
+  }
+
+  test('duplicate ready notifications do not invalidate capture in flight', () {
+    fakeAsync((clock) {
+      final timed = _timedController(
+        consent,
+        media,
+        () => issued.add(clock.elapsed),
+      );
+      media.captureGate = Completer<void>();
+      unawaited(timed.setMediaReady(true));
+      unawaited(timed.startOutgoing(operationId: 'operation-a'));
+      clock.flushMicrotasks();
+      consent.emit(
+        _consent(
+          issued: issued,
+          expires: issued.add(const Duration(minutes: 2)),
+          decision: RealtimeConsentDecision.accept,
+          senderPeerId: 'remote-peer',
+          actionRevision: 1,
+        ),
+      );
+      clock.flushMicrotasks();
+      unawaited(timed.setMediaReady(true));
+      unawaited(timed.setMediaReady(true));
+      clock.flushMicrotasks();
+      media.captureGate!.complete();
+      clock.flushMicrotasks();
+      expect(timed.state, ScreenShareOperationState.active);
+      expect(media.captureStarts, ['operation-a']);
+      expect(media.stops, isEmpty);
+      timed.dispose();
+      clock.flushMicrotasks();
+    });
+  });
+
+  test('accepted consent waiting for readiness does not expire', () {
+    fakeAsync((clock) {
+      final timed = _timedController(
+        consent,
+        media,
+        () => issued.add(clock.elapsed),
+      );
+      unawaited(timed.startOutgoing(operationId: 'operation-a'));
+      clock.flushMicrotasks();
+      consent.emit(
+        _consent(
+          issued: issued,
+          expires: issued.add(const Duration(minutes: 2)),
+          decision: RealtimeConsentDecision.accept,
+          senderPeerId: 'remote-peer',
+          actionRevision: 1,
+        ),
+      );
+      clock.flushMicrotasks();
+      clock.elapse(const Duration(minutes: 3));
+      expect(timed.state, ScreenShareOperationState.accepted);
+      unawaited(timed.setMediaReady(true));
+      clock.flushMicrotasks();
+      expect(timed.state, ScreenShareOperationState.active);
+      timed.dispose();
+      clock.flushMicrotasks();
+    });
+  });
 
   test('public intent comparator preserves deterministic UTF-8 ordering', () {
     expect(
@@ -494,6 +679,21 @@ void main() {
     );
   }
 }
+
+ScreenShareController _timedController(
+  _FakeConsentPort consent,
+  _FakeMediaPort media,
+  DateTime Function() now,
+) => ScreenShareController(
+  consentPort: consent,
+  mediaPort: media,
+  realtimeId: '00112233445566778899aabbccddeeff',
+  sharedSessionInstanceId: '00112233445566778899aabbccddeeff',
+  generation: 7,
+  localPeerId: 'local-peer',
+  remotePeerId: 'remote-peer',
+  now: now,
+);
 
 RealtimeConsent _consent({
   required DateTime issued,

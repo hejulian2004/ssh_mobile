@@ -18,6 +18,44 @@ struct Pair {
     sb: Arc<RuntimeState>,
 }
 
+#[test]
+fn active_realtime_retains_its_signaling_path_until_session_release() {
+    let pair = Pair::new();
+    let realtime_id = "00112233445566778899aabbccddeeff";
+    pair.a.handle().block_on(async {
+        super::super::start_session(
+            Arc::clone(&pair.sa),
+            network_protocol::StartRealtimeSessionCommand {
+                realtime_id: realtime_id.into(),
+                peer_id: "unit-b".into(),
+                screen_video: true,
+            },
+        )
+        .await
+        .unwrap();
+        let path_owner = pair.sa.peer_path_manager("unit-b").await.unwrap();
+        let idle = std::time::Instant::now() + Duration::from_secs(120);
+        let retired = path_owner.lock().unwrap().retire_ephemeral(idle);
+        assert_eq!(
+            retired, 0,
+            "video session still owns this signaling carrier"
+        );
+        super::super::stop_session(
+            &pair.sa,
+            network_protocol::StopRealtimeSessionCommand {
+                realtime_id: realtime_id.into(),
+            },
+        )
+        .await
+        .unwrap();
+        let retired = path_owner.lock().unwrap().retire_ephemeral(idle);
+        assert_eq!(
+            retired, 1,
+            "released video session must not retain an idle carrier"
+        );
+    });
+}
+
 impl Pair {
     fn new() -> Self {
         let a = NetworkRuntime::new().unwrap();

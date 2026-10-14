@@ -15,6 +15,7 @@ dependencies:
     path: ../../infrastructure/network_sdk
 
 dev_dependencies:
+  fake_async: ^1.3.3
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0

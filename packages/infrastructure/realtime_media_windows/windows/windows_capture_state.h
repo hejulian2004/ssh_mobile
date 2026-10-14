@@ -3,6 +3,7 @@
 
 #include <winrt/Windows.Graphics.Capture.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
+#include <winrt/Windows.System.Threading.h>
 
 #include <atomic>
 #include <chrono>
@@ -51,11 +52,13 @@ struct CaptureState final {
   std::atomic<uint32_t> target_framerate{30};
   std::atomic<uint64_t> next_encode_timestamp{0};
   std::atomic<uint64_t> next_recovery_timestamp{0};
+  uint64_t last_encode_timestamp = 0;  // Guarded by encoder_mutex.
 
   IDirect3DDevice device{nullptr};
   GraphicsCaptureItem item{nullptr};
   Direct3D11CaptureFramePool frame_pool{nullptr};
   GraphicsCaptureSession session{nullptr};
+  winrt::Windows::System::Threading::ThreadPoolTimer idle_frame_timer{nullptr};
   winrt::event_token frame_arrived_token{};
   winrt::event_token closed_token{};
 

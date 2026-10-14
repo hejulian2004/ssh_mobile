@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:ui' show Size;
 
+import 'package:flutter/foundation.dart';
 import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'package:realtime_media/realtime_media.dart';
@@ -7,6 +9,7 @@ import 'package:realtime_media_windows/realtime_media_windows.dart';
 
 import 'realtime_media_feature_adapters.dart';
 import 'screen_share_feature_adapters.dart';
+import 'screen_share_media_monitor.dart';
 
 export 'realtime_media_feature_adapters.dart'
     show
@@ -46,6 +49,8 @@ final class AppScreenShareMediaCoordinator {
   RemoteVideoSurface? _remoteSurface;
   String? _operationId;
   Future<void>? _activeMediaOperation;
+  AppScreenShareMediaMonitor? _mediaMonitor;
+  final ValueNotifier<Size?> _remoteVideoSize = ValueNotifier(null);
   bool _prepared = false;
   bool _disposed = false;
   int _operationEpoch = 0;
@@ -54,6 +59,7 @@ final class AppScreenShareMediaCoordinator {
 
   /// Opaque platform presentation capability for the App-owned route.
   RemoteVideoSurface? get remoteSurface => _remoteSurface;
+  ValueListenable<Size?> get remoteVideoSize => _remoteVideoSize;
 
   /// Verifies the local native generation and source metadata.
   /// Permission, source enumeration, endpoint creation, and capture remain
@@ -84,6 +90,7 @@ final class AppScreenShareMediaCoordinator {
     if (_disposed) return;
     ++_operationEpoch;
     _disposed = true;
+    _mediaMonitor?.dispose();
     final activeOperation = _activeMediaOperation;
     if (activeOperation != null) {
       try {
@@ -105,6 +112,7 @@ final class AppScreenShareMediaCoordinator {
       // retryable lease internally; no stale operation is allowed to proceed.
     }
     await _events.close();
+    _remoteVideoSize.dispose();
   }
 
   Future<void> _startCaptureTracked({
@@ -243,6 +251,7 @@ final class AppScreenShareMediaCoordinator {
         attachCompleted = true;
         ownsPreparation = false;
         _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
+        _monitor(endpoint, epoch, operationId, realtimeId, generation);
       } catch (_) {
         await _releaseCurrentEndpoint();
         rethrow;
@@ -292,6 +301,7 @@ final class AppScreenShareMediaCoordinator {
     try {
       _remoteSurface = await mediaSession.attachRemoteVideoSurface(endpoint);
       _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
+      _monitor(endpoint, epoch, operationId, realtimeId, generation);
     } catch (_) {
       await _releaseCurrentEndpoint();
       rethrow;
@@ -315,6 +325,7 @@ final class AppScreenShareMediaCoordinator {
       );
     }
     ++_operationEpoch;
+    _mediaMonitor?.dispose();
     final activeOperation = _activeMediaOperation;
     if (activeOperation != null) {
       try {
@@ -329,12 +340,15 @@ final class AppScreenShareMediaCoordinator {
   }
 
   Future<void> _releaseCurrentEndpoint() async {
+    _mediaMonitor?.dispose();
+    _mediaMonitor = null;
     final endpoint = _endpoint;
     if (endpoint == null) return;
     try {
       await _mediaSession!.release(endpoint);
       _endpoint = null;
       _remoteSurface = null;
+      _remoteVideoSize.value = null;
     } catch (_) {
       // Keep the endpoint reference so the controller can retry the native
       // cleanup. RealtimeMediaSessionController retains retryable leases.
@@ -352,6 +366,49 @@ final class AppScreenShareMediaCoordinator {
       // Keep the session controller's retryable lease; the stale operation
       // must still fail closed and never attach a later callback.
     }
+  }
+
+  void _monitor(
+    RealtimeMediaEndpoint endpoint,
+    int epoch,
+    String operationId,
+    String realtimeId,
+    int generation,
+  ) {
+    _mediaMonitor?.dispose();
+    _mediaMonitor = AppScreenShareMediaMonitor(
+      logger: resources.logger,
+      direction: endpoint.identity.direction,
+      onStats: (stats) {
+        if (endpoint.identity.direction == RealtimeMediaDirection.receive &&
+            stats.width > 0 &&
+            stats.height > 0) {
+          _remoteVideoSize.value = Size(
+            stats.width.toDouble(),
+            stats.height.toDouble(),
+          );
+        }
+      },
+      isCurrent: () =>
+          identical(_endpoint, endpoint) &&
+          _isCurrentOperation(epoch, operationId, realtimeId, generation),
+      readStats: () => resources.backend.readStats(
+        endpointId: endpoint.id,
+        identity: endpoint.identity,
+      ),
+      onFailure: (code) => _events.add(
+        ScreenShareMediaEvent(
+          operationId: operationId,
+          realtimeId: realtimeId,
+          generation: generation,
+          kind: code == RealtimeMediaErrorCode.captureSourceEnded
+              ? ScreenShareMediaEventKind.sourceEnded
+              : endpoint.identity.direction == RealtimeMediaDirection.send
+              ? ScreenShareMediaEventKind.encoderFailed
+              : ScreenShareMediaEventKind.decoderFailed,
+        ),
+      ),
+    );
   }
 
   bool _isCurrentOperation(

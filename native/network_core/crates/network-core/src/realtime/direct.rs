@@ -43,11 +43,23 @@ pub(super) async fn try_send_direct(
     state: &RuntimeState,
     signal: &OutboundSignal,
 ) -> Result<bool, network_protocol::NetworkError> {
-    let Ok(lease) = state
-        .acquire_path_lease(&signal.peer_id, CAPABILITY_RELIABLE_MESSAGE)
+    let retained = state
+        .realtime
+        .lock()
         .await
-    else {
-        return Ok(false);
+        .sessions
+        .get(&signal.realtime_id)
+        .and_then(|session| session.direct_signaling_path.clone());
+    let lease = if let Some(retained) = retained {
+        retained
+    } else {
+        let Ok(lease) = state
+            .acquire_path_lease(&signal.peer_id, CAPABILITY_RELIABLE_MESSAGE)
+            .await
+        else {
+            return Ok(false);
+        };
+        Arc::new(lease)
     };
     if lease.profile().topology() != RouteTopology::Direct {
         return Ok(false);
@@ -58,6 +70,15 @@ pub(super) async fn try_send_direct(
             .current_session_id(&signal.peer_id)
             .await
             .ok_or_else(|| boxed_message("direct signaling session unavailable"))?;
+        if !lease.is_active()
+            || !state
+                .route_is_authorized(&signal.peer_id, RouteTopology::Direct)
+                .await
+        {
+            return Err(boxed_message(
+                "direct signaling carrier is no longer authorized",
+            ));
+        }
         if state
             .realtime
             .lock()
@@ -68,6 +89,21 @@ pub(super) async fn try_send_direct(
             .is_some_and(|bound| bound != session)
         {
             return Err(boxed_message("direct signaling generation changed"));
+        }
+        {
+            let mut manager = state.realtime.lock().await;
+            if let Some(owner) = manager.sessions.get_mut(&signal.realtime_id) {
+                if owner.peer_id != signal.peer_id
+                    || owner.shared_session_instance_id != signal.shared_session_instance_id
+                {
+                    return Err(boxed_message("direct signaling owner mismatch"));
+                }
+                if owner.connection_session_id == Some(session)
+                    && owner.direct_signaling_path.is_none()
+                {
+                    owner.direct_signaling_path = Some(Arc::clone(&lease));
+                }
+            }
         }
         let local_id = state
             .lifecycle

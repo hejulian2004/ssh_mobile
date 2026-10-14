@@ -1,4 +1,4 @@
-最新更新时间：2026-10-13
+最新更新时间：2026-10-14
 
 # ADR-036：直连屏幕共享信令
 
@@ -22,6 +22,15 @@ closed. No signal is retried or replayed across a replacement connection.
 When no Direct carrier is available, existing Relay Control signaling remains
 available. Direct signaling never uses Relay Data, Delivery, Transfer, or Dart
 media bytes. It does not create another socket owner or Realtime runtime.
+
+The native Realtime generation retains its Direct signaling PathLease until
+terminal session removal. Sends borrow that same carrier; they cannot migrate
+to a replacement connection. This prevents an active video operation from being
+retired as an unleased idle path. Normal session stop releases the reservation;
+hard close, authorization revoke, and connection loss still invalidate it.
+Both QUIC endpoint roles use transport keep-alives while application metadata
+is quiet, because video uses a separate WebRTC socket. The finite transport idle
+timeout and the peer owner's retirement of unused paths remain in force.
 
 The App prepares the native carrier through LAN's existing identity-pinned
 capability and native peer-policy owner before starting Realtime. Discovery

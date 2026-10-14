@@ -1,4 +1,4 @@
-Last updated: 2026-10-13
+Last updated: 2026-10-14
 
 # realtime_media_android
 
@@ -42,6 +42,20 @@ last validated CSD across `flush()`, replays it before a recovery IDR, and
 drops deltas before CSD/recovery readiness. At most one pulled frame is held
 under MediaCodec input backpressure; a pending frame blocks another native
 pull, and reset clears it so pre-reset deltas are never replayed.
+
+`DecoderOutputPump` polls asynchronous codec output independently of new input,
+including while a static screen supplies only one access unit. Format/buffer
+notifications do not hide ready output, each drain is bounded, and a stopped
+owner cannot submit or release another output frame. Its independent JVM tests
+cover delayed single-frame output and cancellation.
+
+The module-internal encoder, decoder, and teardown extensions borrow the same
+`AndroidMediaOwner` lock, worker flags, codec/surface references, and native
+token; they do not create another resource owner. MediaCodec/JNI/thread teardown
+wrappers require device acceptance rather than JVM line-coverage claims. The
+pure pump, H.264 gates, pending-frame buffer, and projection lease are covered
+by host unit tests; platform wrapper extraction does not imply hardware/device
+coverage.
 
 ## Projection lease and teardown
 
@@ -99,3 +113,11 @@ flutter test --no-pub
 
 From the application Android project, use the repository's Gradle wrapper for
 the Android compile and instrumentation checks when an SDK/device is present.
+
+`test/android/DecoderSingleFrameProbe.java` is a device diagnostic for the
+Android software H.264 decoder. Compile it against `android.jar`, package with
+D8, and run through `app_process` with the fixed Annex-B fixture exported by
+the Windows encoder probe. It compares sparse input, repeated synthetic input,
+and end-of-stream flushing using bounded byte-buffer output polling. This
+checks codec buffering, not Flutter surface rendering; end-of-stream is only
+a diagnostic control and is never injected into a live sharing session.

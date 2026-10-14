@@ -1,5 +1,4 @@
 #include "windows_h264_encoder.h"
-#include "windows_video_processor.h"
 
 #include <codecapi.h>
 #include <d3d11.h>
@@ -13,6 +12,8 @@
 #include <algorithm>
 #include <cstring>
 #include <utility>
+
+#include "windows_video_processor.h"
 
 namespace realtime_media_windows {
 namespace {
@@ -68,6 +69,7 @@ struct NativeH264Encoder::Impl final {
   uint32_t encoder_width = 0;
   uint32_t encoder_height = 0;
   DWORD output_buffer_size = 0;
+  std::vector<uint8_t> snapshot_nv12;
   bool configured = false;
   bool failed = false;
 
@@ -182,6 +184,8 @@ struct NativeH264Encoder::Impl final {
       if (FAILED(contiguous->Lock(&data, &max_length, &current_length)))
         return false;
       EncodedAccessUnit access_unit;
+      access_unit.width = encoder_width;
+      access_unit.height = encoder_height;
       const bool converted =
           ToAnnexB(data, current_length, &access_unit.payload);
       UINT32 clean_point = 0;
@@ -191,6 +195,53 @@ struct NativeH264Encoder::Impl final {
       if (!converted) return false;
       output->push_back(std::move(access_unit));
     }
+  }
+  bool Submit(uint64_t timestamp_90khz,
+              std::vector<EncodedAccessUnit>* output) {
+    if (!Drain(output)) {
+      failed = true;
+      return false;
+    }
+    if (events != nullptr && input_ready == 0) return true;
+    winrt::com_ptr<IMFMediaBuffer> buffer;
+    winrt::com_ptr<IMFSample> sample;
+    if (FAILED(MFCreateMemoryBuffer(static_cast<DWORD>(snapshot_nv12.size()),
+                                    buffer.put())) ||
+        FAILED(MFCreateSample(sample.put()))) {
+      failed = true;
+      return false;
+    }
+    BYTE* destination = nullptr;
+    DWORD max_length = 0;
+    DWORD current_length = 0;
+    if (FAILED(buffer->Lock(&destination, &max_length, &current_length)) ||
+        max_length < snapshot_nv12.size()) {
+      if (destination != nullptr) buffer->Unlock();
+      failed = true;
+      return false;
+    }
+    std::memcpy(destination, snapshot_nv12.data(), snapshot_nv12.size());
+    buffer->Unlock();
+    buffer->SetCurrentLength(static_cast<DWORD>(snapshot_nv12.size()));
+    if (FAILED(sample->AddBuffer(buffer.get()))) {
+      failed = true;
+      return false;
+    }
+    const uint64_t whole_seconds = timestamp_90khz / 90'000ULL;
+    const uint64_t remainder = timestamp_90khz % 90'000ULL;
+    const uint64_t sample_time_ticks =
+        whole_seconds * 10'000'000ULL + remainder * 10'000'000ULL / 90'000ULL;
+    const LONGLONG sample_time = static_cast<LONGLONG>(sample_time_ticks);
+    sample->SetSampleTime(sample_time);
+    sample->SetSampleDuration(10'000'000 / kFrameRateNumerator);
+    if (timestamp_90khz == 0)
+      sample->SetUINT32(MFSampleExtension_CleanPoint, 1);
+    if (events != nullptr) --input_ready;
+    if (FAILED(transform->ProcessInput(0, sample.get(), 0)) || !Drain(output)) {
+      failed = true;
+      return false;
+    }
+    return true;
   }
 };
 
@@ -272,50 +323,8 @@ bool NativeH264Encoder::Encode(ID3D11Texture2D* texture,
     impl_->failed = true;
     return false;
   }
-  if (!impl_->Drain(output)) {
-    impl_->failed = true;
-    return false;
-  }
-  if (impl_->events != nullptr && impl_->input_ready == 0) return true;
-  winrt::com_ptr<IMFMediaBuffer> buffer;
-  winrt::com_ptr<IMFSample> sample;
-  if (FAILED(MFCreateMemoryBuffer(static_cast<DWORD>(nv12.size()),
-                                  buffer.put())) ||
-      FAILED(MFCreateSample(sample.put()))) {
-    impl_->failed = true;
-    return false;
-  }
-  BYTE* destination = nullptr;
-  DWORD max_length = 0;
-  DWORD current_length = 0;
-  if (FAILED(buffer->Lock(&destination, &max_length, &current_length)) ||
-      max_length < nv12.size()) {
-    if (destination != nullptr) buffer->Unlock();
-    impl_->failed = true;
-    return false;
-  }
-  std::memcpy(destination, nv12.data(), nv12.size());
-  buffer->Unlock();
-  buffer->SetCurrentLength(static_cast<DWORD>(nv12.size()));
-  if (FAILED(sample->AddBuffer(buffer.get()))) {
-    impl_->failed = true;
-    return false;
-  }
-  const uint64_t whole_seconds = timestamp_90khz / 90'000ULL;
-  const uint64_t remainder = timestamp_90khz % 90'000ULL;
-  const uint64_t sample_time_ticks =
-      whole_seconds * 10'000'000ULL + remainder * 10'000'000ULL / 90'000ULL;
-  const LONGLONG sample_time = static_cast<LONGLONG>(sample_time_ticks);
-  sample->SetSampleTime(sample_time);
-  sample->SetSampleDuration(10'000'000 / kFrameRateNumerator);
-  if (timestamp_90khz == 0) sample->SetUINT32(MFSampleExtension_CleanPoint, 1);
-  if (impl_->events != nullptr) --impl_->input_ready;
-  if (FAILED(impl_->transform->ProcessInput(0, sample.get(), 0)) ||
-      !impl_->Drain(output)) {
-    impl_->failed = true;
-    return false;
-  }
-  return true;
+  impl_->snapshot_nv12 = std::move(nv12);
+  return impl_->Submit(timestamp_90khz, output);
 }
 
 bool NativeH264Encoder::ApplyAdaptation(uint32_t bitrate_kbps) {
@@ -340,6 +349,14 @@ bool NativeH264Encoder::ApplyAdaptation(uint32_t bitrate_kbps) {
     return false;
   }
   return true;
+}
+
+bool NativeH264Encoder::RepeatFrame(uint64_t timestamp_90khz,
+                                    std::vector<EncodedAccessUnit>* output) {
+  if (impl_ == nullptr || impl_->failed || output == nullptr) return false;
+  output->clear();
+  if (impl_->snapshot_nv12.empty()) return true;
+  return impl_->Submit(timestamp_90khz, output);
 }
 
 bool NativeH264Encoder::RequestKeyframe() {

@@ -329,7 +329,26 @@ final class _AppScreenShareRouteScopeState
                                   ),
                                 ),
                               )
-                            : presenter.build(context, remoteSurface),
+                            : ValueListenableBuilder<Size?>(
+                                valueListenable:
+                                    _mediaCoordinator!.remoteVideoSize,
+                                builder: (context, size, _) {
+                                  final video = presenter.build(
+                                    context,
+                                    remoteSurface,
+                                  );
+                                  if (size == null) return video;
+                                  return ColoredBox(
+                                    color: Colors.black,
+                                    child: Center(
+                                      child: AspectRatio(
+                                        aspectRatio: size.width / size.height,
+                                        child: video,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                       ),
                       const SizedBox(height: 12),
                       if (operation.state == ScreenShareOperationState.idle &&

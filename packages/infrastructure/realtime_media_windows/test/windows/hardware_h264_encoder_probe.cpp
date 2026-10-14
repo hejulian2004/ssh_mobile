@@ -3,14 +3,22 @@
 #include <windows.h>
 #include <winrt/base.h>
 
+#include <fstream>
 #include <iostream>
 #include <vector>
 
-#include "windows_h264_encoder.h"
 #include "windows_capture.h"
+#include "windows_h264_encoder.h"
+#include "windows_video_processor.h"
 
 int main(int argc, char** argv) {
-  const bool cpu = argc > 1 && std::string(argv[1]) == "--cpu";
+  bool cpu = false, odd = false, export_fixture = false, repeat = false;
+  for (int index = 1; index < argc; ++index) {
+    cpu |= std::string(argv[index]) == "--cpu";
+    odd |= std::string(argv[index]) == "--odd";
+    export_fixture |= std::string(argv[index]) == "--export";
+    repeat |= std::string(argv[index]) == "--repeat";
+  }
   winrt::init_apartment(winrt::apartment_type::multi_threaded);
   if (FAILED(MFStartup(MF_VERSION))) return 2;
   winrt::com_ptr<ID3D11Device> device;
@@ -21,8 +29,8 @@ int main(int argc, char** argv) {
           D3D11_SDK_VERSION, device.put(), nullptr, context.put())))
     return 2;
   D3D11_TEXTURE2D_DESC description{};
-  description.Width = 640;
-  description.Height = 480;
+  description.Width = odd ? 641 : 640;
+  description.Height = odd ? 479 : 480;
   description.MipLevels = 1;
   description.ArraySize = 1;
   description.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -34,6 +42,26 @@ int main(int argc, char** argv) {
   winrt::com_ptr<ID3D11Texture2D> texture;
   if (FAILED(device->CreateTexture2D(&description, &initial, texture.put())))
     return 2;
+  realtime_media_windows::BgraToNv12Readback readback(device.get(),
+                                                      context.get());
+  std::vector<uint8_t> nv12;
+  uint32_t width = 0, height = 0;
+  if (!readback.Read(texture.get(), &nv12, &width, &height) ||
+      width != ((description.Width + 1u) & ~1u) ||
+      height != ((description.Height + 1u) & ~1u) ||
+      nv12.size() != static_cast<size_t>(width) * height * 3 / 2) {
+    std::cout << "FAIL padded_nv12_layout\n";
+    return 1;
+  }
+  const size_t luma = static_cast<size_t>(width) * height;
+  for (size_t index = 0; index < nv12.size(); ++index) {
+    const uint8_t expected =
+        index < luma ? 96 : ((index - luma) % 2 ? 90 : 161);
+    if (nv12[index] != expected) {
+      std::cout << "FAIL padded_nv12_pixels\n";
+      return 1;
+    }
+  }
   auto encoder = realtime_media_windows::NativeH264Encoder::Create(
       device.get(), context.get(),
       cpu ? realtime_media_windows::NativeCodecMode::Cpu
@@ -44,9 +72,20 @@ int main(int argc, char** argv) {
   }
   size_t units = 0;
   bool recovery_requested = false;
+  if (repeat) {
+    std::vector<realtime_media_windows::EncodedAccessUnit> empty;
+    if (!encoder->RepeatFrame(0, &empty) || !empty.empty()) {
+      std::cout << "FAIL uncaptured_repeat\n";
+      return 1;
+    }
+  }
   for (uint64_t frame = 0; frame < 90; ++frame) {
     std::vector<realtime_media_windows::EncodedAccessUnit> output;
-    if (!encoder->Encode(texture.get(), frame * 3000, &output)) {
+    const bool encoded =
+        repeat && frame > 0
+            ? encoder->RepeatFrame(frame * 3000, &output)
+            : encoder->Encode(texture.get(), frame * 3000, &output);
+    if (!encoded) {
       std::cout << "FAIL encoding\n";
       return 1;
     }
@@ -56,6 +95,10 @@ int main(int argc, char** argv) {
       return 1;
     }
     for (const auto& unit : output) {
+      if (unit.width != width || unit.height != height) {
+        std::cout << "FAIL encoded_dimensions\n";
+        return 1;
+      }
       bool sps = false, pps = false, idr = false;
       for (size_t index = 0; index + 4 < unit.payload.size(); ++index) {
         const auto& bytes = unit.payload;
@@ -69,6 +112,15 @@ int main(int argc, char** argv) {
         idr |= type == 5;
       }
       if (unit.keyframe && sps && pps && idr) {
+        if (export_fixture) {
+          std::ofstream fixture_file("single-frame-fixture.h264",
+                                     std::ios::binary);
+          fixture_file.write(reinterpret_cast<const char*>(unit.payload.data()),
+                             static_cast<std::streamsize>(unit.payload.size()));
+          if (!fixture_file) return 1;
+          std::cout << "PASS exported_synthetic_fixture\n";
+          return 0;
+        }
         if (recovery_requested) {
           std::cout << "PASS recovered_encoded_fixture\n";
           return 0;

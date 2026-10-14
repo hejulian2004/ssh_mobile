@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
+
 #include "windows_capture.h"
 
 struct ID3D11Device;
@@ -15,6 +16,8 @@ namespace realtime_media_windows {
 struct EncodedAccessUnit {
   std::vector<uint8_t> payload;
   bool keyframe = false;
+  uint32_t width = 0;
+  uint32_t height = 0;
 };
 
 // Native-only Media Foundation H.264 encoder. It accepts a D3D11
@@ -33,6 +36,11 @@ class NativeH264Encoder final {
 
   bool Encode(ID3D11Texture2D* texture, uint64_t timestamp_90khz,
               std::vector<EncodedAccessUnit>* output);
+
+  // Resamples the last real source snapshot while an unchanged window has no
+  // WGC damage event. Empty capture history never synthesizes a frame.
+  bool RepeatFrame(uint64_t timestamp_90khz,
+                   std::vector<EncodedAccessUnit>* output);
 
   /// Applies a bounded bitrate target to the selected MFT. Frame-rate
   /// throttling is owned by the capture state; resolution changes are

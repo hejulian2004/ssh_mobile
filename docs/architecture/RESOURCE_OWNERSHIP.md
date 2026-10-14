@@ -1,4 +1,4 @@
-最新更新时间：2026-10-12
+最新更新时间：2026-10-14
 
 # 资源 Owner 审计
 
@@ -20,6 +20,11 @@
 | RealtimeMediaSession | `RealtimeMediaSessionController` / App Realtime adapter | Realtime session lease | release endpoint leases before the owning Realtime session; controller never stops the App Runtime |
 | AppScreenShareSessionLease | App Shell coordinator, transferred atomically to screen-share route | One sender/responder Realtime operation | stop this `RealtimeSession`, wait normalized terminal state when available, then request exact-object `releaseSession`; pending SDK release remains terminal-authoritative and never stops App Runtime |
 | AppScreenShareMediaCoordinator | App Shell route scope | One screen-share media operation | stop production/ingress, release endpoint, decoder/encoder, capture preparation, and opaque surface/Texture lease; independent of session lease |
+| AppScreenShareMediaMonitor | `AppScreenShareMediaCoordinator` | Attached endpoint + operation generation | cancel timer before stop/dispose/release; single-flight stats only; ignore late snapshots from invalidated owners |
+| Android media worker extensions | `AndroidMediaOwner` | Borrowed codec + current native owner token | encoder/decoder loops share the owner lock/flags; teardown waits for their safe-point acknowledgement before releasing codec, projection, surface, or texture; the output pump owns no resource |
+| Windows idle-frame timer + cached NV12 snapshot | Native `CaptureState` + its `NativeH264Encoder` | Selected source + native owner generation | timer borrows state weakly and serializes encoding/ingress with capture callbacks; stop cancels it before waiting for callbacks and releasing the codec/cache; source end prevents further output |
+| Remote video dimensions notifier | `AppScreenShareMediaCoordinator`; borrowed by route presenter | Receive endpoint | update from valid payload-free stats; clear on endpoint release; dispose with coordinator |
+| Direct Realtime signaling PathLease | Native `RealtimeSession` | Exact ConnectionSession + Realtime generation | retain during sharing; sends borrow it; terminal session removal drops it; hard close/revoke remains immediately visible |
 | Provisional screen-share binding | Native `RealtimeManager` | Pre-claim Offer + bounded ICE + matched REQUEST | `pending → claiming → claimed/terminal`; native epoch-supervised expiry, reject/CANCEL/close/expiry/rollback destroys Offer and ICE; one shared 32-operation budget; no Dart session or media owner |
 | Screen-share arbitration registry | App Shell | Peer-scoped pending/active intent metadata | release exact `(remotePeerId, initiatorPeerId, operationId)` slot; it owns no session, runtime, endpoint, or media resource |
 | RealtimeMediaEndpoint | native `RealtimeMediaRegistry`; borrowed by `RealtimeMediaSessionController` | Runtime + realtime generation | invalidate before WebRTC peer close; release is idempotent and old `(runtime, realtime, peer, direction)` generations fail closed |

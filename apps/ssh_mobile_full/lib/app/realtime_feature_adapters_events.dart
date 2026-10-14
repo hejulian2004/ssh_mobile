@@ -6,6 +6,7 @@ extension on AppRealtimeSessionBackend {
     final phase = switch (event) {
       NativeRealtimeStateChangedEvent(:final state) => 'state: ${state.name}',
       NativeRealtimeSnapshotEvent(:final state) => 'snapshot: ${state.name}',
+      NativeRealtimeIncomingSessionOfferEvent() => 'incoming offer',
       NativeRealtimeSignalEvent(:final kind, :final consent) =>
         'signal: ${kind.name}${consent == null ? '' : ' ${consent.decision.name}'}',
       NativePeerDiagnosticsEvent(:final lastError)

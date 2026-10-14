@@ -66,6 +66,23 @@ void main() {
       'Screen-share native state: negotiating',
       'Screen-share native rejection: binding',
     ]);
+    gateway._events.add(
+      NativeRealtimeIncomingSessionOfferEvent(
+        eventId: 'private-offer-event',
+        timestampMs: 3,
+        protocolVersion: 2,
+        offerId: 'private-offer',
+        claimToken: 'private-claim',
+        realtimeId: realtimeId,
+        authenticatedPeerId: 'private-peer',
+        sharedSessionInstanceId: realtimeId,
+        bindingExpiresAtMs: DateTime.utc(2030).millisecondsSinceEpoch,
+        request: _nativeTestConsent(),
+      ),
+    );
+    await _pump();
+    expect(logger.messages.last, 'Screen-share native incoming offer');
+    expect(logger.messages.join(), isNot(contains('private-')));
     await backend.dispose();
   });
 

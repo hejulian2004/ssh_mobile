@@ -379,12 +379,6 @@ bool BgraToNv12Readback::Read(ID3D11Texture2D* texture,
       description.Width > 16'384 || description.Height > 16'384) {
     return false;
   }
-  // NV12 stores chroma in 2x2 blocks. Refuse odd capture sizes explicitly
-  // instead of producing a malformed buffer that a hardware MFT may accept
-  // and fail on asynchronously.
-  if ((description.Width & 1u) != 0 || (description.Height & 1u) != 0) {
-    return false;
-  }
   if (description.Format != DXGI_FORMAT_B8G8R8A8_UNORM &&
       description.Format != DXGI_FORMAT_R8G8B8A8_UNORM) {
     return false;
@@ -410,10 +404,16 @@ bool BgraToNv12Readback::Read(ID3D11Texture2D* texture,
   if (FAILED(context->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
     return false;
   }
-  const size_t luma_size = static_cast<size_t>(staging_width) * staging_height;
+  // NV12 requires complete 2x2 chroma blocks. Replicate at most one edge pixel
+  // so an odd window retains all its content in an even, valid encoded frame.
+  const uint32_t encoded_width = (staging_width + 1u) & ~1u;
+  const uint32_t encoded_height = (staging_height + 1u) & ~1u;
+  const size_t luma_size = static_cast<size_t>(encoded_width) * encoded_height;
   output->assign(luma_size + luma_size / 2, 0);
   const bool bgra = description.Format == DXGI_FORMAT_B8G8R8A8_UNORM;
   auto read_rgb = [&](uint32_t x, uint32_t y, int* red, int* green, int* blue) {
+    x = (std::min)(x, staging_width - 1);
+    y = (std::min)(y, staging_height - 1);
     const auto* pixel = static_cast<const uint8_t*>(mapped.pData) +
                         static_cast<size_t>(y) * mapped.RowPitch +
                         static_cast<size_t>(x) * 4;
@@ -427,19 +427,19 @@ bool BgraToNv12Readback::Read(ID3D11Texture2D* texture,
       *blue = pixel[2];
     }
   };
-  for (uint32_t y = 0; y < staging_height; ++y) {
-    for (uint32_t x = 0; x < staging_width; ++x) {
+  for (uint32_t y = 0; y < encoded_height; ++y) {
+    for (uint32_t x = 0; x < encoded_width; ++x) {
       int red = 0;
       int green = 0;
       int blue = 0;
       read_rgb(x, y, &red, &green, &blue);
-      (*output)[static_cast<size_t>(y) * staging_width + x] =
+      (*output)[static_cast<size_t>(y) * encoded_width + x] =
           ClampByte(Luma(red, green, blue));
     }
   }
   const size_t chroma_offset = luma_size;
-  for (uint32_t y = 0; y < staging_height; y += 2) {
-    for (uint32_t x = 0; x < staging_width; x += 2) {
+  for (uint32_t y = 0; y < encoded_height; y += 2) {
+    for (uint32_t x = 0; x < encoded_width; x += 2) {
       int red_sum = 0;
       int green_sum = 0;
       int blue_sum = 0;
@@ -460,16 +460,14 @@ bool BgraToNv12Readback::Read(ID3D11Texture2D* texture,
       const int green = green_sum / static_cast<int>(count);
       const int blue = blue_sum / static_cast<int>(count);
       const size_t chroma_index =
-          chroma_offset + static_cast<size_t>(y / 2) * staging_width + x;
+          chroma_offset + static_cast<size_t>(y / 2) * encoded_width + x;
       (*output)[chroma_index] = ClampByte(ChromaU(red, green, blue));
-      if (x + 1 < staging_width) {
-        (*output)[chroma_index + 1] = ClampByte(ChromaV(red, green, blue));
-      }
+      (*output)[chroma_index + 1] = ClampByte(ChromaV(red, green, blue));
     }
   }
   context->Unmap(staging.get(), 0);
-  *output_width = staging_width;
-  *output_height = staging_height;
+  *output_width = encoded_width;
+  *output_height = encoded_height;
   return true;
 }
 

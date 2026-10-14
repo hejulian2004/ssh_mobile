@@ -1,4 +1,4 @@
-最新更新时间：2026-10-13
+最新更新时间：2026-10-14
 
 # feature_screen_share
 
@@ -26,6 +26,17 @@ claim, sends `ACCEPT` immediately, and starts viewing only after the same media
 gate. `compareScreenShareIntents` is the public pure comparator used by App
 arbitration; the Feature controller still owns consent construction, revisions,
 freshness, and business state.
+
+Request expiry limits pending consent only. A timely acceptance cancels that
+timer, including while native media readiness or system recording consent is
+pending. Active sharing ends through stop/cancel, transport loss, or media
+failure. A later CANCEL carries a fresh bounded action lifetime with the same
+operation/session identity and the next author revision. Duplicate readiness
+values do not invalidate an in-flight media start; a genuine readiness change
+still compensates stale completion.
+Fatal media failures retain the local failed state, stop the borrowed active
+media operation, and send a fresh CANCEL to end the peer's viewer/capture.
+Repeated terminal events do not send another action or resurrect the operation.
 
 Media readiness changes invalidate in-flight media work without invalidating
 a pending consent result. Cancellation, expiry, and replacement still prevent

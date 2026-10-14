@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:app_core/app_core.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:realtime_media_android/realtime_media_android.dart';
@@ -36,6 +38,100 @@ void main() {
       generation: 7,
     );
     addTearDown(session.close);
+  });
+
+  test('reports a capture worker failure after successful attachment', () {
+    fakeAsync((clock) {
+      final logger = _MediaHealthLogger();
+      final coordinator = _coordinator(
+        backend,
+        capabilities,
+        session,
+        source: source,
+        logger: logger,
+      );
+      final events = <ScreenShareMediaEvent>[];
+      final subscription = coordinator.port.events.listen(events.add);
+      unawaited(
+        coordinator
+            .prepare(capture: true)
+            .then(
+              (_) => coordinator.port.startCapture(
+                operationId: 'operation-a',
+                realtimeId: realtimeId,
+                generation: 7,
+              ),
+            ),
+      );
+      clock.flushMicrotasks();
+      expect(backend.operations, ['start:send', 'attach-capture:1']);
+      backend.statsFailure = const RealtimeMediaException(
+        RealtimeMediaErrorCode.frameRejected,
+        'private-native-payload',
+      );
+      clock.elapse(const Duration(seconds: 5));
+      clock.flushMicrotasks();
+      expect(events, hasLength(1));
+      expect(events.single.kind, ScreenShareMediaEventKind.encoderFailed);
+      expect(events.single.operationId, 'operation-a');
+      expect(
+        logger.messages,
+        contains('Screen-share media send failed: frameRejected'),
+      );
+      expect(logger.messages.join(), isNot(contains('private-native-payload')));
+      unawaited(subscription.cancel());
+      clock.flushMicrotasks();
+      var disposed = false;
+      unawaited(coordinator.dispose().then((_) => disposed = true));
+      clock.flushMicrotasks();
+      expect(disposed, isTrue);
+      final reads = backend.statsReads;
+      clock.elapse(const Duration(seconds: 10));
+      expect(backend.statsReads, reads);
+    });
+  });
+
+  test('samples receive progress only while the endpoint is owned', () {
+    fakeAsync((clock) {
+      final logger = _MediaHealthLogger();
+      final coordinator = _coordinator(
+        backend,
+        capabilities,
+        session,
+        logger: logger,
+      );
+      unawaited(
+        coordinator
+            .prepare(capture: false)
+            .then(
+              (_) => coordinator.port.startViewer(
+                operationId: 'operation-a',
+                realtimeId: realtimeId,
+                generation: 7,
+              ),
+            ),
+      );
+      clock.flushMicrotasks();
+      clock.elapse(const Duration(seconds: 5));
+      clock.flushMicrotasks();
+      expect(backend.statsReads, 1);
+      expect(
+        logger.messages.single,
+        contains('Screen-share media receive progress:'),
+      );
+      unawaited(
+        coordinator.port.stop(
+          operationId: 'operation-a',
+          realtimeId: realtimeId,
+          generation: 7,
+        ),
+      );
+      clock.flushMicrotasks();
+      clock.elapse(const Duration(seconds: 10));
+      expect(backend.statsReads, 1);
+      unawaited(coordinator.dispose());
+      clock.flushMicrotasks();
+    });
   });
 
   test('prepares capture and releases the endpoint in owner order', () async {
@@ -638,6 +734,32 @@ void main() {
     expect(backend.operations, contains('release:1'));
   });
 
+  testWidgets('received portrait video retains its native aspect ratio', (
+    tester,
+  ) async {
+    backend.statsSnapshot = RealtimeMediaStats(width: 1080, height: 2424);
+    await tester.pumpWidget(
+      _routeApp(
+        backend,
+        session,
+        capabilities,
+        presenter: const _FixtureVideoPresenter(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    session.emitConsent(_incomingConsent());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Accept screen share'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 5));
+    final displayed = tester.getSize(
+      find.byKey(const ValueKey('fixture-video')),
+    );
+    expect(displayed.width / displayed.height, closeTo(1080 / 2424, 0.001));
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
   testWidgets('CPU route freezes the choice into native receive identity', (
     tester,
   ) async {
@@ -737,6 +859,7 @@ Widget _routeApp(
   _FakeRealtimeSession session,
   _RecordingCapabilities? capabilities, {
   AppScreenShareRouteArguments? arguments,
+  AppRemoteVideoPresenter? presenter,
 }) => MaterialApp(
   home: AppScreenShareRouteScope(
     arguments:
@@ -750,6 +873,7 @@ Widget _routeApp(
       sessionFactory: AppRealtimeMediaSessionFactory(backend: backend),
     ),
     capabilities: capabilities,
+    presenter: presenter,
   ),
 );
 
@@ -758,11 +882,13 @@ AppScreenShareMediaCoordinator _coordinator(
   _RecordingCapabilities capabilities,
   _FakeRealtimeSession session, {
   ScreenCaptureSource? source,
+  AppLogger? logger,
 }) => AppScreenShareMediaCoordinator(
   session: session,
   resources: AppRealtimeMediaResources(
     backend: backend,
     sessionFactory: AppRealtimeMediaSessionFactory(backend: backend),
+    logger: logger,
   ),
   capabilities: capabilities,
   source: source,
@@ -842,6 +968,9 @@ class _RecordingMediaBackend implements RealtimeMediaBackend {
   int _nextEndpoint = 0;
   Completer<void>? startGate;
   void Function()? afterAttach;
+  Object? statsFailure;
+  int statsReads = 0;
+  RealtimeMediaStats statsSnapshot = RealtimeMediaStats();
 
   @override
   Future<RealtimeMediaEndpointId> start(
@@ -898,7 +1027,27 @@ class _RecordingMediaBackend implements RealtimeMediaBackend {
   Future<RealtimeMediaStats> readStats({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
-  }) async => RealtimeMediaStats();
+  }) async {
+    statsReads++;
+    final failure = statsFailure;
+    if (failure != null) throw failure;
+    return statsSnapshot;
+  }
+}
+
+final class _MediaHealthLogger implements AppLogger {
+  final messages = <String>[];
+  @override
+  void log(LogRecord record) => messages.add(record.message);
+  @override
+  AppLogger scope(String name) => this;
+}
+
+final class _FixtureVideoPresenter implements AppRemoteVideoPresenter {
+  const _FixtureVideoPresenter();
+  @override
+  Widget build(BuildContext context, RemoteVideoSurface surface) =>
+      const ColoredBox(key: ValueKey('fixture-video'), color: Colors.blue);
 }
 
 final class _FakeRealtimeSession implements RealtimeSession {

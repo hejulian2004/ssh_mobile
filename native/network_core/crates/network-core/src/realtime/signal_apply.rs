@@ -162,6 +162,7 @@ pub(crate) fn apply_signal_with_driver(
                         peer_id: peer_id.to_string(),
                         shared_session_instance_id: shared_session_instance_id.clone(),
                         connection_session_id,
+                        direct_signaling_path: None,
                         peer: None,
                         driver: Some(driver),
                         revision: 0,
@@ -173,6 +174,7 @@ pub(crate) fn apply_signal_with_driver(
                         peer_id: peer_id.to_string(),
                         shared_session_instance_id: shared_session_instance_id.clone(),
                         connection_session_id,
+                        direct_signaling_path: None,
                         peer: Some(
                             WebRtcPeer::new(WebRtcConfig::default())
                                 .expect("validated default WebRTC configuration"),

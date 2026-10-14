@@ -1,4 +1,4 @@
-Last updated: 2026-10-13
+Last updated: 2026-10-14
 
 # realtime_media_windows
 
@@ -44,9 +44,24 @@ profile advertised by the screen-track SDP. Explicit CPU capture uses a separate
 WARP device and synchronous software MFT, without requiring a physical GPU.
 Software encoding requests low-latency output rather than buffering a full
 look-ahead window before the first frame.
+BGRA/RGBA readback replicates at most one edge row/column for odd window sizes,
+producing complete NV12 chroma blocks without discarding source pixels. Encoded
+access-unit metadata uses that padded size; source-resize detection still uses
+the original capture dimensions.
+Windows Graphics Capture may emit only one frame for a static window. The
+capture owner retains the last real NV12 snapshot and encodes it at a bounded
+five frames per second while the source is quiet, with fresh timestamps. This
+keeps decoder startup and keyframe recovery working without another source
+change. Encoding and native queue ingress share the encoder lock; stop cancels
+the timer before waiting for callbacks and releasing the cached frame/codec.
 `test/windows/hardware_h264_encoder_probe.cpp` verifies encoding with a fixed
 native texture; `--cpu` forces WARP and software encoding. Absent selected
 hardware or software capability is a GAP, not a successful fallback.
+`--odd` verifies padded NV12 layout, pixels, encoded dimensions, and IDR recovery
+for an odd window fixture in either codec mode.
+`--repeat` verifies cached-frame encoding and IDR recovery, including an empty
+history that produces no access unit. `--export` writes only the fixed synthetic
+fixture for the Android codec-output probe; it never captures a user window.
 
 Receive initialization also borrows Flutter's existing COM apartment. Decoder
 enumeration includes D3D11-aware H.264 transforms: synchronous MFT registration
@@ -83,3 +98,16 @@ must still fail closed when a platform capability is unavailable or stale.
 flutter analyze --no-pub
 flutter test --no-pub
 ```
+
+After building the Full App for Windows, build native probes from the repository
+root with CMake and the installed MSVC generator:
+
+```powershell
+cmake -S packages/infrastructure/realtime_media_windows/test/windows -B apps/ssh_mobile_full/build/native-probes -A x64
+cmake --build apps/ssh_mobile_full/build/native-probes --config Release
+./apps/ssh_mobile_full/build/native-probes/Release/encoder_probe.exe --cpu --odd
+```
+
+Run without `--cpu` to check hardware encoding, or without `--odd` for the even
+fixture.
+Add `--repeat` to verify the static-source path.
