@@ -15,6 +15,10 @@ is exposed. Hardware mode is the default. Explicit CPU mode selects software
 H.264 using a scoped factory choice; it preserves system recording consent,
 owner cleanup, and the native frame path. Unknown modes and unavailable selected
 codecs fail with typed errors; there is no silent or alternate-codec fallback.
+Configuration tries H.264 candidates only within the explicitly selected
+hardware or CPU mode. Each failed attempt is released before trying the next;
+unconfirmed cleanup aborts acquisition. A configured codec transfers to the
+existing media owner; exhausting unsupported formats fails capture/decoder startup.
 
 Generation-bound owner tokens also carry payload-free `requestKeyframe`,
 `resetDecoder`, and bounded `applyAdaptation` commands. Kotlin/JNI and the
