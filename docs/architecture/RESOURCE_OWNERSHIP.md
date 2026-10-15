@@ -1,4 +1,4 @@
-最新更新时间：2026-10-14
+最新更新时间：2026-10-15
 
 # 资源 Owner 审计
 
@@ -26,7 +26,9 @@
 | Remote video dimensions notifier | `AppScreenShareMediaCoordinator`; borrowed by route presenter | Receive endpoint | update from valid payload-free stats; clear on endpoint release; dispose with coordinator |
 | Direct Realtime signaling PathLease | Native `RealtimeSession` | Exact ConnectionSession + Realtime generation | retain during sharing; sends borrow it; terminal session removal drops it; hard close/revoke remains immediately visible |
 | Provisional screen-share binding | Native `RealtimeManager` | Pre-claim Offer + bounded ICE + matched REQUEST | `pending → claiming → claimed/terminal`; native epoch-supervised expiry, reject/CANCEL/close/expiry/rollback destroys Offer and ICE; one shared 32-operation budget; no Dart session or media owner |
-| Screen-share arbitration registry | App Shell | Peer-scoped pending/active intent metadata | release exact `(remotePeerId, initiatorPeerId, operationId)` slot; it owns no session, runtime, endpoint, or media resource |
+| Screen-share arbitration registry | `ScreenShareEntryCoordinator`; borrowed by incoming host and routes | Per-peer pending intents + one App-wide committed share | committed operations cannot be replaced; route releases exact `(remotePeerId, initiatorPeerId, operationId)` after media/session cleanup; coordinator disposes its owned notifier; it owns no media or runtime |
+| Screen-share video presentation | `AppScreenShareVideoPage` Widget State | One receiving route | local rotation/fullscreen state only; toggles retain the same video subtree; back/Escape exit fullscreen before route teardown |
+| Screen-share native-identity waiter | Incoming host or outgoing entry coordinator | One claim/start attempt | cancel temporary snapshot subscription and timeout when caller disposal resolves its cancellation signal; late results never install a route |
 | RealtimeMediaEndpoint | native `RealtimeMediaRegistry`; borrowed by `RealtimeMediaSessionController` | Runtime + realtime generation | invalidate before WebRTC peer close; release is idempotent and old `(runtime, realtime, peer, direction)` generations fail closed |
 | Native media ingress queue | `network-webrtc::WebRtcPeer` through `RealtimeIoDriver` | Native PeerConnection generation | stop capture/encoder, drop stale queued H.264, then close the native peer; borrowers never own the queue |
 | Native media egress queue | `network-webrtc::WebRtcPeer` through `RealtimeIoDriver` | Native PeerConnection generation | terminal peer loss invalidates decoder output before decoder/surface teardown; never emit frames through the Dart event queue |

@@ -1,4 +1,4 @@
-最新更新时间：2026-10-13
+最新更新时间：2026-10-15
 
 # ADR-034：WebRTC 实时屏幕共享媒体边界与生命周期
 
@@ -20,6 +20,32 @@ Screen Share slice；M8 中 Voice、Camera/一般 Video 或其他 RTC 工作不�
 验收门禁。
 
 ## 背景与当前事实
+
+2026-10-15 补充产品约束：接收端手动旋转、全屏显示、Android 发送端横竖屏切换、
+后台持续传输和邀请冲突处理属于同一个屏幕共享操作。下列平台原生调整仍是
+计划要求，不能用接收端视图旋转或宿主测试代替原生与设备验收：
+
+- 待接受的交叉邀请仍按既有 comparator 仲裁；接受认领或媒体启动进入全局独占后，
+  新邀请须发送正式拒绝，不能中断当前共享。停止、初始化失败和迟到认领都必须按
+  原 owner 清理，精确释放占用；原邀请的期限不能成为活动共享的期限。
+- 接收端手动旋转只变换本地视图；全屏切换不创建第二个媒体端点、不再次请求录屏。
+  返回键/Escape 先退出全屏，停止操作始终可达。平台窗口/系统栏的全屏状态须作为
+  展示租约恢复，不得影响其他窗口或用户原有状态。
+- Android 同一授权内容的尺寸变化计划保留原 `MediaProjection` 和单个
+  `VirtualDisplay`，按尺寸回调调整显示与输入 Surface；不得再次消费系统 grant
+  或再次创建 VirtualDisplay。编码器替换须串行完成旧资源安全点、保持选定模式、
+  单调帧序号/时间戳，并以新 SPS/PPS + IDR 恢复；过期回调不能重启停止的 owner。
+  这项计划替代旧的“任意尺寸变化立即结束”产品行为，不授权更换共享来源。
+- Android 后台计划继续使用原 native 网络和媒体 owner。接收端的不可见显示不得
+  因 Surface 背压停止收包/解码；恢复前台应显示最新有效画面。后台服务与电源锁
+  必须有共享期间的租约，并在终态释放，不得创建第二个 NetworkRuntime。
+- 系统撤销录屏、进程销毁或平台能力失败仍为明确终态；不得绕过平台隐私保护，
+  也不得将应用隐藏时未渲染的画面计为实际显示成功。
+
+原生尺寸回调与 VirtualDisplay/Surface 调整依据
+[Android MediaProjection 文档](https://developer.android.com/media/grow/media-projection)
+及 [onCapturedContentResize](https://developer.android.com/reference/android/media/projection/MediaProjection.Callback#onCapturedContentResize(int,int))；
+当前实现状态以 owning package README 和设备验证为准。
 
 2026-10-13 补充决策：Windows/Android 允许用户显式选择 CPU H.264 编解码模式，
 默认硬件模式不变，不进行静默软件回退。模式属于本地媒体端点身份，由 App 在

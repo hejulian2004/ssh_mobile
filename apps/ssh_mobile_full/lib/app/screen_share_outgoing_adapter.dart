@@ -22,11 +22,15 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
     required this.runtime,
     required this.navigatorKey,
     AppScreenSharePeerArbitrationRegistry? arbitration,
-  }) : arbitration = arbitration ?? AppScreenSharePeerArbitrationRegistry();
+  }) : _ownsArbitration = arbitration == null,
+       arbitration = arbitration ?? AppScreenSharePeerArbitrationRegistry();
 
   final AppRuntime runtime;
   final GlobalKey<NavigatorState> navigatorKey;
   final AppScreenSharePeerArbitrationRegistry arbitration;
+  final bool _ownsArbitration;
+  bool _disposed = false;
+  final Completer<void> _disposedSignal = Completer<void>();
   final Set<String> _startsInFlight = <String>{};
   int _operationSequence = 0;
 
@@ -37,7 +41,8 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
 
   @override
   bool canShareWith(String peerId) {
-    if (!_platformSupported ||
+    if (_disposed ||
+        !_platformSupported ||
         peerId == runtime.lanShareSettingsAdapter.lanDeviceId) {
       return false;
     }
@@ -49,7 +54,8 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
 
   @override
   bool canReceiveScreenShareFrom(String peerId) {
-    if (!_platformSupported ||
+    if (_disposed ||
+        !_platformSupported ||
         peerId == runtime.lanShareSettingsAdapter.lanDeviceId) {
       return false;
     }
@@ -106,7 +112,9 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
       }
       final selectedSource = await _selectSource();
       if (selectedSource == null) return;
-      if (superseded) throw StateError('Screen-share intent was superseded.');
+      if (superseded || _disposed) {
+        throw StateError('Screen-share intent was superseded.');
+      }
       _logPreparation('connecting authenticated peer');
 
       final coordinator = runtime.lanShareModule.coordinator;
@@ -119,7 +127,9 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
       if (prepared is SdkFailure<void>) {
         throw StateError(prepared.error.message);
       }
-      if (superseded) throw StateError('Screen-share intent was superseded.');
+      if (superseded || _disposed) {
+        throw StateError('Screen-share intent was superseded.');
+      }
       _logPreparation('starting native session');
 
       final realtimeId = _newHexIdentity();
@@ -131,9 +141,16 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
       if (startResult is SdkFailure<void>) {
         throw StateError(startResult.error.message);
       }
-      if (superseded) throw StateError('Screen-share intent was superseded.');
-      await _waitForIdentity(session);
-      if (superseded) throw StateError('Screen-share intent was superseded.');
+      if (superseded || _disposed) {
+        throw StateError('Screen-share intent was superseded.');
+      }
+      await waitForScreenShareSessionIdentity(
+        session,
+        cancelled: _disposedSignal.future,
+      );
+      if (superseded || _disposed) {
+        throw StateError('Screen-share intent was superseded.');
+      }
       _logPreparation('opening consent route');
       lease = AppScreenShareSessionLease(
         client: runtime.realtimeClient,
@@ -149,6 +166,7 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
         operationId: operationId,
         mode: AppScreenShareRouteMode.send,
         startOutgoing: true,
+        arbitration: arbitration,
       );
       try {
         routeActive = true;
@@ -189,7 +207,7 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
           } catch (_) {}
         }
       }
-      if (acquired) {
+      if (acquired && !handedOff) {
         arbitration.release(
           remotePeerId: peerId,
           initiatorPeerId: runtime.lanShareSettingsAdapter.lanDeviceId,
@@ -248,31 +266,11 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
     );
   }
 
-  Future<void> _waitForIdentity(RealtimeSession session) async {
-    bool ready(RealtimeSnapshot? snapshot) {
-      final effectiveState = snapshot?.state ?? session.state;
-      return (effectiveState == RealtimeSessionState.negotiating ||
-              effectiveState == RealtimeSessionState.connected) &&
-          (snapshot?.generation ?? session.generation) != null &&
-          (snapshot?.sharedSessionInstanceId ??
-                  session.sharedSessionInstanceId) !=
-              null;
-    }
-
-    if (ready(session.currentSnapshot)) return;
-    final completer = Completer<void>();
-    late final StreamSubscription<RealtimeSnapshot> subscription;
-    subscription = session.snapshots.listen((snapshot) {
-      if (!completer.isCompleted && ready(snapshot)) {
-        completer.complete();
-      }
-    });
-    try {
-      if (ready(session.currentSnapshot)) return;
-      await completer.future.timeout(const Duration(seconds: 30));
-    } finally {
-      await subscription.cancel();
-    }
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _disposedSignal.complete();
+    if (_ownsArbitration) arbitration.dispose();
   }
 
   void _logPreparation(String phase) => runtime.logger.log(

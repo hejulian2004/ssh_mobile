@@ -12,6 +12,8 @@ import 'package:feature_screen_share/feature_screen_share.dart';
 
 import 'package:ssh_mobile/app/realtime_media_feature_adapters.dart';
 import 'package:ssh_mobile/app/screen_share_route_scope.dart';
+import 'package:ssh_mobile/app/screen_share_peer_arbitration.dart';
+import 'package:ssh_mobile/app/screen_share_session_lease.dart';
 
 void main() {
   const realtimeId = '00112233445566778899aabbccddeeff';
@@ -38,6 +40,22 @@ void main() {
       generation: 7,
     );
     addTearDown(session.close);
+  });
+
+  test('identity wait ends immediately when its caller is disposed', () async {
+    session.mediaToken = null;
+    final cancellation = Completer<void>();
+    var completed = false;
+    final waiting = waitForScreenShareSessionIdentity(
+      session,
+      cancelled: cancellation.future,
+    ).then((_) => completed = true);
+    expect(completed, isFalse);
+    cancellation.complete();
+    // Stream.empty's cancellation Future lives outside FakeAsync's zone.
+    // Observe its actual completion, bounded below the identity timeout.
+    await waiting.timeout(const Duration(seconds: 5));
+    expect(completed, isTrue);
   });
 
   test('reports a capture worker failure after successful attachment', () {
@@ -756,6 +774,152 @@ void main() {
       find.byKey(const ValueKey('fixture-video')),
     );
     expect(displayed.width / displayed.height, closeTo(1080 / 2424, 0.001));
+    final mediaOperations = List<String>.of(backend.operations);
+    await tester.tap(find.byTooltip('Rotate view'));
+    await tester.pump();
+    expect(
+      tester.widget<AspectRatio>(find.byType(AspectRatio)).aspectRatio,
+      2424 / 1080,
+    );
+    await tester.tap(find.byTooltip('Enter fullscreen'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AppBar), findsNothing);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Screen sharing active'), findsOneWidget);
+    expect(backend.operations, mediaOperations);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets(
+    'busy admission prevents a second viewer before native allocation',
+    (tester) async {
+      final arbitration = AppScreenSharePeerArbitrationRegistry();
+      addTearDown(arbitration.dispose);
+      arbitration.acquire(
+        remotePeerId: session.peerId,
+        initiatorPeerId: session.peerId,
+        operationId: 'operation-a',
+      );
+      arbitration.acquire(
+        remotePeerId: 'occupied-peer',
+        initiatorPeerId: 'peer-local',
+        operationId: 'live',
+      );
+      arbitration.activate(
+        remotePeerId: 'occupied-peer',
+        initiatorPeerId: 'peer-local',
+        operationId: 'live',
+      );
+      await tester.pumpWidget(
+        _routeApp(
+          backend,
+          session,
+          capabilities,
+          arguments: AppScreenShareRouteArguments(
+            session: session,
+            localPeerId: 'peer-local',
+            arbitration: arbitration,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      session.emitConsent(_incomingConsent());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Accept screen share'));
+      await tester.pumpAndSettle();
+      expect(backend.operations, isEmpty);
+      expect(find.text('Screen sharing failed'), findsOneWidget);
+      expect(arbitration.isBusy, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
+    'stopping releases busy ownership while the result page remains open',
+    (tester) async {
+      final arbitration = AppScreenSharePeerArbitrationRegistry();
+      addTearDown(arbitration.dispose);
+      arbitration.acquire(
+        remotePeerId: session.peerId,
+        initiatorPeerId: session.peerId,
+        operationId: 'operation-a',
+      );
+      await tester.pumpWidget(
+        _routeApp(
+          backend,
+          session,
+          capabilities,
+          arguments: AppScreenShareRouteArguments(
+            session: session,
+            localPeerId: 'peer-local',
+            arbitration: arbitration,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      session.emitConsent(_incomingConsent());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Accept screen share'));
+      await tester.pumpAndSettle();
+      expect(arbitration.isBusy, isTrue);
+      await tester.tap(find.text('Stop screen share'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppScreenShareRouteScope), findsOneWidget);
+      expect(find.text('Screen sharing cancelled'), findsOneWidget);
+      expect(arbitration.isBusy, isFalse);
+      expect(
+        backend.operations.where((operation) => operation == 'release:1'),
+        hasLength(1),
+      );
+      expect(
+        arbitration.acquire(
+          remotePeerId: 'next-peer',
+          initiatorPeerId: 'peer-local',
+          operationId: 'next',
+        ),
+        isTrue,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
+
+  testWidgets('initialization failure releases claimed invitation admission', (
+    tester,
+  ) async {
+    final arbitration = AppScreenSharePeerArbitrationRegistry();
+    addTearDown(arbitration.dispose);
+    arbitration.acquire(
+      remotePeerId: session.peerId,
+      initiatorPeerId: session.peerId,
+      operationId: 'operation-a',
+    );
+    arbitration.activate(
+      remotePeerId: session.peerId,
+      initiatorPeerId: session.peerId,
+      operationId: 'operation-a',
+    );
+    session.mediaToken = null;
+    await tester.pumpWidget(
+      _routeApp(
+        backend,
+        session,
+        capabilities,
+        arguments: AppScreenShareRouteArguments(
+          session: session,
+          localPeerId: 'peer-local',
+          operationId: 'operation-a',
+          arbitration: arbitration,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Screen sharing unavailable'), findsOneWidget);
+    expect(arbitration.isBusy, isFalse);
+    expect(backend.operations, isEmpty);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });

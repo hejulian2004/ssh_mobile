@@ -125,6 +125,7 @@ class _SshMobileAppState extends State<SshMobileApp>
     WidgetsBinding.instance.removeObserver(this);
     _terminalSettingsAdapter?.dispose();
     _terminalShortcutAdapter?.dispose();
+    _lanScreenShareAdapter?.dispose();
     final runtime = widget.runtime;
     if (runtime != null) {
       unawaited(runtime.dispose());
