@@ -33,6 +33,7 @@ class RealtimeMediaAndroidPlugin :
     private var projectionLease: ProjectionLease? = null
     private var pendingProjectionResult: MethodChannel.Result? = null
     private val owners = HashMap<Long, AndroidMediaOwner>()
+    private val rendererVisibility = AndroidRendererVisibility()
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
@@ -46,6 +47,7 @@ class RealtimeMediaAndroidPlugin :
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        rendererVisibility.detach()
         disposeOwners()
         channel?.setMethodCallHandler(null)
         channel = null
@@ -55,6 +57,7 @@ class RealtimeMediaAndroidPlugin :
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        rendererVisibility.attach(binding.activity)
         activity = binding.activity
         activityBinding = binding
         binding.addActivityResultListener(this)
@@ -389,6 +392,10 @@ class RealtimeMediaAndroidPlugin :
             error(result, "stale_endpoint", "The Android owner identity does not match.")
             return
         }
+        if (current != null && current.codecMode != codecMode) {
+            error(result, "invalid_argument", "The owner's codec mode is immutable.")
+            return
+        }
         val owner = current ?: run {
             val registry = textureRegistry
             val appContext = context
@@ -396,7 +403,8 @@ class RealtimeMediaAndroidPlugin :
                 error(result, "backend_failure", "Android texture registry is unavailable.")
                 return
             }
-            AndroidMediaOwner(appContext, registry, token, identity).also { owners[token] = it }
+            AndroidMediaOwner(appContext, registry, token, identity, rendererVisibility, codecMode)
+                .also { owners[token] = it }
         }
         AndroidCodecFactory.withCodecMode(codecMode) { block(owner, args) }
     }
@@ -463,6 +471,7 @@ class RealtimeMediaAndroidPlugin :
     }
 
     private fun detachActivityListener() {
+        rendererVisibility.detach()
         activityBinding?.removeActivityResultListener(this)
         activityBinding = null
         activity = null

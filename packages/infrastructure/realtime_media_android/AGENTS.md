@@ -1,4 +1,4 @@
-Last updated: 2026-10-13
+Last updated: 2026-10-15
 
 # realtime_media_android maintenance contract
 
@@ -53,8 +53,28 @@ send owner. A pre-consume start failure releases the captured `GRANTED` lease
 only if it is still the current lease. The App-scope Android backend serializes
 permission preparation across route coordinators; caller-owned preparation is
 abandoned exactly once, while backend-invalidated preparation is not abandoned
-again by the caller. Display-size changes remain `capture_source_ended`, not a
-hot resize path.
+again by the caller.
+
+Captured-content size changes retain the consumed projection and its single
+VirtualDisplay. Only the existing encoder worker may detach the display's
+input, release the old codec/surface, configure the frozen codec mode, resize
+the display, and attach its replacement input. Check stop/revoke between these
+steps; never acquire a replacement after unconfirmed old-codec release. Keep
+the owner's sequence and monotonic timestamp timeline, reset CSD/IDR recovery,
+and preserve bitrate/framerate policy. An unsupported new size is a typed
+terminal encoder failure, never a new grant, shared source, or mode fallback.
+API 34+ callbacks stay bound to their projection lease, coalesce the latest
+positive dimensions, and are ignored after revoke/release. Older full-display
+capture observes current display dimensions on the same worker.
+
+Activity visibility affects presentation only, not the native receive/decoder
+owner. Decoder output keeps at most one pending buffer and one submitted
+texture frame awaiting Flutter's consumed callback. Drop older pending output
+without rendering; resume the latest buffer without requiring another input.
+Discard pending indices before codec flush and before worker stop acknowledgement.
+Activity/configuration detach unregisters only the visibility observer, and no
+Activity lock may be held across a codec operation. Receiver foreground-service
+and power retention still require their own owner and device acceptance.
 
 The encoder's bounded CSD cache accepts both MediaCodec codec-config output and
 output-format `csd-0`/`csd-1`. The sender's recovery gate stays closed until a

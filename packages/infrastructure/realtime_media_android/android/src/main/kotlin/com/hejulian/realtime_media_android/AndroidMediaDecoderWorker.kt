@@ -1,30 +1,45 @@
 package com.hejulian.realtime_media_android
 
 import android.media.MediaCodec
-import kotlin.math.max
+import android.media.MediaFormat
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Borrows one owner's decoder; the owner alone releases its resources. */
-internal fun AndroidMediaOwner.drainDecoder() {
+internal fun AndroidMediaOwner.drainDecoder(frameAvailable: AtomicBoolean) {
     val codec = synchronized(lock) { decoder } ?: return
     val info = MediaCodec.BufferInfo()
-    var queuedWidth = 0
-    var queuedHeight = 0
+    val presentation = DecoderPresentationGate(
+        canRender = { frameAvailable.compareAndSet(true, false) },
+    ) { index, render ->
+        codec.releaseOutputBuffer(index, render)
+        if (render) synchronized(lock) { framesRendered++ }
+    }
     val pump = DecoderOutputPump(
         isActive = { decoderRunning.get() },
-        submitInput = {
-            queueDecoderInput(codec) { nextWidth, nextHeight ->
-                queuedWidth = nextWidth
-                queuedHeight = nextHeight
-            }
-        },
+        submitInput = { queueDecoderInput(codec) },
         readOutput = { codec.dequeueOutputBuffer(info, 0) },
         renderOutput = { index ->
-            codec.releaseOutputBuffer(index, true)
+            val format = codec.getOutputFormat(index)
+            val dimensions = decoderOutputDimensions(
+                format.getInteger(MediaFormat.KEY_WIDTH),
+                format.getInteger(MediaFormat.KEY_HEIGHT),
+                format.optionalInteger(MediaFormat.KEY_CROP_LEFT),
+                format.optionalInteger(MediaFormat.KEY_CROP_RIGHT),
+                format.optionalInteger(MediaFormat.KEY_CROP_TOP),
+                format.optionalInteger(MediaFormat.KEY_CROP_BOTTOM),
+            )
+            if (dimensions == null) {
+                codec.releaseOutputBuffer(index, false)
+                failFromWorker("frame_rejected", "MediaCodec returned invalid output dimensions.")
+                return@DecoderOutputPump
+            }
+            rendererVisibility.present { visible ->
+                presentation.offer(index, visible && decoderRunning.get())
+            }
             synchronized(lock) {
                 framesDecoded++
-                framesRendered++
-                width = max(width, queuedWidth)
-                height = max(height, queuedHeight)
+                width = dimensions.first
+                height = dimensions.second
             }
         },
     )
@@ -32,10 +47,9 @@ internal fun AndroidMediaOwner.drainDecoder() {
         while (decoderRunning.get()) {
             if (decoderResetRequested.compareAndSet(true, false)) {
                 try {
+                    presentation.clear()
                     codec.flush()
                     pendingDecoderFrame.clear()
-                    queuedWidth = 0
-                    queuedHeight = 0
                     synchronized(lock) { width = 0; height = 0 }
                     decoderRecoveryGate.resetForFlush()
                 } catch (_: IllegalStateException) {
@@ -45,6 +59,9 @@ internal fun AndroidMediaOwner.drainDecoder() {
             }
             // Output may finish asynchronously after the last input frame.
             // Poll it even while a static screen supplies no new access unit.
+            rendererVisibility.present { visible ->
+                presentation.resume(visible && decoderRunning.get())
+            }
             if (!pump.step()) Thread.sleep(2)
         }
     } catch (_: InterruptedException) {
@@ -54,6 +71,9 @@ internal fun AndroidMediaOwner.drainDecoder() {
     } catch (_: Exception) {
         failFromWorker("decoder_failed", "Android decoder worker failed.")
     } finally {
+        // Output indices belong to the running codec and must be returned
+        // before the owner acknowledges stop or releases that codec.
+        try { presentation.clear() } catch (_: IllegalStateException) { }
         synchronized(lock) {
             if (Thread.currentThread() == decoderThread) decoderThread = null
             decoderStopAck?.countDown()
@@ -63,7 +83,6 @@ internal fun AndroidMediaOwner.drainDecoder() {
 
 private fun AndroidMediaOwner.queueDecoderInput(
     codec: MediaCodec,
-    onQueued: (Int, Int) -> Unit,
 ): Boolean {
     if (decoderRecoveryGate.hasPendingConfig && !queueDecoderConfig(codec)) return false
     val frame = pendingDecoderFrame.acquire { NativeMediaBridge.pullH264(token) } ?: return false
@@ -110,11 +129,13 @@ private fun AndroidMediaOwner.queueDecoderInput(
     input.put(accessUnit.annexB)
     codec.queueInputBuffer(inputIndex, 0, accessUnit.annexB.size,
         timestamp90kToUs(frame.timestamp), if (keyframe) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
-    onQueued(frame.width, frame.height)
     pendingDecoderFrame.markQueued()
     decoderRecoveryGate.markFrameQueued(keyframe)
     return true
 }
+
+private fun MediaFormat.optionalInteger(key: String): Int? =
+    if (containsKey(key)) getInteger(key) else null
 
 private fun AndroidMediaOwner.queueDecoderConfig(codec: MediaCodec): Boolean {
     val config = decoderRecoveryGate.cache.codecConfig() ?: return true
