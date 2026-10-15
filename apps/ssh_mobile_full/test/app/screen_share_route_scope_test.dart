@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:app_core/app_core.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:realtime_media_android/realtime_media_android.dart';
 import 'package:realtime_media_windows/realtime_media_windows.dart';
@@ -16,6 +17,8 @@ import 'package:ssh_mobile/app/screen_share_peer_arbitration.dart';
 import 'package:ssh_mobile/app/screen_share_session_lease.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  const windowChannel = MethodChannel('ssh_mobile/window_presentation');
   const realtimeId = '00112233445566778899aabbccddeeff';
   final source = ScreenCaptureSource(
     id: ScreenCaptureSourceId('display:1'),
@@ -30,6 +33,12 @@ void main() {
   late _FakeRealtimeSession session;
 
   setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(windowChannel, (_) async => true);
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(windowChannel, null),
+    );
     backend = _RecordingMediaBackend();
     capabilities = _RecordingCapabilities(
       sources: <ScreenCaptureSource>[source],

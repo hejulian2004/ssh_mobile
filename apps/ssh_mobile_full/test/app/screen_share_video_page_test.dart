@@ -1,11 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssh_mobile/app/screen_share_video_page.dart';
+import 'package:ssh_mobile/app/window_fullscreen_controller.dart';
 
 void main() {
   late ValueNotifier<Size?> size;
-  setUp(() => size = ValueNotifier(const Size(1080, 2400)));
+  late _WindowPlatform platform;
+  setUp(() {
+    size = ValueNotifier(const Size(1080, 2400));
+    platform = _WindowPlatform();
+  });
   tearDown(() => size.dispose());
 
   Widget page({VoidCallback? onStop, bool enabled = true, Locale? locale}) =>
@@ -17,6 +24,7 @@ void main() {
           controls: const Text('consent state'),
           enableViewerControls: enabled,
           onStop: onStop,
+          windowPlatform: platform,
         ),
       );
 
@@ -84,9 +92,56 @@ void main() {
     await tester.tap(find.byTooltip('Enter fullscreen'));
     await tester.pumpAndSettle();
     await tester.pumpWidget(page(enabled: false));
+    await tester.pumpAndSettle();
     expect(find.byType(AppBar), findsOneWidget);
     expect(find.byTooltip('Rotate view'), findsNothing);
     expect(find.text('consent state'), findsOneWidget);
+  });
+
+  testWidgets(
+    'back during pending enter restores native window before leaving fullscreen',
+    (tester) async {
+      final entered = Completer<void>();
+      platform.entering = entered.future;
+      await tester.pumpWidget(page());
+      final before = tester.state(find.byType(_Video));
+      await tester.tap(find.byTooltip('Enter fullscreen'));
+      await tester.pump();
+      await tester.binding.handlePopRoute();
+      entered.complete();
+      await tester.pumpAndSettle();
+      expect(platform.calls.map((call) => call.$2), [true, false]);
+      expect(platform.calls.first.$1, platform.calls.last.$1);
+      expect(find.byType(AppBar), findsOneWidget);
+      expect(tester.state(find.byType(_Video)), same(before));
+    },
+  );
+
+  testWidgets('route disposal compensates late native enter', (tester) async {
+    final entered = Completer<void>();
+    platform.entering = entered.future;
+    await tester.pumpWidget(page());
+    await tester.tap(find.byTooltip('Enter fullscreen'));
+    await tester.pumpWidget(const SizedBox());
+    entered.complete();
+    await tester.pumpAndSettle();
+    expect(platform.calls.map((call) => call.$2), [true, false]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('native failure keeps window controls and reports an error', (
+    tester,
+  ) async {
+    platform.failEnter = true;
+    await tester.pumpWidget(page());
+    await tester.tap(find.byTooltip('Enter fullscreen'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AppBar), findsOneWidget);
+    expect(
+      find.text('Unable to change or restore fullscreen.'),
+      findsOneWidget,
+    );
+    expect(platform.calls.map((call) => call.$2), [true, false]);
   });
 
   testWidgets('missing or invalid dimensions remain renderable', (
@@ -101,6 +156,52 @@ void main() {
     expect(find.byType(AspectRatio), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'terminal view can retry a failed native fullscreen restoration',
+    (tester) async {
+      await tester.pumpWidget(page());
+      final before = tester.state(find.byType(_Video));
+      await tester.tap(find.byTooltip('Enter fullscreen'));
+      await tester.pumpAndSettle();
+      platform.failExit = true;
+      await tester.pumpWidget(page(enabled: false));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppBar), findsNothing);
+      expect(find.byTooltip('Rotate view'), findsNothing);
+      expect(find.text('Retry restore'), findsOneWidget);
+      platform.failExit = false;
+      await tester.tap(find.text('Retry restore'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppBar), findsOneWidget);
+      expect(
+        find.text('Unable to change or restore fullscreen.'),
+        findsNothing,
+      );
+      expect(tester.state(find.byType(_Video)), same(before));
+      expect(platform.calls.map((call) => call.$1).toSet().length, 1);
+    },
+  );
+}
+
+class _WindowPlatform implements AppWindowPresentationPlatform {
+  final calls = <(int, bool)>[];
+  Future<void>? entering;
+  bool failEnter = false;
+  bool failExit = false;
+  @override
+  Future<void> setFullscreen({
+    required int leaseId,
+    required bool enabled,
+  }) async {
+    calls.add((leaseId, enabled));
+    if (enabled) {
+      await entering;
+      if (failEnter) throw StateError('window unavailable');
+    } else if (failExit) {
+      throw StateError('restore failed');
+    }
+  }
 }
 
 class _Video extends StatefulWidget {
