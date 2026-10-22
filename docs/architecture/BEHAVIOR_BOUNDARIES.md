@@ -76,7 +76,7 @@ data → domain 模型
 | 局域网共享 | `app_core`、`app_ui`、`network_sdk` | `network_transport`、native、`ssh_core`、`feature_screen_share` |
 | 屏幕共享 | `app_ui`、`network_sdk` 的会话元数据 | `realtime_media`、native、SDP/ICE、传输门面 |
 
-组合根是唯一同时看见「业务公共入口」和「该入口相邻实现」的层。`ssh_mobile_full` 和 `ssh_mobile_network` 可以依赖 `network_transport` 来注入门面。`feature_lan_share` 的网络边停在 `network_sdk`。native 绑定只属于 `network_transport` 的下一层。
+组合根是唯一同时看见「业务公共入口」和「该入口相邻实现」的层。`ssh_mobile_full` 和 `ssh_mobile_network` 可以依赖 `network_transport`，并把运行时收成 `LanShareNetworkRuntimePort` 后注入。`feature_lan_share` 的网络边停在 `network_sdk`。native 绑定只属于 `network_transport` 的下一层。
 
 `feature_ai` 到 `feature_playbook` 是唯一登记的横向端口，只走公开 `PlaybookAutomationPort`。新的业务包依赖另走架构评审，默认不加。
 
@@ -131,7 +131,7 @@ data → domain 模型
 | MCP | `feature_mcp` | `McpModule` 独占 `mcp.db` | 本地工具 Port | 释放的是 MCP HTTP Server 和审批队列，然后才是本库 |
 | WebView | `feature_webview` | 不拥有数据库，不把页面正文写入持久化存储 | App 注入的安全策略；会话控制器由 AppRuntime 持有 | AI 编排留在 `feature_ai` |
 | 开发者诊断 | `feature_developer` | 不拥有数据库；展示注入的脱敏状态 | 日志和遥测 Port | Relay 设备库不在这条链上 |
-| 局域网共享 | `feature_lan_share` | `LanShareModule` 独占 `lan_share.db`；密钥和 Token 在安全存储 | 借用 Full App 的 `NetworkFacade`；控制 HTTP 由 App 注入 | 路径、E2EE、二进制传输失败才下钻 SDK。屏幕共享包不在本包依赖里 |
+| 局域网共享 | `feature_lan_share` | `LanShareModule` 独占 `lan_share.db`；密钥和 Token 在安全存储 | 借用 Full App 的 `NetworkFacade`；运行时经 `LanShareNetworkRuntimePort` 注入；控制 HTTP 由 App 注入 | 路径、E2EE、二进制传输失败才下钻 SDK。屏幕共享包不在本包依赖里 |
 | 屏幕共享 | `feature_screen_share` 拥有同意、超时和业务状态。入口、仲裁、路由、会话租约、媒体协调在 `apps/ssh_mobile_full/lib/app/screen_share_*.dart` | Feature 不存媒体帧 | `LanShareScreenSharePort`、SDK Realtime、`realtime_media` 不透明端点 | 平台采集在 `realtime_media_android` / `realtime_media_windows`。TURN 凭证颁发才读 `relay/internal/relay/turn_credentials.go` |
 
 终端按键、渲染、历史停在 `feature_terminal`。SFTP 页面、路径收藏、目标指纹校验停在 `feature_sftp`。两边的字节和连接生命周期仍在上表的 App 后端，那是兼容边界，不是新功能的落地处。

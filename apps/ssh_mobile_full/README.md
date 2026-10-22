@@ -1,4 +1,4 @@
-最新更新时间：2026-10-14
+最新更新时间：2026-10-22
 
 # ssh_mobile_full
 
@@ -12,7 +12,10 @@ Network V2 的组合根约束：`AppRuntimeFactory` 创建 App-owned `AppNetwork
 `NetworkRuntime` 和共享 `NetworkFacade`；事件订阅和诊断不触发初始化。LAN、SSH、
 SFTP、Realtime 和 Relay 只借用这些 App Scope 资源；Feature
 或 Route Scope 不得创建第二个 runtime/facade，也不得在 deactivate/reactivate 时
-停止、销毁或重新配置它们。
+停止、销毁或重新配置它们。局域网运行时经 `LanShareNetworkRuntimePort` 注入：
+`ensureRuntime` 映射为 `NetworkCapability.runtime`，`ensureWebSocketRelay`
+映射为 `NetworkCapability.webSocketRelay`。`feature_lan_share` 不依赖
+`network_transport`。
 
 ## 不负责什么
 

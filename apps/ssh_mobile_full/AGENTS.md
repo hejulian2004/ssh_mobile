@@ -1,4 +1,4 @@
-最新更新时间：2026-10-11
+最新更新时间：2026-10-22
 
 # ssh_mobile_full 维护约束
 
@@ -8,8 +8,11 @@
   `NetworkRuntime`, native command gateway, and shared `NetworkFacade`; one
   App process performs at most one successful `ConfigureRuntime`, on first
   network use. Cold event/diagnostic subscriptions must not initialize keys
-  or native handles. LAN, SSH, SFTP,
-  Realtime, and Relay borrow these resources.
+  or native handles. SSH, SFTP, Realtime, and Relay borrow these resources.
+  LAN runtime is injected as `LanShareNetworkRuntimePort`: `ensureRuntime`
+  maps to `NetworkCapability.runtime`, and `ensureWebSocketRelay` maps to
+  `NetworkCapability.webSocketRelay`. `feature_lan_share` does not depend on
+  `network_transport`.
 - `NetworkIdentityBundle` (Ed25519/X25519 key pairs) belongs to App/infrastructure;
   Features never create, persist, or replace it. `AppRuntime.dispose()` stops
   Feature/Module use and facade/realtime subscriptions before stopping/destroying

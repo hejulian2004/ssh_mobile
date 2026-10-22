@@ -1,4 +1,4 @@
-> Last updated: 2026-10-12
+> Last updated: 2026-10-22
 
 # LAN Share Feature Memory
 
@@ -131,7 +131,8 @@ explicit/configured, not an import or App-start side effect.
   drains keep-alive, history migration, and persistence work.
 - Direct is preferred; Relay is fallback only when peer Relay authorization,
   local enrollment/configuration, remote capability, and native route checks
-  pass. There is no Relay-only peer creation flow. Receiver startup ensures only
+  pass. There is no Relay-only peer creation flow. Receiver startup calls only
+  `LanShareNetworkRuntimePort.ensureRuntime`. The App shell maps that call to
   `NetworkCapability.runtime`; QUIC is not an implicit command-gateway
   prerequisite. Wave 1 `ConfigureRuntime` still initializes direct QUIC/TCP;
   QUIC-free WSS-only is deferred to Wave 2 and does not exist today.

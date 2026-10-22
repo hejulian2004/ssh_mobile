@@ -38,7 +38,8 @@ flutter test
 
 下列入口会打开平台安全存储或平台数据库，widget 测试改走 `open`。
 页面测试在 App 外提供 Feature 已支持的 `LanShareViewModel`，因此不会启动真实
-mDNS/UDP。生产 `create()` 仍启用接收器，并且只确保 `NetworkCapability.runtime`。
+mDNS/UDP。生产 `create()` 仍启用接收器。本 Shell 把
+`LanShareNetworkRuntimePort.ensureRuntime` 映射为 `NetworkCapability.runtime`。
 
 - `lib/main.dart`：委托给 `NetworkAppBootstrap.run`，用 `coverage:ignore` 标记。
 - `lib/app/network_app_bootstrap.dart`：绑定 Flutter 并 `runApp`。
