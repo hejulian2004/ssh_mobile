@@ -11,6 +11,31 @@ import java.util.concurrent.TimeUnit
 
 class ProjectionLeaseTest {
     @Test
+    fun capturedSizeCoalescesRotationAndIgnoresLateTerminalCallbacks() {
+        val lease = ProjectionLeaseStateMachine()
+        assertTrue(lease.updateCapturedSize(1080, 1920))
+        assertTrue(lease.consume(7))
+        assertTrue(lease.updateCapturedSize(1920, 1080))
+        assertTrue(lease.updateCapturedSize(1080, 1920))
+        assertEquals(1080 to 1920, lease.capturedSize)
+        assertFalse(lease.updateCapturedSize(0, 1080))
+        assertFalse(lease.updateCapturedSize(1080, -1))
+        assertEquals(1080 to 1920, lease.capturedSize)
+        lease.revoke()
+        assertFalse(lease.updateCapturedSize(1920, 1080))
+        assertNull(lease.capturedSize)
+        lease.release()
+        assertFalse(lease.updateCapturedSize(1920, 1080))
+        assertNull(lease.capturedSize)
+    }
+
+    @Test
+    fun projectionFailuresRemainTypedWithoutSystemMessageContent() {
+        assertEquals("permission_denied", projectionFailureCode(SecurityException("private-fixture")))
+        assertEquals("backend_failure", projectionFailureCode(IllegalStateException("private-fixture")))
+    }
+
+    @Test
     fun leaseCanBeConsumedOnlyOnceAndReleasedIdempotently() {
         val lease = ProjectionLeaseStateMachine()
 

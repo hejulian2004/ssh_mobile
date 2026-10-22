@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:app_core/app_core.dart';
+
 import 'package:feature_lan_share/feature_lan_share.dart' as lan;
 import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:flutter/foundation.dart';
@@ -12,6 +14,7 @@ import 'navigation/app_route_contributions.dart';
 import 'screen_share_peer_arbitration.dart';
 import 'screen_share_route_scope.dart';
 import 'screen_share_session_lease.dart';
+import 'screen_share_codec_mode_picker.dart';
 
 /// App-owned peer action that turns the LAN secondary action into a route.
 final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
@@ -19,11 +22,15 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
     required this.runtime,
     required this.navigatorKey,
     AppScreenSharePeerArbitrationRegistry? arbitration,
-  }) : arbitration = arbitration ?? AppScreenSharePeerArbitrationRegistry();
+  }) : _ownsArbitration = arbitration == null,
+       arbitration = arbitration ?? AppScreenSharePeerArbitrationRegistry();
 
   final AppRuntime runtime;
   final GlobalKey<NavigatorState> navigatorKey;
   final AppScreenSharePeerArbitrationRegistry arbitration;
+  final bool _ownsArbitration;
+  bool _disposed = false;
+  final Completer<void> _disposedSignal = Completer<void>();
   final Set<String> _startsInFlight = <String>{};
   int _operationSequence = 0;
 
@@ -34,7 +41,8 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
 
   @override
   bool canShareWith(String peerId) {
-    if (!_platformSupported ||
+    if (_disposed ||
+        !_platformSupported ||
         peerId == runtime.lanShareSettingsAdapter.lanDeviceId) {
       return false;
     }
@@ -46,7 +54,8 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
 
   @override
   bool canReceiveScreenShareFrom(String peerId) {
-    if (!_platformSupported ||
+    if (_disposed ||
+        !_platformSupported ||
         peerId == runtime.lanShareSettingsAdapter.lanDeviceId) {
       return false;
     }
@@ -103,7 +112,25 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
       }
       final selectedSource = await _selectSource();
       if (selectedSource == null) return;
-      if (superseded) throw StateError('Screen-share intent was superseded.');
+      if (superseded || _disposed) {
+        throw StateError('Screen-share intent was superseded.');
+      }
+      _logPreparation('connecting authenticated peer');
+
+      final coordinator = runtime.lanShareModule.coordinator;
+      final network = coordinator.nativeTransferCoordinator;
+      if (network == null) throw StateError('Network receiver is not ready.');
+      final prepared = await network.prepareRealtimeConnection(
+        peerId: peerId,
+        discovery: coordinator.viewModel?.peerStateFor(peerId)?.discovery,
+      );
+      if (prepared is SdkFailure<void>) {
+        throw StateError(prepared.error.message);
+      }
+      if (superseded || _disposed) {
+        throw StateError('Screen-share intent was superseded.');
+      }
+      _logPreparation('starting native session');
 
       final realtimeId = _newHexIdentity();
       session = runtime.realtimeClient.createSession(
@@ -114,9 +141,17 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
       if (startResult is SdkFailure<void>) {
         throw StateError(startResult.error.message);
       }
-      if (superseded) throw StateError('Screen-share intent was superseded.');
-      await _waitForIdentity(session);
-      if (superseded) throw StateError('Screen-share intent was superseded.');
+      if (superseded || _disposed) {
+        throw StateError('Screen-share intent was superseded.');
+      }
+      await waitForScreenShareSessionIdentity(
+        session,
+        cancelled: _disposedSignal.future,
+      );
+      if (superseded || _disposed) {
+        throw StateError('Screen-share intent was superseded.');
+      }
+      _logPreparation('opening consent route');
       lease = AppScreenShareSessionLease(
         client: runtime.realtimeClient,
         session: session,
@@ -127,9 +162,11 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
         localPeerId: runtime.lanShareSettingsAdapter.lanDeviceId,
         source: selectedSource.nativeSource,
         sourceOption: selectedSource.option,
+        codecMode: selectedSource.codecMode,
         operationId: operationId,
         mode: AppScreenShareRouteMode.send,
         startOutgoing: true,
+        arbitration: arbitration,
       );
       try {
         routeActive = true;
@@ -170,7 +207,7 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
           } catch (_) {}
         }
       }
-      if (acquired) {
+      if (acquired && !handedOff) {
         arbitration.release(
           remotePeerId: peerId,
           initiatorPeerId: runtime.lanShareSettingsAdapter.lanDeviceId,
@@ -210,44 +247,40 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
     ];
     return showModalBottomSheet<_SelectedScreenShareSource>(
       context: context,
-      builder: (context) => ScreenShareSourcePicker(
+      builder: (context) => AppScreenShareSourcePicker(
         options: [for (final selected in options) selected.option],
-        onSelected: (option) {
+        onSelected: (option, codecMode) {
           final selected = options.firstWhere(
             (candidate) => candidate.option.opaqueId == option.opaqueId,
           );
-          Navigator.pop(context, selected);
+          Navigator.pop(
+            context,
+            _SelectedScreenShareSource(
+              nativeSource: selected.nativeSource,
+              option: selected.option,
+              codecMode: codecMode,
+            ),
+          );
         },
       ),
     );
   }
 
-  Future<void> _waitForIdentity(RealtimeSession session) async {
-    bool ready(RealtimeSnapshot? snapshot) {
-      final effectiveState = snapshot?.state ?? session.state;
-      return (effectiveState == RealtimeSessionState.negotiating ||
-              effectiveState == RealtimeSessionState.connected) &&
-          (snapshot?.generation ?? session.generation) != null &&
-          (snapshot?.sharedSessionInstanceId ??
-                  session.sharedSessionInstanceId) !=
-              null;
-    }
-
-    if (ready(session.currentSnapshot)) return;
-    final completer = Completer<void>();
-    late final StreamSubscription<RealtimeSnapshot> subscription;
-    subscription = session.snapshots.listen((snapshot) {
-      if (!completer.isCompleted && ready(snapshot)) {
-        completer.complete();
-      }
-    });
-    try {
-      if (ready(session.currentSnapshot)) return;
-      await completer.future.timeout(const Duration(seconds: 30));
-    } finally {
-      await subscription.cancel();
-    }
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _disposedSignal.complete();
+    if (_ownsArbitration) arbitration.dispose();
   }
+
+  void _logPreparation(String phase) => runtime.logger.log(
+    LogRecord(
+      timestamp: DateTime.now(),
+      level: LogLevel.info,
+      source: 'ScreenShareEntryCoordinator',
+      message: 'Screen-share preparation: $phase',
+    ),
+  );
 
   String _newOperationId() {
     _operationSequence = (_operationSequence + 1) & 0xffff;
@@ -283,8 +316,10 @@ final class _SelectedScreenShareSource {
   const _SelectedScreenShareSource({
     required this.nativeSource,
     required this.option,
+    this.codecMode = RealtimeMediaCodecMode.hardware,
   });
 
   final ScreenCaptureSource nativeSource;
   final ScreenShareSourceOption option;
+  final RealtimeMediaCodecMode codecMode;
 }

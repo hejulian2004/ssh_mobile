@@ -21,6 +21,399 @@ void main() {
   });
 
   test(
+    'screen sharing prepares a mapped direct connection without transferring a file',
+    () async {
+      HttpOverrides.global = _CapabilitiesHttpOverrides(
+        getNativePort: () => 43123,
+        expectedIdentityKey: Uint8List(32),
+        expectedX25519Key: Uint8List(32),
+      );
+      final fixture = await _Fixture.create(
+        trusted: true,
+        discoveryBridge: _MappingBridge(55002),
+      );
+      addTearDown(fixture.dispose);
+      final result = await fixture.coordinator.prepareRealtimeConnection(
+        peerId: 'peer-a',
+        discovery: _device('peer-a').copyWith(ip: '127.0.0.1'),
+      );
+      expect(result, isA<SdkSuccess<void>>());
+      expect(fixture.updatedEndpoints, ['peer-a:127.0.0.1:55002']);
+      expect(fixture.facade.connectCalls, 1);
+      expect(fixture.facade.transferCalls, 0);
+    },
+  );
+
+  test('screen sharing rejects untrusted peers before connecting', () async {
+    final fixture = await _Fixture.create();
+    addTearDown(fixture.dispose);
+    final result = await fixture.coordinator.prepareRealtimeConnection(
+      peerId: 'peer-a',
+      discovery: _device('peer-a'),
+    );
+    expect(result, isA<SdkFailure<void>>());
+    expect(fixture.facade.connectCalls, 0);
+  });
+
+  test(
+    'screen sharing rejects mismatched discovery, missing routes and disposed owners',
+    () async {
+      final fixture = await _Fixture.create(trusted: true);
+      final mismatch = await fixture.coordinator.prepareRealtimeConnection(
+        peerId: 'peer-a',
+        discovery: _device('other'),
+      );
+      expect(
+        (mismatch as SdkFailure<void>).error.code,
+        NetworkErrorCode.invalidArgument,
+      );
+      final noRoute = await fixture.coordinator.prepareRealtimeConnection(
+        peerId: 'peer-a',
+      );
+      expect(
+        (noRoute as SdkFailure<void>).error.code,
+        NetworkErrorCode.noRoute,
+      );
+      expect(fixture.facade.connectCalls, 0);
+      await fixture.coordinator.dispose();
+      expect(
+        (await fixture.coordinator.prepareRealtimeConnection(peerId: 'peer-a')
+                as SdkFailure<void>)
+            .error
+            .code,
+        NetworkErrorCode.cancelled,
+      );
+      await fixture.transferService.close();
+      await fixture.store.dispose();
+      await fixture.facade.close();
+    },
+  );
+
+  test(
+    'screen sharing honors policy, reconciliation and endpoint failures',
+    () async {
+      HttpOverrides.global = _CapabilitiesHttpOverrides(
+        getNativePort: () => 43123,
+        expectedIdentityKey: Uint8List(32),
+        expectedX25519Key: Uint8List(32),
+      );
+      final fixture = await _Fixture.create(trusted: true);
+      addTearDown(fixture.dispose);
+      fixture.policyPort.failPolicy = true;
+      expect(
+        await fixture.coordinator.prepareRealtimeConnection(peerId: 'peer-a'),
+        isA<SdkFailure<void>>(),
+      );
+      fixture.policyPort.failPolicy = false;
+      fixture.policyPort.blockedPeers.add('peer-a');
+      expect(
+        await fixture.coordinator.prepareRealtimeConnection(peerId: 'peer-a'),
+        isA<SdkFailure<void>>(),
+      );
+      fixture.policyPort.blockedPeers.clear();
+      fixture.policyPort.failReconcile = true;
+      expect(
+        await fixture.coordinator.prepareRealtimeConnection(peerId: 'peer-a'),
+        isA<SdkFailure<void>>(),
+      );
+      fixture.policyPort.failReconcile = false;
+      fixture.policyPort.failUpdate = true;
+      expect(
+        await fixture.coordinator.prepareRealtimeConnection(
+          peerId: 'peer-a',
+          discovery: _device('peer-a'),
+        ),
+        isA<SdkFailure<void>>(),
+      );
+      expect(fixture.facade.connectCalls, 0);
+    },
+  );
+
+  test(
+    'screen sharing cannot create Relay-only trust or connect after unpair',
+    () async {
+      final fixture = await _Fixture.create(
+        trusted: true,
+        relayAuthorized: true,
+      );
+      addTearDown(fixture.dispose);
+      final trust = (await fixture.store.read('peer-a'))!;
+      expect(
+        () => trust.copyWith(
+          authorization: const PeerRouteAuthorization(
+            localDirect: false,
+            relay: true,
+          ),
+        ),
+        throwsFormatException,
+      );
+      await fixture.store.delete('peer-a');
+      final result = await fixture.coordinator.prepareRealtimeConnection(
+        peerId: 'peer-a',
+        discovery: _device('peer-a'),
+      );
+      expect(
+        (result as SdkFailure<void>).error.code,
+        NetworkErrorCode.authenticationFailed,
+      );
+      expect(fixture.facade.connectCalls, 0);
+    },
+  );
+
+  test(
+    'screen sharing fails closed on capability identity mismatch and connect errors',
+    () async {
+      HttpOverrides.global = _CapabilitiesHttpOverrides(
+        getNativePort: () => 43123,
+        expectedIdentityKey: Uint8List.fromList(List.filled(32, 1)),
+        expectedX25519Key: Uint8List(32),
+      );
+      final fixture = await _Fixture.create(
+        trusted: true,
+        relayAuthorized: true,
+      );
+      addTearDown(fixture.dispose);
+      expect(
+        (await fixture.coordinator.prepareRealtimeConnection(
+                  peerId: 'peer-a',
+                  discovery: _device('peer-a'),
+                )
+                as SdkFailure<void>)
+            .error
+            .code,
+        NetworkErrorCode.identityConflict,
+      );
+      expect(fixture.invalidatedPeerIds, ['peer-a']);
+      fixture.facade.failConnectCount = 1;
+      expect(
+        await fixture.coordinator.prepareRealtimeConnection(peerId: 'peer-a'),
+        isA<SdkFailure<void>>(),
+      );
+      fixture.facade.throwConnect = true;
+      expect(
+        await fixture.coordinator.prepareRealtimeConnection(peerId: 'peer-a'),
+        isA<SdkFailure<void>>(),
+      );
+      fixture.facade.throwConnect = false;
+      expect(
+        await fixture.coordinator.prepareRealtimeConnection(peerId: 'peer-a'),
+        isA<SdkSuccess<void>>(),
+      );
+      expect(fixture.facade.transferCalls, 0);
+    },
+  );
+
+  test(
+    'capability query resolves a guest control port through the live discovery mapping',
+    () async {
+      HttpOverrides.global = _CapabilitiesHttpOverrides(
+        getNativePort: () => 43123,
+        expectedIdentityKey: Uint8List(32),
+        expectedX25519Key: Uint8List(32),
+        capabilityFields: {'expectedControlPort': 55001},
+      );
+      final fixture = await _Fixture.create(
+        trusted: true,
+        discoveryBridge: _MappingBridge(55002, controlPort: 55001),
+      );
+      addTearDown(fixture.dispose);
+      final directory = await Directory.systemTemp.createTemp(
+        'lan-control-map-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final file = File('${directory.path}/payload')..writeAsStringSync('x');
+      final result = await fixture.coordinator.sendFile(
+        peerId: 'peer-a',
+        transferId: 'mapped-control',
+        filePath: file.path,
+        discovery: _device(
+          'peer-a',
+        ).copyWith(ip: '127.0.0.1', controlPort: 53317),
+      );
+      expect(result, isA<SdkSuccess<SdkTransferSession>>());
+      expect(fixture.updatedEndpoints, ['peer-a:127.0.0.1:55002']);
+    },
+  );
+
+  test(
+    'native route events publish direct and relay state without mutating prior snapshots',
+    () async {
+      final fixture = await _Fixture.create();
+      addTearDown(fixture.dispose);
+      final snapshots = <Map<String, LanPeerRouteState>>[];
+      final subscription = fixture.coordinator.routeStates.listen(
+        snapshots.add,
+      );
+      addTearDown(subscription.cancel);
+      for (final route in [
+        NetworkRouteType.quicDirect,
+        NetworkRouteType.relay,
+      ]) {
+        fixture.facade.emit(
+          PeerStateChanged(
+            eventId: 'connected-$route',
+            timestamp: DateTime.now(),
+            peerId: 'peer-a',
+            state: PeerConnectionState.connected,
+            routeType: route,
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          fixture.coordinator.currentRouteStates['peer-a']!.activeRoute,
+          route,
+        );
+        fixture.facade.emit(
+          RouteChanged(
+            eventId: 'changed-$route',
+            timestamp: DateTime.now(),
+            snapshot: SdkRouteSnapshot(
+              peerId: 'peer-a',
+              routeType: route,
+              endpoint: '127.0.0.1:55002',
+            ),
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          fixture.coordinator.currentRouteStates['peer-a']!.endpoint,
+          '127.0.0.1:55002',
+        );
+      }
+      fixture.facade.emit(
+        PeerStateChanged(
+          eventId: 'offline',
+          timestamp: DateTime.now(),
+          peerId: 'peer-a',
+          state: PeerConnectionState.disconnected,
+          routeType: NetworkRouteType.quicDirect,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        fixture.coordinator.currentRouteStates['peer-a']!.directAvailable,
+        isFalse,
+      );
+      expect(snapshots.first['peer-a']!.directAvailable, isTrue);
+    },
+  );
+
+  test(
+    'policy failures reject incoming requests and thrown policy errors allow retry',
+    () async {
+      final fixture = await _Fixture.create(trusted: true);
+      addTearDown(fixture.dispose);
+      fixture.policyPort.failPolicy = true;
+      fixture.facade.emit(_offer('policy-event', 'peer-a'));
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(fixture.facade.responses, [('policy-event', false)]);
+      final offer = _offer('policy-decision', 'peer-a');
+      expect(await fixture.coordinator.accept(offer), isA<SdkFailure<void>>());
+      expect(fixture.facade.responses.last, ('policy-decision', false));
+      fixture.policyPort.failPolicy = false;
+      fixture.policyPort.throwPolicy = true;
+      final retryOffer = _offer('policy-retry', 'peer-a');
+      expect(
+        await fixture.coordinator.accept(retryOffer),
+        isA<SdkFailure<void>>(),
+      );
+      fixture.policyPort.throwPolicy = false;
+      expect(
+        await fixture.coordinator.accept(retryOffer),
+        isA<SdkSuccess<void>>(),
+      );
+      fixture.facade.throwRespond = true;
+      expect(
+        await fixture.coordinator.reject(_offer('native-error', 'peer-a')),
+        isA<SdkFailure<void>>(),
+      );
+      await fixture.coordinator.dispose();
+      expect(
+        await fixture.coordinator.accept(_offer('disposed', 'peer-a')),
+        isA<SdkFailure<void>>(),
+      );
+    },
+  );
+
+  for (final capabilityFields in <Map<String, Object?>>[
+    {'protocolVersion': 1},
+    {'quicFileTransfer': false},
+    {'quicPort': 0},
+    {'responseStatus': 403},
+  ]) {
+    test(
+      'invalid capability response $capabilityFields fails before native connection',
+      () async {
+        HttpOverrides.global = _CapabilitiesHttpOverrides(
+          getNativePort: () => 43123,
+          expectedIdentityKey: Uint8List(32),
+          expectedX25519Key: Uint8List(32),
+          capabilityFields: capabilityFields,
+        );
+        final fixture = await _Fixture.create(trusted: true);
+        addTearDown(fixture.dispose);
+        final directory = await Directory.systemTemp.createTemp(
+          'lan-invalid-cap-',
+        );
+        addTearDown(() => directory.delete(recursive: true));
+        final file = File('${directory.path}/payload')..writeAsStringSync('x');
+        expect(
+          await fixture.coordinator.sendFile(
+            peerId: 'peer-a',
+            transferId: 'invalid-cap',
+            filePath: file.path,
+            discovery: _device('peer-a'),
+          ),
+          isA<SdkFailure<SdkTransferSession>>(),
+        );
+        expect(fixture.facade.connectCalls, 0);
+      },
+    );
+  }
+
+  for (final mappedPort in <int?>[55002, null]) {
+    test(
+      'authenticated native capabilities require a live port mapping ($mappedPort)',
+      () async {
+        HttpOverrides.global = _CapabilitiesHttpOverrides(
+          getNativePort: () => 43123,
+          expectedIdentityKey: Uint8List(32),
+          expectedX25519Key: Uint8List(32),
+        );
+        final bridge = _MappingBridge(mappedPort);
+        final fixture = await _Fixture.create(
+          trusted: true,
+          discoveryBridge: bridge,
+        );
+        addTearDown(fixture.dispose);
+        final directory = await Directory.systemTemp.createTemp(
+          'lan-mapped-source-',
+        );
+        addTearDown(() => directory.delete(recursive: true));
+        final file = File('${directory.path}/payload.bin')
+          ..writeAsStringSync('x');
+        final result = await fixture.coordinator.sendFile(
+          peerId: 'peer-a',
+          transferId: 'mapped-transfer',
+          filePath: file.path,
+          discovery: _device(
+            'peer-a',
+          ).copyWith(ip: '127.0.0.1', controlPort: 55001),
+        );
+        expect(bridge.observedPort, 43123);
+        if (mappedPort == null) {
+          expect(result, isA<SdkFailure<SdkTransferSession>>());
+          expect(fixture.facade.connectCalls, 0);
+          expect(fixture.updatedEndpoints, isEmpty);
+        } else {
+          expect(result, isA<SdkSuccess<SdkTransferSession>>());
+          expect(fixture.updatedEndpoints, ['peer-a:127.0.0.1:$mappedPort']);
+        }
+      },
+    );
+  }
+
+  test(
     'sendFile rejects missing sources before any network operation',
     () async {
       final fixture = await _Fixture.create();
@@ -134,6 +527,35 @@ void main() {
       expect(fixture.facade.connectCalls, 1);
       expect(fixture.facade.transferCalls, 1);
       expect(fixture.invalidatedPeerIds, contains('peer-a'));
+    },
+  );
+
+  test(
+    'sendFile reconciles the persisted peer before the first native connect',
+    () async {
+      final fixture = await _Fixture.create(
+        trusted: true,
+        relayAuthorized: true,
+      );
+      addTearDown(fixture.dispose);
+      fixture.policyPort.onReconcile = () {
+        expect(fixture.facade.connectCalls, 0);
+      };
+      final directory = await Directory.systemTemp.createTemp('lan-v2-source-');
+      addTearDown(() => directory.delete(recursive: true));
+      final file = File('${directory.path}/payload.bin')
+        ..writeAsStringSync('hello');
+
+      final result = await fixture.coordinator.sendFile(
+        peerId: 'peer-a',
+        transferId: 'tx-reconcile-before-connect',
+        filePath: file.path,
+        discovery: null,
+      );
+
+      expect(result, isA<SdkSuccess<SdkTransferSession>>());
+      expect(fixture.policyPort.reconciledPeerIds, <String>['peer-a']);
+      expect(fixture.facade.connectCalls, 1);
     },
   );
 
@@ -721,6 +1143,7 @@ final class _Fixture {
     bool relayAuthorized = false,
     Duration offerTimeout = LanNativeTransferCoordinator.defaultOfferTimeout,
     double freeDiskSpaceMb = 1000.0,
+    LanShareDiscoveryBridgePort? discoveryBridge,
   }) async {
     final store = LanPeerTrustStore();
     if (trusted) {
@@ -736,6 +1159,7 @@ final class _Fixture {
     final facade = _RecordingFacade();
     final transferService = LanTransferService(
       currentDeviceId: 'device-a',
+      discoveryBridge: discoveryBridge,
       securityService: LanSecurityService(
         appOwnedX25519PrivateSeed: Uint8List(32),
         peerTrustStore: store,
@@ -797,12 +1221,28 @@ final class _RecordingPolicyPort implements LanNativePeerPolicyPort {
   final List<String>? invalidatedPeerIds;
   final Set<String> blockedPeers = {};
   bool failInvalidate = false;
+  bool failPolicy = false;
+  bool failReconcile = false;
+  bool failUpdate = false;
+  bool throwPolicy = false;
   FutureOr<void> Function()? onInvalidate;
+  FutureOr<void> Function()? onReconcile;
+  final List<String> reconciledPeerIds = <String>[];
 
   @override
   Future<NetworkResult<LanPeerPolicySnapshot>> getPeerPolicy(
     String peerId,
   ) async {
+    if (throwPolicy) throw StateError('Policy unavailable');
+    if (failPolicy) {
+      return const NetworkFailure(
+        NetworkError(
+          code: NetworkErrorCode.ioError,
+          message: 'Policy unavailable',
+          operation: NetworkOperation.respondToIncoming,
+        ),
+      );
+    }
     final t = await store.read(peerId);
     final isBlocked = blockedPeers.contains(peerId);
     return NetworkSuccess(
@@ -820,6 +1260,14 @@ final class _RecordingPolicyPort implements LanNativePeerPolicyPort {
     String endpoint,
   ) async {
     updatedEndpoints?.add('$peerId:$endpoint');
+    if (failUpdate) {
+      return const NetworkFailure(
+        NetworkError(
+          code: NetworkErrorCode.noRoute,
+          message: 'Endpoint unavailable',
+        ),
+      );
+    }
     return const NetworkSuccess(null);
   }
 
@@ -860,6 +1308,16 @@ final class _RecordingPolicyPort implements LanNativePeerPolicyPort {
   Future<NetworkResult<void>> reconcilePersistedTrust(
     LanPeerTrustRecord record,
   ) async {
+    reconciledPeerIds.add(record.deviceId);
+    if (failReconcile) {
+      return const NetworkFailure(
+        NetworkError(
+          code: NetworkErrorCode.authenticationFailed,
+          message: 'Reconcile failed',
+        ),
+      );
+    }
+    if (onReconcile != null) await onReconcile!();
     return const NetworkSuccess(null);
   }
 }
@@ -871,7 +1329,9 @@ final class _RecordingFacade extends Fake implements NetworkFacade {
   int connectCalls = 0;
   int transferCalls = 0;
   int? failConnectCount;
+  bool throwConnect = false;
   bool failRespond = false;
+  bool throwRespond = false;
   int? failRespondCount;
   Completer<void>? respondCompleter;
 
@@ -886,6 +1346,7 @@ final class _RecordingFacade extends Fake implements NetworkFacade {
     CommunicationClass communicationClass = CommunicationClass.reliableStream,
   }) async {
     connectCalls++;
+    if (throwConnect) throw StateError('Connect failed');
     final count = failConnectCount;
     if (count != null && count > 0) {
       failConnectCount = count - 1;
@@ -923,6 +1384,7 @@ final class _RecordingFacade extends Fake implements NetworkFacade {
     required String transferId,
     required bool accept,
   }) async {
+    if (throwRespond) throw StateError('Native response unavailable');
     if (respondCompleter != null) {
       await respondCompleter!.future;
     }
@@ -988,11 +1450,13 @@ class _CapabilitiesHttpOverrides extends HttpOverrides {
     required this.getNativePort,
     required this.expectedIdentityKey,
     required this.expectedX25519Key,
+    this.capabilityFields = const {},
   });
 
   final int Function() getNativePort;
   final Uint8List expectedIdentityKey;
   final Uint8List expectedX25519Key;
+  final Map<String, Object?> capabilityFields;
 
   @override
   HttpClient createHttpClient(SecurityContext? context) {
@@ -1000,6 +1464,7 @@ class _CapabilitiesHttpOverrides extends HttpOverrides {
       getNativePort: getNativePort,
       expectedIdentityKey: expectedIdentityKey,
       expectedX25519Key: expectedX25519Key,
+      capabilityFields: capabilityFields,
     );
   }
 }
@@ -1009,11 +1474,13 @@ class _MockCapabilitiesHttpClient extends Fake implements HttpClient {
     required this.getNativePort,
     required this.expectedIdentityKey,
     required this.expectedX25519Key,
+    this.capabilityFields = const {},
   });
 
   final int Function() getNativePort;
   final Uint8List expectedIdentityKey;
   final Uint8List expectedX25519Key;
+  final Map<String, Object?> capabilityFields;
 
   @override
   Duration? connectionTimeout;
@@ -1026,10 +1493,15 @@ class _MockCapabilitiesHttpClient extends Fake implements HttpClient {
 
   @override
   Future<HttpClientRequest> getUrl(Uri url) async {
+    final expectedControl = capabilityFields['expectedControlPort'];
+    if (expectedControl != null && url.port != expectedControl) {
+      throw const SocketException('Control port is not mapped');
+    }
     return _MockCapabilitiesRequest(
       nativePort: getNativePort(),
       expectedIdentityKey: expectedIdentityKey,
       expectedX25519Key: expectedX25519Key,
+      capabilityFields: capabilityFields,
     );
   }
 
@@ -1042,11 +1514,13 @@ class _MockCapabilitiesRequest extends Fake implements HttpClientRequest {
     required this.nativePort,
     required this.expectedIdentityKey,
     required this.expectedX25519Key,
+    this.capabilityFields = const {},
   });
 
   final int nativePort;
   final Uint8List expectedIdentityKey;
   final Uint8List expectedX25519Key;
+  final Map<String, Object?> capabilityFields;
   final _MockHttpHeaders _headers = _MockHttpHeaders();
 
   @override
@@ -1064,21 +1538,29 @@ class _MockCapabilitiesRequest extends Fake implements HttpClientRequest {
       'x25519PubKey': base64.encode(expectedX25519Key),
       'networkIdentityPubKey': base64.encode(expectedIdentityKey),
       'quicPort': nativePort,
+      ...capabilityFields,
     });
-    return _MockCapabilitiesResponse(body: body);
+    return _MockCapabilitiesResponse(
+      body: body,
+      responseStatus:
+          capabilityFields['responseStatus'] as int? ?? HttpStatus.ok,
+    );
   }
 }
 
 class _MockCapabilitiesResponse extends StreamView<List<int>>
     with Fake
     implements HttpClientResponse {
-  _MockCapabilitiesResponse({required this.body})
-    : super(Stream<List<int>>.value(utf8.encode(body)));
+  _MockCapabilitiesResponse({
+    required this.body,
+    this.responseStatus = HttpStatus.ok,
+  }) : super(Stream<List<int>>.value(utf8.encode(body)));
 
   final String body;
+  final int responseStatus;
 
   @override
-  int get statusCode => HttpStatus.ok;
+  int get statusCode => responseStatus;
 
   @override
   int get contentLength => utf8.encode(body).length;
@@ -1101,4 +1583,27 @@ class _MockHttpHeaders extends Fake implements HttpHeaders {
 
   @override
   String? value(String name) => _map[name.toLowerCase()];
+}
+
+class _MappingBridge implements LanShareDiscoveryBridgePort {
+  _MappingBridge(this.mappedPort, {this.controlPort});
+  final int? mappedPort;
+  final int? controlPort;
+  int? observedPort;
+  @override
+  Stream<List<LanDiscoveredPeer>> get peers => const Stream.empty();
+  @override
+  Future<void> start(Map<String, Object> advertisement) async {}
+  @override
+  Future<void> stop() async {}
+  @override
+  Future<void> close() async {}
+  @override
+  LanDiscoveredPeer routePeer(LanDiscoveredPeer peer) =>
+      controlPort == null ? peer : peer.copyWith(controlPort: controlPort);
+  @override
+  int? nativePortFor(LanDiscoveredPeer peer, int advertisedPort) {
+    observedPort = advertisedPort;
+    return mappedPort;
+  }
 }

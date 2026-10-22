@@ -1,9 +1,14 @@
-> Last updated: 2026-08-23
+> Last updated: 2026-10-22
 
 # Network V2 Validation Report
 
-This report is the current validation index for branch
-`agent/network-v2-final-20260819`.
+This file records the closure run for branch
+`agent/network-v2-final-20260819`. It is a historical snapshot. Current gates
+live at `scripts/bash/contracts/network_v2_acceptance.sh`,
+`scripts/bash/contracts/relay_v2_contract.sh`,
+`scripts/bash/e2e/client_backend_e2e.sh`, and
+`scripts/bash/ci/full_test.sh`. The commands later in this file are the entry
+points used for that SHA.
 
 `FINAL_CLOSURE_BASE_SHA: 926967e08ed2abb638bf13596fa4d25595c75da9`
 `CODE_VALIDATION_HEAD: 2253282f3afa7dc64ff38e5604eb2f272518969b`
@@ -14,8 +19,8 @@ This report is the current validation index for branch
 ## Contract and owner closeout
 
 `protocol/contract_tests/acceptance_matrix.json` records 71/71 cases as
-`covered`. `bash scripts/network_v2_acceptance.sh strict` is the strict entry
-point and preserves the frozen Relay V2 wire shape: target-less
+`covered`. That run used `bash scripts/network_v2_acceptance.sh strict` and
+preserved the frozen Relay V2 wire shape: target-less
 `ConnectivityOffer`, request/attempt correlation, fail-closed Resolve status,
 and separate Control/Data channels.
 

@@ -161,6 +161,7 @@ pub(super) async fn send_route_view(
             let kind = match kind {
                 GenericFrameKind::DataMessage => ChannelFrameKind::DataMessage,
                 GenericFrameKind::DeliveryAck => ChannelFrameKind::DeliveryAck,
+                GenericFrameKind::RealtimeSignal => ChannelFrameKind::RealtimeSignal,
                 _ => {
                     return Err(
                         std::io::Error::other("stream frames require QUIC bi-stream").into(),
@@ -179,6 +180,9 @@ pub(super) async fn send_route_view(
             .await
             .map_err(|error| std::io::Error::other(error.to_string()).into()),
         RouteViewCarrier::Relay(Some(relay)) => match kind {
+            GenericFrameKind::RealtimeSignal => {
+                Err(std::io::Error::other("direct signaling cannot use Relay data").into())
+            }
             GenericFrameKind::DataMessage => {
                 crate::relay::send_relay_channel_message(&relay, relay_token, payload)
                     .await

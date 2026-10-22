@@ -182,6 +182,35 @@ void main() {
   );
 
   test(
+    'background runtime rejects missing password before creating a client',
+    () async {
+      final service = _FakeServiceInstance();
+      var factoryCalled = false;
+      startBackgroundSshRuntimeForTesting(
+        service,
+        sessionFactory: (_) async {
+          factoryCalled = true;
+          return _FakeSshClient(_FakeSshSession());
+        },
+      );
+
+      final data = _connectData('runtime-missing-password');
+      data['password'] = null;
+      service.emit('sshConnect', data);
+
+      await _waitUntil(
+        () => _stateFor(service, 'runtime-missing-password') == 'error',
+      );
+      expect(factoryCalled, isFalse);
+      expect(service.messages, contains('SSH connection failed'));
+
+      service.emit('stopService', const <String, dynamic>{});
+      await _waitUntil(() => service.stopSelfCalls == 1);
+      await service.dispose();
+    },
+  );
+
+  test(
     'background runtime reports tmux failures and releases partial clients',
     () async {
       final service = _FakeServiceInstance();

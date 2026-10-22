@@ -1,4 +1,4 @@
-最新更新时间：2026-08-28
+最新更新时间：2026-10-15
 
 # ssh_mobile_full
 
@@ -7,9 +7,10 @@
 Full App 是 SSH Mobile 的完整 App Shell 和组合根，负责启动协调、`AppRuntime`
 生命周期、路由聚合、App Port 适配器以及兼容清单中明确保留的 App Scope 后端。
 
-Network V2 的组合根约束：`AppRuntimeFactory` 先加载/创建 App-owned
-`NetworkIdentityBundle`，再创建并 exactly-once 配置 `NetworkRuntime`，随后创建共享
-`NetworkFacade`。LAN、SSH、SFTP、Realtime 和 Relay 只借用这些 App Scope 资源；Feature
+Network V2 的组合根约束：`AppRuntimeFactory` 创建 App-owned `AppNetworkResources`，
+首次网络操作才加载/创建 `NetworkIdentityBundle` 并 exactly-once 配置原生
+`NetworkRuntime` 和共享 `NetworkFacade`；事件订阅和诊断不触发初始化。LAN、SSH、
+SFTP、Realtime 和 Relay 只借用这些 App Scope 资源；Feature
 或 Route Scope 不得创建第二个 runtime/facade，也不得在 deactivate/reactivate 时
 停止、销毁或重新配置它们。
 
@@ -24,7 +25,87 @@ App Shell 的稳定组合入口是 `lib/main.dart`、`lib/app/app_bootstrap.dart
 `lib/app/app_runtime.dart` 和 `lib/app/navigation/`。外部调用方不得把旧
 `lib/screens/`、`lib/models/` 或兼容 Service 当作新模块 API。
 
+`AppBootstrap` 立即挂载 Logo 启动壳，并在后续 microtask 开始 Runtime 装配，
+不等待首帧绘制或栅格化；异步 I/O 与首帧重叠，并保留同一个加载动画。
+`SshMobileApp.onStartupReady` 在初始首页或电源引导完成首帧布局后通知启动壳移除
+遮罩；准备期间 App 隐藏且暂停 Ticker，异步数据读取继续执行。该回调不转移 Runtime
+资源所有权。
+
+LAN 接收在首次打开快传页面时激活，随后由 Module 保持接收；启动时全局配对宿主
+仅订阅事件。遥测只准备独立的 Relay enrollment 门禁，不初始化接收器。网络密钥
+推导和 TLS 证书首次生成在工作 isolate 执行，安全存储读写仍使用平台 isolate。
+首次网络激活完成后，组合根为 Realtime 接收适配器接入同一原生运行时的借用
+gateway，确保从未主动共享过屏幕的设备也能收到邀请；冷启动订阅仍不初始化网络。
+Realtime 命令以原生 `CommandResultV2` 的终态完成关联，并核对目标设备；入队成功
+不能替代命令完成或 native-authoritative 会话状态。
+
+Windows 屏幕选择使用原生目录绑定的源标识；接受邀请后直接交给原生采集 Owner
+核验目标是否仍有效，不重新枚举并替换已选择的目录。媒体失败日志只记录阶段和
+类型化错误码，不记录屏幕内容、源标签或会话标识。
+路由在媒体端点完成绑定后低频读取发送、接收、解码和渲染计数，并报告原生采集/
+解码线程的后续故障；统计暂时不可用时继续观察，不将其当作媒体失败。监控在
+停止、路由释放或代际失效后取消，迟到结果不能影响新共享，也不记录帧内容。
+接收视图使用这些尺寸元数据保持视频原始比例，竖屏不再被拉伸为窗口的宽高比。
+接收视图支持按直角旋转画面和系统全屏；切换保留同一视频组件与原生媒体端点，
+不重新申请录屏权限。Windows 全屏覆盖当前显示器并保留进入前的窗口位置与样式；
+Android 隐藏系统栏，退出时恢复先前的状态栏、导航栏可见性和交互方式。
+返回键或 Escape 先退出全屏，全屏中仍提供停止共享入口。原生切换期间禁用重复
+点击；路由关闭或共享结束会恢复窗口，迟到的进入结果也按原租约补偿。
+恢复失败保留原始快照并提供重试提示；没有原生能力时报告失败并允许正常返回。
+
+窗口租约控制与 Android 快照仲裁分别有独立 Dart/JVM 回归；Win32 生命周期测试
+使用隐藏的固定测试窗口，检查全显示器范围、原样恢复与迟到释放保护。
+`test/windows/CMakeLists.txt` 可用 Windows CMake 构建后运行对应测试程序；Android
+App 的宿主入口是 `:app:testDebugUnitTest`。Android 系统栏适配与 Win32 API 包装
+属于平台调用，不以 JVM/Dart 行覆盖率替代真实系统验收；跨显示器/DPI、最大化
+恢复和 Android 设备实际交互仍需平台验收。
+
+App Scope 保留待接受邀请的按设备仲裁，并为已认领/启动媒体的操作提供全局独占。
+共享期间的新可信邀请会收到正式 REJECT，不替换当前共享；媒体和会话清理结束后
+释放精确操作的占用，结果页无需先关闭。初始化失败同样清理占用。邀请宿主销毁后，
+迟到的认领结果只补偿停止对应会话，不再导航；宿主和发起入口释放时也会取消身份等待。
+
+接收端从 H.264 SPS 读取有效尺寸（含编码块裁剪），后续帧保留该尺寸，避免把
+手机竖屏或不同分辨率显示器误当作默认横屏尺寸。
+
+设备级验证入口为 `test/device/screen_share_device_probe.dart`，通过
+`flutter run -t test/device/screen_share_device_probe.dart` 在 Windows 和 Android
+模拟器分别启动。测试使用隔离临时目录与固定测试身份，自动邀请和接受，检查
+发送、解码和渲染计数；模拟器运行前设置 `adb forward tcp:47831 tcp:47831`。
+两端使用 `--dart-define=SCREEN_PROBE_REVERSE=true` 可验证 Android → Windows；
+模拟器通过 `10.0.2.2` 访问主机，仍需完成 Android 系统录屏授权。
+两端增加 `--dart-define=SCREEN_PROBE_CPU=true` 可强制验证 CPU 编解码路径；
+未开启时保留硬件模式，缺少所选编解码器会报告能力失败，不能计作视频验收通过。
+此入口只用于设备测试，不进入正式应用；模拟器验证不能替代真机硬件能力验收。
+
+正式共享可在屏幕选择或来访邀请卡片中开启 CPU 模式，两端独立选择。选择在
+路由创建时固定，连接处理中禁用切换；取消选择不申请录屏授权。默认使用硬件
+编解码；CPU 模式适用于无硬件编解码能力的设备，并可能增加 CPU 占用。
+
+启动品牌资源为 `assets/app_icon.svg`：透明边缘、浅蓝面板、蓝色终端提示符和青绿色
+光标。`StartupBranding` 使用 SVG 等比显示，按可用短边限制在 64–128 逻辑像素，
+保留安全区和大字号滚动空间。Android 原生启动页使用同款 VectorDrawable，日间与
+夜间启动底色均为白色。系统图标通过 `dart run tool/generate_app_icons.dart` 生成
+各平台 PNG 和包含 16–256 像素图层的 Windows ICO；调整 SVG 形状或配色时须同步
+生成器与 Android vector。启动页仍使用白底；iOS 的系统图标按平台要求保持不透明。
+
 ## 依赖
+
+屏幕共享支持已配对设备的原生 Direct QUIC/TCP 信令，无需配置 Relay；入口先经
+LAN 的身份钉扎能力查询与 peer-policy Owner 准备直连，再创建 Realtime session。
+无可用 Direct 时保留 Relay Control 路径。邀请、接受与拒绝仍由用户明确确认，
+画面仍走 native WebRTC，不能把共享信令送达当作真实 capture/render 验收。
+
+Windows Full App 在 LAN 广播期间通过注入的 discovery Port 识别本机在线 Android
+Emulator。ADB 从已配置 Android SDK、Android Studio 默认 SDK 或 PATH 解析；未安装
+或不可用时保留普通 LAN 发现。适配器只创建/释放自己的 console UDP 发现映射、
+TCP HTTPS 映射以及独立 TCP/UDP native 映射，不读取配对密钥、不操作已有 ADB
+forward、不停止模拟器。Windows 和模拟器内 Android 都需要使用支持来源端口
+PONG 的版本；仍需双向 PIN 配对和原生传输接收审批。
+模拟器 NAT 可能改写 PONG 的回复源端口，适配器为每台模拟器保留独立的回环
+请求/接收 socket，按接收通道绑定其映射，不按回包源端口关联模拟器。
+真实设备映射核验入口为 `flutter test --no-pub test/manual/lan_emulator_mapping_smoke.dart`：
+需要唯一在线的本地模拟器，使用临时 TCP/UDP 应答器并清理本次映射，不访问 App 数据。
 
 依赖由本 App 的 `pubspec.yaml` 声明，包含 Flutter、Core/Infrastructure/Feature
 Package 和 App Shell 直接使用的插件；Feature 实现不得通过 App `/src/` 反向获取依赖。

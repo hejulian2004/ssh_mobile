@@ -33,11 +33,13 @@ use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::Notify;
 use tokio::time::Instant;
 
+use crate::connect::PathLease;
 use crate::session::SessionId;
 
 mod claim;
 mod claim_commit;
 mod claim_reject;
+mod direct;
 mod io;
 mod provisional;
 mod provisional_signal;
@@ -53,6 +55,7 @@ pub(crate) use claim::{
 };
 pub(crate) use claim_commit::claim_incoming_offer;
 pub(crate) use claim_reject::{discard_incoming_offer, reject_incoming_offer};
+pub(crate) use direct::handle_direct_signal;
 pub(crate) use io::{
     close_realtime_sessions_for_session, create_io_driver, realtime_task_key,
     remove_realtime_session_if_owned, run_realtime_session_io, runtime_webrtc_config,
@@ -112,6 +115,9 @@ pub(crate) struct RealtimeSession {
     /// `None` 表示创建时该 peer 尚无 ConnectionSession（例如 responder 首个信令
     /// 早于数据连接建立）。
     connection_session_id: Option<SessionId>,
+    /// One reservation for this generation's Direct signaling carrier.
+    /// Temporary sends borrow it; terminal session removal releases it.
+    direct_signaling_path: Option<Arc<PathLease>>,
     /// Signaling uses this only for sessions created by the pure state-machine
     /// tests. Runtime sessions keep the peer inside `RealtimeIoDriver` and
     /// access it through `driver` so the socket and sans-I/O peer share one

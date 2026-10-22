@@ -11,6 +11,8 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:nsd/nsd.dart' as nsd;
 import 'lan_multicast_lock.dart';
+import 'lan_discovery_datagrams.dart';
+import 'lan_discovery_bridge_lifecycle.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'lan_share_models.dart';
 import 'lan_security_service.dart';
@@ -20,6 +22,7 @@ import 'lan_transfer_service.dart';
 import 'lan_web_share_request_handler.dart';
 import 'lan_local_address_selection.dart';
 import '../../domain/lan_share_ports.dart';
+import '../../domain/lan_discovery_bridge.dart';
 
 part 'lan_web_share_server.dart';
 part 'lan_web_share_lifecycle.dart';
@@ -41,6 +44,29 @@ class LanDiscoveryService {
   final LanMulticastLock multicastLock;
   final LanShareLocalAddressSelectionPort localAddressSelectionPort;
   final LanShareLocalIpv4CandidateSource localAddressCandidateSource;
+  final LanShareDiscoveryBridgePort? discoveryBridge;
+  final Set<String> _bridgePeerIds = {};
+  late final _bridgeBinding = LanDiscoveryBridgeBinding(
+    bridge: discoveryBridge,
+    onPeers: (peers) {
+      if (_closing || _closed) return;
+      final ids = peers.map((peer) => peer.deviceId).toSet();
+      for (final id in _bridgePeerIds.difference(ids)) {
+        _peerMap.remove(id);
+        _nsdPeerIds.remove(id);
+      }
+      _bridgePeerIds
+        ..clear()
+        ..addAll(ids);
+      for (final peer in peers) {
+        if (peer.deviceId != currentDeviceId) {
+          _nsdPeerIds.remove(peer.deviceId);
+          _peerMap[peer.deviceId] = peer;
+        }
+      }
+      _notifyPeersUpdated();
+    },
+  );
   late final LanShareLocalAddressResolver _localAddressResolver =
       LanShareLocalAddressResolver(
         candidateSource: localAddressCandidateSource,
@@ -69,6 +95,7 @@ class LanDiscoveryService {
   final _discoveredPeersController =
       StreamController<List<LanDiscoveredPeer>>.broadcast();
   final Map<String, LanDiscoveredPeer> _peerMap = {};
+  final Set<String> _nsdPeerIds = {};
 
   bool _isScanning = false;
 
@@ -111,6 +138,7 @@ class LanDiscoveryService {
     required this.localAddressSelectionPort,
     LanShareLocalIpv4CandidateSource? localAddressCandidateSource,
     LanMulticastLock? multicastLock,
+    this.discoveryBridge,
   }) : localAddressCandidateSource =
            localAddressCandidateSource ??
            const DartLanShareLocalIpv4CandidateSource(),
@@ -245,6 +273,7 @@ class LanDiscoveryService {
     _isScanning = true;
     final generation = ++_discoveryGeneration;
     _peerMap.clear();
+    _nsdPeerIds.clear();
     _notifyPeersUpdated();
 
     try {
@@ -399,7 +428,7 @@ class LanDiscoveryService {
   /// 创建平台 mDNS 发现实例。
   @protected
   Future<nsd.Discovery> performStartDiscovery() =>
-      nsd.startDiscovery(serviceType);
+      nsd.startDiscovery(serviceType, ipLookupType: nsd.IpLookupType.v4);
 
   /// 停止平台 mDNS 发现实例。
   @protected
@@ -447,6 +476,7 @@ class LanDiscoveryService {
       stopAdvertising(),
       stopWebShareServer(),
     ]);
+    await _bridgeBinding.close();
     if (!_discoveredPeersController.isClosed) {
       await _discoveredPeersController.close();
     }

@@ -252,31 +252,11 @@ class _LanShareSettingsScreenState extends State<LanShareSettingsScreen> {
     String current,
     LanShareStrings strings,
   ) async {
-    final controller = TextEditingController(text: current);
     final value = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(strings.lanDeviceAlias),
-        content: TextField(
-          controller: controller,
-          maxLength: 32,
-          autofocus: true,
-          decoration: InputDecoration(hintText: strings.lanDeviceAlias),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: Text(strings.cancel),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.pop(dialogContext, controller.text.trim()),
-            child: Text(strings.save),
-          ),
-        ],
-      ),
+      builder: (dialogContext) =>
+          _AliasEditorDialog(current: current, strings: strings),
     );
-    controller.dispose();
     if (value != null && value.isNotEmpty) {
       await settings.setLanDeviceAlias(value);
     }
@@ -300,61 +280,11 @@ class _LanShareSettingsScreenState extends State<LanShareSettingsScreen> {
       return;
     }
 
-    final host = TextEditingController(text: settings.relayHost);
-    final port = TextEditingController(text: '${settings.relayPort}');
-    String? error;
     final value = await showDialog<(String, int)>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text(strings.lanRelayServer),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: host,
-                decoration: InputDecoration(labelText: strings.hostAddress),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: port,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(labelText: strings.port),
-              ),
-              if (error != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: Text(strings.cancel),
-            ),
-            FilledButton(
-              onPressed: () {
-                final parsed = int.tryParse(port.text.trim());
-                if (host.text.trim().isEmpty ||
-                    parsed == null ||
-                    parsed < 1 ||
-                    parsed > 65535) {
-                  setState(() => error = strings.invalidPort);
-                  return;
-                }
-                Navigator.pop(dialogContext, (host.text.trim(), parsed));
-              },
-              child: Text(strings.save),
-            ),
-          ],
-        ),
-      ),
+      builder: (dialogContext) =>
+          _FallbackRelayEditorDialog(settings: settings, strings: strings),
     );
-    host.dispose();
-    port.dispose();
     if (value == null || !context.mounted) return;
     try {
       await settings.setRelayServer(host: value.$1, port: value.$2);
@@ -365,6 +295,140 @@ class _LanShareSettingsScreenState extends State<LanShareSettingsScreen> {
         ).showSnackBar(SnackBar(content: Text(strings.invalidPort)));
       }
     }
+  }
+}
+
+class _AliasEditorDialog extends StatefulWidget {
+  final String current;
+  final LanShareStrings strings;
+
+  const _AliasEditorDialog({required this.current, required this.strings});
+
+  @override
+  State<_AliasEditorDialog> createState() => _AliasEditorDialogState();
+}
+
+class _AliasEditorDialogState extends State<_AliasEditorDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.current);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.strings.lanDeviceAlias),
+      content: TextField(
+        controller: _controller,
+        maxLength: 32,
+        autofocus: true,
+        decoration: InputDecoration(hintText: widget.strings.lanDeviceAlias),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(widget.strings.cancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: Text(widget.strings.save),
+        ),
+      ],
+    );
+  }
+}
+
+class _FallbackRelayEditorDialog extends StatefulWidget {
+  final LanShareSettingsPort settings;
+  final LanShareStrings strings;
+
+  const _FallbackRelayEditorDialog({
+    required this.settings,
+    required this.strings,
+  });
+
+  @override
+  State<_FallbackRelayEditorDialog> createState() =>
+      _FallbackRelayEditorDialogState();
+}
+
+class _FallbackRelayEditorDialogState
+    extends State<_FallbackRelayEditorDialog> {
+  late final TextEditingController _host;
+  late final TextEditingController _port;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _host = TextEditingController(text: widget.settings.relayHost);
+    _port = TextEditingController(text: '${widget.settings.relayPort}');
+  }
+
+  @override
+  void dispose() {
+    _host.dispose();
+    _port.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = widget.strings;
+    return AlertDialog(
+      title: Text(strings.lanRelayServer),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _host,
+            decoration: InputDecoration(labelText: strings.hostAddress),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _port,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(labelText: strings.port),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(strings.cancel),
+        ),
+        FilledButton(
+          onPressed: () {
+            final parsed = int.tryParse(_port.text.trim());
+            if (_host.text.trim().isEmpty ||
+                parsed == null ||
+                parsed < 1 ||
+                parsed > 65535) {
+              setState(() => _error = strings.invalidPort);
+              return;
+            }
+            Navigator.pop(context, (_host.text.trim(), parsed));
+          },
+          child: Text(strings.save),
+        ),
+      ],
+    );
   }
 }
 

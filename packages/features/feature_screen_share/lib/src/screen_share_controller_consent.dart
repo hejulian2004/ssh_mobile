@@ -1,5 +1,30 @@
 part of 'screen_share_controller.dart';
 
+Future<void> _sendScreenShareCancellation(
+  ScreenShareController controller, {
+  required bool refresh,
+}) async {
+  final id = controller._snapshot.operationId;
+  final issued = controller._now();
+  final expires = refresh
+      ? issued.add(controller._requestLifetime)
+      : controller._snapshot.expiresAt;
+  if (id == null || expires == null || !issued.isBefore(expires)) return;
+  controller._nextLocalActionRevision++;
+  await controller._send(
+    buildScreenShareConsent(
+      operationId: id,
+      realtimeId: controller.realtimeId,
+      sharedSessionInstanceId: controller.sharedSessionInstanceId,
+      issuedAt: issued,
+      expiresAt: expires,
+      decision: RealtimeConsentDecision.cancel,
+      senderPeerId: controller.localPeerId,
+      actionRevision: controller._nextLocalActionRevision,
+    ),
+  );
+}
+
 void _handleScreenShareConsent(
   ScreenShareController controller,
   RealtimeConsent consent,

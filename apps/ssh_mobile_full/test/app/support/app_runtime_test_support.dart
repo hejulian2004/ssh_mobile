@@ -29,6 +29,7 @@ final class FakeNetworkRuntime implements NetworkRuntime {
   int disposeCalls = 0;
   int ensureCapabilityCalls = 0;
   int openCommandGatewayCalls = 0;
+  int openRealtimeGatewayCalls = 0;
   bool disposed = false;
   final FakeCommandGateway gateway = FakeCommandGateway();
   final Set<NetworkCapability> _readyCapabilities = <NetworkCapability>{};
@@ -60,6 +61,7 @@ final class FakeNetworkRuntime implements NetworkRuntime {
 
   @override
   Future<NetworkRealtimeGateway> openRealtimeGateway() async {
+    openRealtimeGatewayCalls++;
     final gateway = realtimeGateway;
     if (gateway == null) {
       throw UnimplementedError('openRealtimeGateway is not expected in tests');

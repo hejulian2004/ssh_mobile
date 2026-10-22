@@ -27,6 +27,7 @@ fn command_peer_scope_mapping_covers_peer_and_runtime_commands() {
         network_command::Payload::DisconnectRelay(Default::default()),
         network_command::Payload::StartRealtimeSession(
             network_protocol::StartRealtimeSessionCommand {
+                screen_video: false,
                 peer_id: peer.clone(),
                 ..Default::default()
             },

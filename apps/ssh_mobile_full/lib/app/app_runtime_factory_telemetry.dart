@@ -26,11 +26,9 @@ extension _AppRuntimeFactoryTelemetry on _AppRuntimeFactoryContext {
     final telemetryBuildMetadata = await DeviceInfoBuildMetadataProvider(
       logger: logger,
     ).load();
-    // The LAN module keeps receiver activation optional, so its coordinator
-    // may not have initialized the Relay enrollment owner yet. Initialize the
-    // coordinator's lightweight dependencies here before evaluating the App
-    // Scope telemetry gate; this does not start discovery or native listening.
-    await lanShareModule.coordinator.ensureInitialized();
+    // Evaluate the durable Relay gate independently of LAN activation. This
+    // prepares enrollment only, without network keys, TLS or listeners.
+    await lanShareModule.coordinator.ensureRelayEnrollment();
     final relayEnrollmentService =
         lanShareModule.coordinator.relayEnrollmentService;
     final telemetryEnrollmentProvider = relayEnrollmentService == null

@@ -1,4 +1,4 @@
-> Last updated: 2026-08-21
+> Last updated: 2026-10-22
 
 # PR49 Dependency Architecture Graph
 
@@ -55,10 +55,10 @@ RuntimeState ──> RelayTransferPort ──> Relay transfer adapter
 RuntimeState ──> TransferRelayPort ──> Transfer recovery adapter
 
 Relay production ownership
-  relay.rs ──> relay_control.rs
-            ├──> relay_data.rs
-            └──> relay_transfer.rs
-  transfer.rs ──> transfer_operations.rs
+  relay.rs ──> relay_control/
+            ├──> relay_data/
+            └──> relay_transfer/
+  transfer.rs ──> transfer_operations/
 
 The two internal ports are the only Relay↔Transfer command/recovery bridge;
 `relay.rs` and `transfer.rs` no longer call each other's module-private entry

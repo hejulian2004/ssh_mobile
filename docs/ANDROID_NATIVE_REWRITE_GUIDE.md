@@ -1,4 +1,4 @@
-> 最新更新时间：2026-08-23
+> 最新更新时间：2026-10-22
 
 # SSH Mobile Android 原生复写零基础教程
 
@@ -39,7 +39,7 @@ ssh-mobile-native/
 当前 Flutter 项目只作为功能参考。它采用 package-first MVVM：产品 Feature 位于
 `packages/features/feature_*`，共享契约与 UI 位于 `packages/core/`，SSH 与 Network
 运行时位于 `packages/infrastructure/`，Full App 的组合根、Port Adapter 和 App Scope
-后端位于 `apps/ssh_mobile_full/lib/app/` 与 `lib/services/`。你在做 Android 原生版时，
+后端位于 `apps/ssh_mobile_full/lib/app/` 与 `apps/ssh_mobile_full/lib/services/`。你在做 Android 原生版时，
 应该先看“状态和动作在谁手里”，再看具体页面怎么摆。
 
 先看 MVVM / feature 层：

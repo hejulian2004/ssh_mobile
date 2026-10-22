@@ -234,10 +234,10 @@ impl RealtimeMediaRegistry {
         let mut driver = driver
             .lock()
             .map_err(|_| RealtimeMediaError::DriverUnavailable)?;
-        driver
-            .peer_mut()
-            .clear_h264_screen_video(direction)
-            .map_err(|_| RealtimeMediaError::DriverUnavailable)?;
+        match driver.peer_mut().clear_h264_screen_video(direction) {
+            Ok(()) | Err(WebRtcError::ScreenVideoNotConfigured) => {}
+            Err(_) => return Err(RealtimeMediaError::DriverUnavailable),
+        }
         self.endpoints.remove(&endpoint_id);
         Ok(())
     }

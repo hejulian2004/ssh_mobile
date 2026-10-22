@@ -1,11 +1,12 @@
 import 'dart:io';
+import 'package:yaml/yaml.dart';
 
 part 'ci_workflow_checks.dart';
 
 /// 验证模块级 CI 合同，避免 Workspace、Melos 脚本和 GitHub Actions 漂移。
 ///
 /// 这个测试只读取文本，不执行 CI 命令；它把 CI 的关键入口固定为可审计的
-/// 字符串，避免为了检查 YAML 再引入一个与 Flutter 工作区冲突的解析依赖。
+/// 合同字符串和仓库已有 YAML 解析器，验证入口及配置语法。
 void main() {
   final root = _findRepositoryRoot();
   final pubspec = File('${root.path}/pubspec.yaml').readAsStringSync();
@@ -19,7 +20,11 @@ void main() {
     '${root.path}/native/network_core/rust-toolchain.toml',
   ).readAsStringSync();
 
+  _expect(loadYaml(workflow) is YamlMap, 'Flutter workflow 必须是合法 YAML');
+  _expect(loadYaml(onlineWorkflow) is YamlMap, 'Online workflow 必须是合法 YAML');
+
   _testChangeScopePolicy(workflow);
+  _testNativeBuildArtifacts(workflow);
   _testActionsArePinned(workflow, workflowName: 'flutter.yml');
   _testActionsArePinned(onlineWorkflow, workflowName: 'online-e2e.yml');
   _verifyScriptTrees(root);
@@ -229,7 +234,6 @@ void main() {
     'lan-network-v2-targeted',
     'terminal-smoke-build',
     'app-unit-tests',
-    'android-build',
     'windows-build',
     'macos-build',
     'ios-build',
@@ -246,6 +250,18 @@ void main() {
       '$jobName 必须复用按平台架构隔离的 Rust target 缓存',
     );
   }
+
+  final androidBuild = _jobSection(workflow, 'android-build');
+  _expect(
+    androidBuild.contains('workspaces: "native/network_core -> target"') &&
+        androidBuild.contains(
+          r'shared-key: "android-release-${{ runner.os }}-${{ runner.arch }}"',
+        ) &&
+        androidBuild.contains('cache-targets: true') &&
+        androidBuild.contains('cache-workspace-crates: true') &&
+        androidBuild.contains('flutter build apk --debug --no-pub'),
+    'Android 必须使用独立 release 缓存复用原生库及依赖，不混入 host 测试产物，且保留完整 APK 构建',
+  );
 
   final appCoverage = _jobSection(workflow, 'app-coverage');
   _expect(

@@ -1,4 +1,4 @@
-> 最新更新时间：2026-08-24
+> 最新更新时间：2026-10-22
 
 # ADR-RELAY-DATA-PLANE-V2：Control/Data 物理分离、Reservation 模型、Relay Protocol V2
 
@@ -106,7 +106,7 @@ RelayData、Control/Hub 与事件对账，再让 Cache/Storage 在剩余预算�
 
 ### Relay Protocol V2
 
-新增 `protocol/relay_v2.proto`，Protobuf Binary over WebSocket，替代现有
+新增 `protocol/proto/relay/v2/relay_v2.proto`，Protobuf Binary over WebSocket，替代现有
 Control JSON。核心消息至少包含：
 
 ```text

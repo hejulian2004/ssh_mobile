@@ -22,6 +22,42 @@ use crate::runtime::PeerConfig;
 use crate::NetworkRuntime;
 
 #[test]
+fn screen_driver_route_probe_targets_the_hotspot_peer_instead_of_default_route() {
+    let phone = "192.0.2.40:44000".parse().unwrap();
+    assert_eq!(super::io::realtime_route_target(Some(phone)), phone);
+    assert_eq!(
+        super::io::realtime_route_target(None),
+        "192.0.2.1:9".parse::<std::net::SocketAddr>().unwrap()
+    );
+    assert_eq!(
+        super::io::realtime_route_target(Some("127.0.0.1:44000".parse().unwrap())),
+        "192.0.2.1:9".parse::<std::net::SocketAddr>().unwrap()
+    );
+}
+
+#[test]
+fn wildcard_screen_driver_selects_a_concrete_interface_in_the_bound_family() {
+    let addresses = ["198.51.100.7", "0.0.0.0", "2001:db8::7"].map(|ip| ip.parse().unwrap());
+    assert_eq!(
+        super::io::select_interface_ip("0.0.0.0".parse().unwrap(), addresses, None),
+        Some("198.51.100.7".parse().unwrap())
+    );
+    assert_eq!(
+        super::io::select_interface_ip("0.0.0.0".parse().unwrap(), [], None),
+        None
+    );
+    let addresses = ["198.51.100.7", "198.51.100.8"].map(|ip| ip.parse().unwrap());
+    assert_eq!(
+        super::io::select_interface_ip(
+            "0.0.0.0".parse().unwrap(),
+            addresses,
+            Some("198.51.100.8".parse().unwrap())
+        ),
+        Some("198.51.100.8".parse().unwrap())
+    );
+}
+
+#[test]
 fn media_endpoint_driver_requires_a_current_matching_realtime_session() {
     let realtime_id = "00112233445566778899aabbccddeeff";
     let mut manager = RealtimeManager::default();
@@ -37,6 +73,7 @@ fn media_endpoint_driver_requires_a_current_matching_realtime_session() {
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: None,
             driver: None,
             revision: 1,
@@ -76,6 +113,7 @@ async fn delayed_old_generation_cannot_create_an_endpoint_on_a_replacement_sessi
                 shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: peer_id.into(),
                 connection_session_id: None,
+                direct_signaling_path: None,
                 peer: None,
                 driver: Some(first_driver),
                 revision: 1,
@@ -105,6 +143,7 @@ async fn delayed_old_generation_cannot_create_an_endpoint_on_a_replacement_sessi
                 shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: peer_id.into(),
                 connection_session_id: None,
+                direct_signaling_path: None,
                 peer: None,
                 driver: Some(second_driver),
                 revision: 2,
@@ -160,6 +199,7 @@ async fn media_endpoints_bridge_native_h264_without_exposing_a_peer_handle() {
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: peer_id.into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: None,
             driver: Some(Arc::clone(&driver)),
             revision: 1,
@@ -241,8 +281,10 @@ async fn media_endpoints_bridge_native_h264_without_exposing_a_peer_handle() {
     assert_eq!(received.codec, VideoCodec::H264);
     assert_eq!(received.sequence, 0);
     assert_eq!(received.timestamp, input.timestamp);
-    assert_eq!(received.width, 1_920);
-    assert_eq!(received.height, 1_080);
+    // The fixture's SPS describes 64x96. RTP must recover those dimensions,
+    // rather than inventing a default or copying non-wire sender metadata.
+    assert_eq!(received.width, 64);
+    assert_eq!(received.height, 96);
     assert!(received.keyframe);
     assert_eq!(received.payload, input.payload);
 
@@ -281,6 +323,7 @@ fn runtime_stop_revokes_live_media_endpoints_before_runtime_state_is_released() 
                 shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: peer_id.into(),
                 connection_session_id: None,
+                direct_signaling_path: None,
                 peer: None,
                 driver: Some(Arc::clone(&driver)),
                 revision: 1,
@@ -357,6 +400,7 @@ async fn connection_session_loss_invalidates_bound_media_endpoints() {
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: peer_id.into(),
             connection_session_id: Some(connection_session_id),
+            direct_signaling_path: None,
             peer: None,
             driver: Some(Arc::clone(&driver)),
             revision: 1,
@@ -415,6 +459,7 @@ async fn realtime_snapshot_carries_authoritative_state_and_revision_after_connec
                 shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: "peer-a".into(),
                 connection_session_id: None,
+                direct_signaling_path: None,
                 peer: None,
                 driver: None,
                 revision: 7,
@@ -467,6 +512,7 @@ async fn realtime_io_event_matrix_maps_lifecycle_and_failure_boundaries() {
                 shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: "peer-a".into(),
                 connection_session_id: None,
+                direct_signaling_path: None,
                 peer: None,
                 driver: None,
                 revision: 4,
@@ -587,6 +633,7 @@ async fn realtime_session_io_removes_owner_after_driver_failure() {
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: None,
             driver: Some(Arc::clone(&driver)),
             revision: 5,
@@ -757,6 +804,7 @@ fn offer_answer_and_stale_revision_are_session_bound() {
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-b".into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: Some(caller),
             driver: None,
             revision: caller_revision,
@@ -774,7 +822,8 @@ fn offer_answer_and_stale_revision_are_session_bound() {
         answer.payload,
     )
     .expect("connected");
-    assert_eq!(connected.state, Some(RealtimeSessionState::Connected));
+    // Applying SDP cannot authorize media before ICE/DTLS reports connected.
+    assert_eq!(connected.state, Some(RealtimeSessionState::Negotiating));
     let late_ice = apply_signal(
         &mut caller_manager,
         realtime_id,
@@ -1060,6 +1109,7 @@ fn close_for_connection_session_only_affects_bound_realtime_sessions() {
                 shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: peer_id.to_string(),
                 connection_session_id,
+                direct_signaling_path: None,
                 peer: Some(
                     WebRtcPeer::new(WebRtcConfig::default())
                         .expect("validated default WebRTC configuration"),
@@ -1257,6 +1307,7 @@ async fn inbound_v2_signal_uses_established_realtime_peer_binding_not_target() {
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: Some(caller),
             driver: None,
             revision: offer_revision,
@@ -1355,6 +1406,7 @@ async fn delayed_consent_from_previous_generation_is_rejected_after_reconnect() 
                 shared_session_instance_id: old_shared_id.into(),
                 peer_id: "peer-a".into(),
                 connection_session_id: None,
+                direct_signaling_path: None,
                 peer: None,
                 driver: None,
                 revision: 1,
@@ -1373,6 +1425,7 @@ async fn delayed_consent_from_previous_generation_is_rejected_after_reconnect() 
                 shared_session_instance_id: current_shared_id.into(),
                 peer_id: "peer-a".into(),
                 connection_session_id: None,
+                direct_signaling_path: None,
                 peer: None,
                 driver: None,
                 revision: 1,
@@ -2498,6 +2551,7 @@ async fn signaling_flows_over_v2_control_plane_and_transport_loss_then_reestabli
     start_session(
         state.clone(),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -2560,6 +2614,7 @@ async fn signaling_flows_over_v2_control_plane_and_transport_loss_then_reestabli
     start_session(
         state.clone(),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -2611,6 +2666,7 @@ async fn signaling_lost_mid_negotiation_closes_cleanly_and_re_request_succeeds()
     let error = start_session(
         state.clone(),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -2633,6 +2689,7 @@ async fn signaling_lost_mid_negotiation_closes_cleanly_and_re_request_succeeds()
     start_session(
         state.clone(),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -2662,6 +2719,7 @@ async fn start_realtime_cleans_the_driver_when_supervisor_is_stopping() {
     let error = start_session(
         Arc::clone(&state),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -2688,6 +2746,7 @@ async fn duplicate_start_realtime_rejects_without_retaining_a_bound_driver() {
     start_session(
         state.clone(),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -2718,6 +2777,7 @@ async fn duplicate_start_realtime_rejects_without_retaining_a_bound_driver() {
     let error = start_session(
         state.clone(),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -2765,6 +2825,7 @@ async fn healthy_realtime_survives_environment_reprobe() {
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: Some(peer),
             driver: None,
             revision: 1,
@@ -2855,6 +2916,7 @@ fn realtime_signal_kind_mapping_and_owner_errors_are_explicit() {
         shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
         peer_id: "peer-a".into(),
         connection_session_id: None,
+        direct_signaling_path: None,
         peer: None,
         driver: None,
         revision: 1,
@@ -2890,6 +2952,7 @@ async fn realtime_peer_and_session_helpers_fail_closed_and_remove_exact_owner() 
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: Some(WebRtcPeer::new(WebRtcConfig::default()).unwrap()),
             driver: None,
             revision: 4,
@@ -2945,6 +3008,7 @@ async fn stale_realtime_cleanup_does_not_remove_a_replacement_driver() {
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: None,
             driver: Some(Arc::clone(&replacement_driver)),
             revision: 1,
@@ -2983,6 +3047,7 @@ async fn realtime_manager_close_all_and_connection_close_are_owner_scoped() {
                 shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
                 peer_id: peer.into(),
                 connection_session_id: session,
+                direct_signaling_path: None,
                 peer: Some(WebRtcPeer::new(WebRtcConfig::default()).unwrap()),
                 driver: None,
                 revision: 1,
@@ -3099,6 +3164,7 @@ async fn realtime_command_boundaries_reject_invalid_identity_peer_and_revision()
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: None,
             driver: None,
             revision: 3,
@@ -3184,6 +3250,7 @@ async fn start_realtime_cancellation_closes_driver_when_supervisor_is_stopping()
     let error = start_session(
         Arc::clone(&state),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: realtime_id.into(),
             peer_id: "peer-a".into(),
         },
@@ -3209,6 +3276,7 @@ async fn stop_realtime_ignores_close_signal_loss_after_removing_owner() {
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: None,
             driver: None,
             revision: 4,
@@ -3238,6 +3306,7 @@ async fn v2_signal_rejects_an_empty_established_peer_binding() {
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: String::new(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: None,
             driver: None,
             revision: 1,
@@ -3286,6 +3355,7 @@ async fn realtime_turn_configuration_is_parsed_and_invalid_driver_setup_fails_cl
     let error = start_session_with_config(
         Arc::clone(&state),
         StartRealtimeSessionCommand {
+            screen_video: false,
             realtime_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
         },
@@ -3362,6 +3432,7 @@ fn apply_signal_rejects_unknown_peer_and_restores_failed_offer_state() {
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: Some(WebRtcPeer::new(WebRtcConfig::default()).expect("peer")),
             driver: None,
             revision: 1,
@@ -3403,6 +3474,7 @@ async fn send_realtime_signal_routes_valid_revision_and_emits_event() {
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: None,
             driver: None,
             revision: 3,
@@ -3466,6 +3538,7 @@ async fn stop_realtime_session_closes_session_routes_close_and_emits_event() {
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: None,
             driver: Some(Arc::clone(&driver)),
             revision: 7,
@@ -3548,6 +3621,7 @@ async fn realtime_signal_route_rejects_disconnected_control_and_forwards_local_c
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: None,
             driver: None,
             revision: 3,
@@ -3645,6 +3719,7 @@ fn realtime_session_without_peer_owner_fails_closed() {
         shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
         peer_id: "peer-a".into(),
         connection_session_id: None,
+        direct_signaling_path: None,
         peer: None,
         driver: None,
         revision: 0,
@@ -3685,6 +3760,7 @@ fn realtime_close_and_unsupported_signal_boundaries_fail_closed() {
             shared_session_instance_id: "00112233445566778899aabbccddeeff".into(),
             peer_id: "peer-a".into(),
             connection_session_id: None,
+            direct_signaling_path: None,
             peer: Some(WebRtcPeer::new(WebRtcConfig::default()).expect("peer")),
             driver: None,
             revision: 3,

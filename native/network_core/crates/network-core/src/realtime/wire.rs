@@ -294,6 +294,9 @@ pub(crate) async fn send_signal(
     state: &RuntimeState,
     signal: &OutboundSignal,
 ) -> Result<(), network_protocol::NetworkError> {
+    if super::direct::try_send_direct(state, signal).await? {
+        return Ok(());
+    }
     let Some(control) = state.relay.control.read().await.clone() else {
         return Err(protocol_error(
             network_protocol::NetworkErrorCode::RelayError,

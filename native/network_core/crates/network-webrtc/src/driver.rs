@@ -20,6 +20,9 @@ use tokio::sync::mpsc::Sender;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_UDP_DATAGRAM_BYTES: usize = 64 * 1024;
+const UDP_RECEIVE_BUFFER_BYTES: usize = 2 * 1024 * 1024;
+const UDP_SEND_BURST_PACKETS: usize = 4;
+const UDP_SEND_BURST_PAUSE: Duration = Duration::from_millis(1);
 const HOST_CANDIDATE_PRIORITY: u32 = 2_130_706_431;
 pub const REALTIME_IO_EVENT_CAPACITY: usize = 256;
 
@@ -57,6 +60,7 @@ pub struct RealtimeIoDriver {
     peer: WebRtcPeer,
     socket: Arc<UdpSocket>,
     local_addr: SocketAddr,
+    io_local_addr: SocketAddr,
 }
 
 /// Shared owner handle used by Runtime signal handling and the I/O task.  The
@@ -84,6 +88,11 @@ impl RealtimeIoDriver {
         let socket = UdpSocket::bind(bind_addr)
             .await
             .map_err(|error| WebRtcError::Io(error.to_string()))?;
+        // A screen keyframe spans many UDP datagrams. The default Windows
+        // receive buffer cannot retain that bounded burst while SRTP is read.
+        socket2::SockRef::from(&socket)
+            .set_recv_buffer_size(UDP_RECEIVE_BUFFER_BYTES)
+            .map_err(|error| WebRtcError::Io(error.to_string()))?;
         let local_addr = socket
             .local_addr()
             .map_err(|error| WebRtcError::Io(error.to_string()))?;
@@ -101,6 +110,7 @@ impl RealtimeIoDriver {
             peer,
             socket: Arc::new(socket),
             local_addr,
+            io_local_addr: SocketAddr::new(candidate_ip, local_addr.port()),
         })
     }
 
@@ -131,7 +141,7 @@ impl RealtimeIoDriver {
     }
 
     fn local_addr_value(&self) -> SocketAddr {
-        self.local_addr
+        self.io_local_addr
     }
 }
 
@@ -194,7 +204,12 @@ pub async fn run_realtime_io(
             (socket, local_addr, outbound, timeout, pending_events)
         };
 
-        for (peer_addr, payload) in outbound {
+        for (index, (peer_addr, payload)) in outbound.into_iter().enumerate() {
+            // A local socket buffer does not enlarge emulator/NAT queues.
+            // Pace fragmented keyframes so those hops can drain each burst.
+            if index > 0 && index % UDP_SEND_BURST_PACKETS == 0 {
+                tokio::time::sleep(UDP_SEND_BURST_PAUSE).await;
+            }
             socket
                 .send_to(&payload, peer_addr)
                 .await
@@ -217,7 +232,11 @@ pub async fn run_realtime_io(
         tokio::pin!(timer);
         tokio::select! {
             _ = &mut timer => {
-                handle_timeout(&handle, Instant::now())?;
+                // The fallback wakeup pumps externally changed SDP/media
+                // state; it is not an RTC timer while awaiting an answer.
+                if timeout.is_some() {
+                    handle_timeout(&handle, Instant::now())?;
+                }
             }
             result = socket.recv_from(&mut receive_buffer) => {
                 let (bytes_read, peer_addr) = result

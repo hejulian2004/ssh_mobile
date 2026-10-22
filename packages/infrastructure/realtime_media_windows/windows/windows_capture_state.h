@@ -1,17 +1,18 @@
 #ifndef REALTIME_MEDIA_WINDOWS_CAPTURE_STATE_H_
 #define REALTIME_MEDIA_WINDOWS_CAPTURE_STATE_H_
 
-#include "windows_capture.h"
-#include "windows_h264_encoder.h"
-
 #include <winrt/Windows.Graphics.Capture.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
+#include <winrt/Windows.System.Threading.h>
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+
+#include "windows_capture.h"
+#include "windows_h264_encoder.h"
 
 namespace realtime_media_windows {
 
@@ -20,13 +21,21 @@ using winrt::Windows::Graphics::Capture::GraphicsCaptureItem;
 using winrt::Windows::Graphics::Capture::GraphicsCaptureSession;
 using winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 
+struct CaptureGraphicsDevice {
+  winrt::com_ptr<ID3D11Device> d3d_device;
+  winrt::com_ptr<ID3D11DeviceContext> d3d_context;
+  IDirect3DDevice winrt_device{nullptr};
+};
+bool EnsureCaptureGraphicsDevice(NativeCodecMode mode,
+                                 CaptureGraphicsDevice* graphics);
+
 struct CaptureState final {
   ~CaptureState();
 
   uint64_t owner = 0;
   H264PushCallback push_h264 = nullptr;
   std::mutex encoder_mutex;
-  std::unique_ptr<HardwareH264Encoder> encoder;
+  std::unique_ptr<NativeH264Encoder> encoder;
   std::chrono::steady_clock::time_point started_at;
   std::atomic<bool> stopped{false};
   std::atomic<bool> teardown_started{false};
@@ -42,11 +51,14 @@ struct CaptureState final {
   std::atomic<uint32_t> target_bitrate_kbps{3 * 1024};
   std::atomic<uint32_t> target_framerate{30};
   std::atomic<uint64_t> next_encode_timestamp{0};
+  std::atomic<uint64_t> next_recovery_timestamp{0};
+  uint64_t last_encode_timestamp = 0;  // Guarded by encoder_mutex.
 
   IDirect3DDevice device{nullptr};
   GraphicsCaptureItem item{nullptr};
   Direct3D11CaptureFramePool frame_pool{nullptr};
   GraphicsCaptureSession session{nullptr};
+  winrt::Windows::System::Threading::ThreadPoolTimer idle_frame_timer{nullptr};
   winrt::event_token frame_arrived_token{};
   winrt::event_token closed_token{};
 

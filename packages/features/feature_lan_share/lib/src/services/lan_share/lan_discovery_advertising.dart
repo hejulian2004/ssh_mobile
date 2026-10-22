@@ -102,9 +102,19 @@ extension LanDiscoveryAdvertisingOperations on LanDiscoveryService {
     }
 
     await _startUdpListener(port, nativePort: nativePort);
+    await _bridgeBinding.start(
+      LanDiscoveryService.createUdpPingPayload(
+        deviceId: currentDeviceId,
+        alias: currentDeviceAlias,
+        os: Platform.operatingSystem,
+        port: port,
+        nativePort: nativePort,
+      ),
+    );
   }
 
   Future<void> _performStopAdvertising() async {
+    await _bridgeBinding.stop();
     await _sendUdpDisconnect();
     if (_registration != null) {
       try {
@@ -145,84 +155,38 @@ extension LanDiscoveryAdvertisingOperations on LanDiscoveryService {
       }
       _udpSocket = socket;
       socket.broadcastEnabled = true;
+      final handler = LanDiscoveryDatagramHandler(
+        advertisement: LanDiscoveryService.createUdpPingPayload(
+          deviceId: currentDeviceId,
+          alias: currentDeviceAlias,
+          os: Platform.operatingSystem,
+          port: listeningHttpPort,
+          nativePort: nativePort,
+        ),
+        reply: (bytes, address, port) =>
+            socket.send(bytes, InternetAddress(address), port),
+        onPeer: (peer) {
+          _nsdPeerIds.remove(peer.deviceId);
+          _peerMap[peer.deviceId] = peer;
+          LanDiscoveryPeerOperations(this)._notifyPeersUpdated();
+        },
+        onRemove: (id) {
+          _nsdPeerIds.remove(id);
+          _peerMap.remove(id);
+          LanDiscoveryPeerOperations(this)._notifyPeersUpdated();
+        },
+      );
       _udpSocketSubscription = socket.listen((event) {
-        if (!identical(_udpSocket, socket)) return;
-        if (event == RawSocketEvent.read) {
-          final datagram = socket.receive();
-          if (datagram == null) return;
-          try {
-            final messageStr = utf8.decode(datagram.data);
-            final json = jsonDecode(messageStr) as Map<String, dynamic>;
-
-            /// 注册一个通过 UDP 发现的对端，并发布设备快照。
-            void registerDiscoveredPeerFromDatagram(
-              String rawId,
-              Map<String, dynamic> json,
-              String hostIp,
-            ) {
-              final id = LanDiscoveryPeerOperations(
-                this,
-              )._extractCleanId(rawId);
-              if (id.isEmpty || id == currentDeviceId) return;
-              final cleanHostIp = hostIp.startsWith('::ffff:')
-                  ? hostIp.substring(7)
-                  : hostIp;
-              final peer = LanDiscoveredPeer(
-                deviceId: id,
-                alias: json['alias'] as String? ?? 'Device',
-                ip: cleanHostIp,
-                controlPort:
-                    (json['port'] as num?)?.toInt() ??
-                    LanDiscoveryService.defaultPort,
-                advertisedNativePort: (json['nativePort'] as num?)?.toInt(),
-                deviceType: LanDiscoveryPeerOperations(
-                  this,
-                )._guessDeviceType(json['os'] as String? ?? ''),
-                os: json['os'] as String? ?? 'Unknown',
-                lastSeen: DateTime.now(),
-              );
-              _peerMap[id] = peer;
-              LanDiscoveryPeerOperations(this)._notifyPeersUpdated();
-            }
-
-            final type = json['type'] as String?;
-            if (type == 'PING') {
-              final senderId = json['id'] as String?;
-              if (senderId != null && senderId != currentDeviceId) {
-                _sendUdpPong(
-                  datagram.address,
-                  listeningHttpPort,
-                  nativePort: nativePort,
-                );
-                registerDiscoveredPeerFromDatagram(
-                  senderId,
-                  json,
-                  datagram.address.address,
-                );
-              }
-            } else if (type == 'PONG') {
-              final id = json['id'] as String?;
-              if (id != null && id != currentDeviceId) {
-                registerDiscoveredPeerFromDatagram(
-                  id,
-                  json,
-                  datagram.address.address,
-                );
-              }
-            } else if (type == 'BYE' ||
-                type == 'DISCONNECT' ||
-                type == 'OFFLINE') {
-              final id = json['id'] as String?;
-              if (id != null) {
-                final cleanId = LanDiscoveryPeerOperations(
-                  this,
-                )._extractCleanId(id);
-                _peerMap.remove(cleanId);
-                _peerMap.remove(id);
-                LanDiscoveryPeerOperations(this)._notifyPeersUpdated();
-              }
-            }
-          } catch (_) {}
+        if (!identical(_udpSocket, socket) || event != RawSocketEvent.read) {
+          return;
+        }
+        final datagram = socket.receive();
+        if (datagram != null) {
+          handler.handle(
+            datagram.data,
+            datagram.address.address,
+            datagram.port,
+          );
         }
       });
     } catch (e) {
@@ -241,28 +205,6 @@ extension LanDiscoveryAdvertisingOperations on LanDiscoveryService {
     } finally {
       socket?.close();
     }
-  }
-
-  /// 向发现 ping 发送 UDP 响应。
-  void _sendUdpPong(
-    InternetAddress targetAddress,
-    int port, {
-    int? nativePort,
-  }) {
-    final socket = _udpSocket;
-    if (socket == null) return;
-    try {
-      final payload = jsonEncode({
-        'type': 'PONG',
-        'id': currentDeviceId,
-        'alias': currentDeviceAlias,
-        'port': port,
-        'nativePort': ?nativePort,
-        'os': Platform.operatingSystem,
-      });
-      final bytes = utf8.encode(payload);
-      socket.send(bytes, targetAddress, LanDiscoveryService.udpDiscoveryPort);
-    } catch (_) {}
   }
 
   /// 向已发现对端广播 V2 离线通知。

@@ -1,19 +1,121 @@
 #include "windows_capture_state.h"
 
 #include <d3d11.h>
+#include <dxgi1_2.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Graphics.Capture.h>
+#include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
+#include <winrt/Windows.Graphics.DirectX.h>
+#include <winrt/base.h>
 
 #include <algorithm>
 #include <chrono>
 #include <vector>
 
-#include <winrt/Windows.Foundation.h>
-#include <winrt/Windows.Graphics.Capture.h>
-#include <winrt/Windows.Graphics.DirectX.h>
-#include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
-#include <winrt/base.h>
-
 namespace realtime_media_windows {
+namespace {
+constexpr uint64_t kIdleFrameInterval = 18'000;  // Five frames per second.
+uint64_t CaptureTimestamp(const CaptureState& state) {
+  const auto elapsed = std::chrono::steady_clock::now() - state.started_at;
+  const auto ns =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
+  return ns <= 0 ? 0 : static_cast<uint64_t>(ns) * 90'000ULL / 1'000'000'000ULL;
+}
+struct CallbackExit final {
+  std::shared_ptr<CaptureState> state;
+  explicit CallbackExit(std::shared_ptr<CaptureState> value)
+      : state(std::move(value)) {
+    state->EnterCallback();
+  }
+  ~CallbackExit() { state->ExitCallback(); }
+};
+// Caller holds encoder_mutex through encoding and pushing so a timer cannot
+// interleave a newer access unit with an actual capture callback.
+void PushAccessUnits(const std::shared_ptr<CaptureState>& state,
+                     uint64_t timestamp_90khz,
+                     const std::vector<EncodedAccessUnit>& access_units) {
+  for (const auto& access_unit : access_units) {
+    if (state->stopped.load()) break;
+    NativeH264FrameMetadata metadata;
+    metadata.sequence = state->sequence.fetch_add(1);
+    metadata.timestamp = timestamp_90khz;
+    metadata.width = access_unit.width;
+    metadata.height = access_unit.height;
+    metadata.keyframe = access_unit.keyframe ? 1 : 0;
+    const int push_status =
+        state->push_h264(state->owner, metadata, access_unit.payload.data(),
+                         access_unit.payload.size());
+    if (push_status == 0) {
+      state->frames_sent.fetch_add(1);
+    } else if (push_status == 1) {
+      // The native queue owns queue-drop accounting. Counting this
+      // status here would make the platform/native merge report the
+      // same dropped access unit twice.
+      auto next_recovery = state->next_recovery_timestamp.load();
+      if (timestamp_90khz >= next_recovery &&
+          state->next_recovery_timestamp.compare_exchange_strong(
+              next_recovery, timestamp_90khz + 90'000ULL)) {
+        if (!state->stopped.load() && state->encoder != nullptr &&
+            !state->encoder->RequestKeyframe()) {
+          state->terminal_status.store(kCaptureTerminalEncoderFailed);
+          state->stopped.store(true);
+          break;
+        }
+      }
+      continue;
+    } else {
+      state->frames_dropped.fetch_add(1);
+      state->terminal_status.store(push_status);
+      state->stopped.store(true);
+      break;
+    }
+  }
+}
+}  // namespace
+
+bool EnsureCaptureGraphicsDevice(NativeCodecMode mode,
+                                 CaptureGraphicsDevice* graphics) {
+  auto& d3d_device = graphics->d3d_device;
+  auto& d3d_context = graphics->d3d_context;
+  auto& winrt_device = graphics->winrt_device;
+  if (winrt_device != nullptr) return true;
+  constexpr D3D_FEATURE_LEVEL kFeatureLevels[] = {
+      D3D_FEATURE_LEVEL_11_1,
+      D3D_FEATURE_LEVEL_11_0,
+  };
+  D3D_FEATURE_LEVEL feature_level = D3D_FEATURE_LEVEL_11_0;
+  const HRESULT device_result = D3D11CreateDevice(
+      nullptr,
+      mode == NativeCodecMode::Cpu ? D3D_DRIVER_TYPE_WARP
+                                   : D3D_DRIVER_TYPE_HARDWARE,
+      nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, kFeatureLevels,
+      ARRAYSIZE(kFeatureLevels), D3D11_SDK_VERSION, d3d_device.put(),
+      &feature_level, d3d_context.put());
+  if (FAILED(device_result) || d3d_device == nullptr) return false;
+
+  winrt::com_ptr<IDXGIDevice> dxgi_device;
+  if (FAILED(d3d_device->QueryInterface(IID_PPV_ARGS(dxgi_device.put())))) {
+    d3d_device = nullptr;
+    d3d_context = nullptr;
+    return false;
+  }
+  winrt::com_ptr<IInspectable> inspectable_device;
+  if (FAILED(CreateDirect3D11DeviceFromDXGIDevice(dxgi_device.get(),
+                                                  inspectable_device.put()))) {
+    d3d_device = nullptr;
+    d3d_context = nullptr;
+    return false;
+  }
+  try {
+    winrt_device = inspectable_device.as<IDirect3DDevice>();
+  } catch (...) {
+    d3d_device = nullptr;
+    d3d_context = nullptr;
+    return false;
+  }
+  return winrt_device != nullptr;
+}
 
 CaptureState::~CaptureState() {
   if (Stop()) return;
@@ -71,6 +173,10 @@ bool CaptureState::Stop() {
   stopped.store(true);
   if (!teardown_started.exchange(true)) {
     try {
+      if (idle_frame_timer != nullptr) {
+        idle_frame_timer.Cancel();
+        idle_frame_timer = nullptr;
+      }
       if (frame_pool != nullptr && frame_arrived_token.value != 0) {
         frame_pool.FrameArrived(frame_arrived_token);
         frame_arrived_token = {};
@@ -95,11 +201,7 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
                    winrt::Windows::Foundation::IInspectable const&) {
         const auto state = weak_state.lock();
         if (!state) return;
-        state->EnterCallback();
-        struct CallbackExit final {
-          std::shared_ptr<CaptureState> state;
-          ~CallbackExit() { state->ExitCallback(); }
-        } callback_exit{state};
+        CallbackExit callback_exit{state};
         if (state->stopped.load()) return;
         try {
           while (!state->stopped.load()) {
@@ -124,26 +226,18 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
             state->frames_captured.fetch_add(1);
 
             auto surface = frame.Surface();
-            winrt::com_ptr<
-                ::Windows::Graphics::DirectX::Direct3D11::
-                    IDirect3DDxgiInterfaceAccess>
+            winrt::com_ptr<::Windows::Graphics::DirectX::Direct3D11::
+                               IDirect3DDxgiInterfaceAccess>
                 access;
             winrt::check_hresult(winrt::get_unknown(surface)->QueryInterface(
                 IID_PPV_ARGS(access.put())));
             winrt::com_ptr<ID3D11Texture2D> texture;
             winrt::check_hresult(
                 access->GetInterface(IID_PPV_ARGS(texture.put())));
+            std::lock_guard<std::mutex> encode_lock(state->encoder_mutex);
+            if (state->stopped.load() || state->encoder == nullptr) break;
             std::vector<EncodedAccessUnit> access_units;
-            const auto elapsed = std::chrono::steady_clock::now() -
-                                 state->started_at;
-            const auto elapsed_ns =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed)
-                    .count();
-            const uint64_t timestamp_90khz =
-                elapsed_ns <= 0
-                    ? 0
-                    : static_cast<uint64_t>(elapsed_ns) * 90'000ULL /
-                          1'000'000'000ULL;
+            const uint64_t timestamp_90khz = CaptureTimestamp(*state);
             const auto target_framerate =
                 std::max<uint32_t>(5, state->target_framerate.load());
             const uint64_t frame_interval = 90'000ULL / target_framerate;
@@ -158,10 +252,13 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
                     : timestamp_90khz + frame_interval);
             bool encoded = false;
             {
-              std::lock_guard<std::mutex> encode_lock(state->encoder_mutex);
               if (!state->stopped.load() && state->encoder != nullptr) {
                 encoded = state->encoder->Encode(texture.get(), timestamp_90khz,
                                                  &access_units);
+                if (encoded) {
+                  state->last_encode_timestamp = timestamp_90khz;
+                  PushAccessUnits(state, timestamp_90khz, access_units);
+                }
               }
             }
             if (!encoded) {
@@ -170,31 +267,6 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
               state->terminal_status.store(kCaptureTerminalEncoderFailed);
               state->stopped.store(true);
               break;
-            }
-            for (const auto& access_unit : access_units) {
-              if (state->stopped.load()) break;
-              NativeH264FrameMetadata metadata;
-              metadata.sequence = state->sequence.fetch_add(1);
-              metadata.timestamp = timestamp_90khz;
-              metadata.width = static_cast<uint32_t>(content_size.Width);
-              metadata.height = static_cast<uint32_t>(content_size.Height);
-              metadata.keyframe = access_unit.keyframe ? 1 : 0;
-              const int push_status = state->push_h264(
-                  state->owner, metadata, access_unit.payload.data(),
-                  access_unit.payload.size());
-              if (push_status == 0) {
-                state->frames_sent.fetch_add(1);
-              } else if (push_status == 1) {
-                // The native queue owns queue-drop accounting. Counting this
-                // status here would make the platform/native merge report the
-                // same dropped access unit twice.
-                continue;
-              } else {
-                state->frames_dropped.fetch_add(1);
-                state->terminal_status.store(push_status);
-                state->stopped.store(true);
-                break;
-              }
             }
           }
         } catch (...) {
@@ -212,14 +284,40 @@ void InstallCaptureCallbacks(const std::shared_ptr<CaptureState>& state) {
                    winrt::Windows::Foundation::IInspectable const&) {
         const auto state = weak_state.lock();
         if (!state) return;
-        state->EnterCallback();
-        struct CallbackExit final {
-          std::shared_ptr<CaptureState> state;
-          ~CallbackExit() { state->ExitCallback(); }
-        } callback_exit{state};
+        CallbackExit callback_exit{state};
         state->source_ended.store(true);
         state->stopped.store(true);
       });
+  state->idle_frame_timer =
+      winrt::Windows::System::Threading::ThreadPoolTimer::CreatePeriodicTimer(
+          [weak_state](auto const&) {
+            const auto state = weak_state.lock();
+            if (!state) return;
+            CallbackExit callback_exit{state};
+            if (state->stopped.load()) return;
+            try {
+              std::lock_guard<std::mutex> encode_lock(state->encoder_mutex);
+              if (state->stopped.load() || state->encoder == nullptr) return;
+              const uint64_t timestamp = CaptureTimestamp(*state);
+              if (timestamp < state->last_encode_timestamp ||
+                  timestamp - state->last_encode_timestamp < kIdleFrameInterval)
+                return;
+              std::vector<EncodedAccessUnit> access_units;
+              if (!state->encoder->RepeatFrame(timestamp, &access_units)) {
+                state->terminal_status.store(kCaptureTerminalEncoderFailed);
+                state->stopped.store(true);
+                return;
+              }
+              state->last_encode_timestamp = timestamp;
+              PushAccessUnits(state, timestamp, access_units);
+            } catch (...) {
+              if (!state->stopped.load()) {
+                state->terminal_status.store(kCaptureTerminalEncoderFailed);
+                state->stopped.store(true);
+              }
+            }
+          },
+          std::chrono::milliseconds(200));
 }
 
 }  // namespace realtime_media_windows

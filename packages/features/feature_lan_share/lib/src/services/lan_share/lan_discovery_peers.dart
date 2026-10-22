@@ -11,23 +11,52 @@ extension LanDiscoveryPeerOperations on LanDiscoveryService {
         : service.name ?? '';
     final id = _extractCleanId(rawId);
     if (id.isEmpty || id == currentDeviceId) return;
+    // A packet/manual route observation identifies the interface actually used
+    // to reach this peer. A multi-interface mDNS host/TXT address must not
+    // replace that endpoint while the observation remains fresh.
+    final observed = _peerMap[id];
+    if (!_nsdPeerIds.contains(id) &&
+        observed != null &&
+        DateTime.now().difference(observed.lastSeen) <
+            LanDiscoveryService.devicePresenceTtl) {
+      return;
+    }
 
     final rawAlias = txt['alias'] != null
         ? utf8.decode(txt['alias']!)
         : service.name ?? 'Device';
     final alias = _extractCleanAlias(rawAlias);
     final os = txt['os'] != null ? utf8.decode(txt['os']!) : 'Unknown';
-    var hostIp =
-        service.host ?? (txt['ip'] != null ? utf8.decode(txt['ip']!) : '');
-    if (hostIp.startsWith('::ffff:')) {
-      hostIp = hostIp.substring(7);
+    // NSD host is a canonical hostname on Android/Windows, while addresses
+    // contains the resolved endpoint. LAN listeners bind IPv4; do not hand a
+    // .local name or an unusable interface address to the HTTPS client.
+    String? usableIpv4(String? raw) {
+      if (raw == null) return null;
+      final value = raw.startsWith('::ffff:') ? raw.substring(7) : raw;
+      final address = InternetAddress.tryParse(value);
+      if (address == null ||
+          address.type != InternetAddressType.IPv4 ||
+          address.isLoopback ||
+          address.isMulticast ||
+          address.address == '0.0.0.0') {
+        return null;
+      }
+      return address.address;
     }
+
+    String? hostIp;
+    for (final address in service.addresses ?? <InternetAddress>[]) {
+      hostIp = usableIpv4(address.address);
+      if (hostIp != null) break;
+    }
+    hostIp ??= usableIpv4(service.host);
+    hostIp ??= usableIpv4(txt['ip'] != null ? utf8.decode(txt['ip']!) : null);
     final port = service.port ?? LanDiscoveryService.defaultPort;
     final nativePort = int.tryParse(
       txt['nativePort'] == null ? '' : utf8.decode(txt['nativePort']!),
     );
 
-    if (hostIp.isEmpty) return;
+    if (hostIp == null) return;
 
     final peer = LanDiscoveredPeer(
       deviceId: id,
@@ -41,6 +70,7 @@ extension LanDiscoveryPeerOperations on LanDiscoveryService {
     );
 
     _peerMap[id] = peer;
+    _nsdPeerIds.add(id);
     _notifyPeersUpdated();
   }
 
@@ -145,6 +175,7 @@ extension LanDiscoveryPeerOperations on LanDiscoveryService {
           !activeNsdDeviceIds.contains(_extractCleanId(peer.deviceId)),
     );
     final removed = before - _peerMap.length;
+    _nsdPeerIds.removeWhere((id) => !_peerMap.containsKey(id));
     if (removed > 0) _notifyPeersUpdated();
     return removed;
   }
@@ -177,12 +208,14 @@ extension LanDiscoveryPeerOperations on LanDiscoveryService {
 
   /// 新增或替换一个 discovery-only 对端观察。
   void _registerDiscoveredPeer(LanDiscoveredPeer peer) {
+    _nsdPeerIds.remove(peer.deviceId);
     _peerMap[peer.deviceId] = peer;
     _notifyPeersUpdated();
   }
 
   /// 根据标识移除一个动态 discovery observation。
   void _removeDiscoveredPeer(String deviceId) {
+    _nsdPeerIds.remove(deviceId);
     _peerMap.remove(deviceId);
     _peerMap.removeWhere(
       (key, peer) => _extractCleanId(peer.deviceId) == deviceId,

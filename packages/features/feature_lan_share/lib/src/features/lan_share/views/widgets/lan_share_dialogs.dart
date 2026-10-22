@@ -181,7 +181,9 @@ extension _LanShareDialogActions on _LanShareScreenState {
     LanShareStrings strings,
   ) async {
     final result = await vm.requestPairing(device);
-    if (result is NetworkFailure<void> && context.mounted) {
+    if (result is NetworkFailure<void> &&
+        result.error.code != NetworkErrorCode.cancelled &&
+        context.mounted) {
       _showRequestFailure(context, result, strings);
     }
     return result;
@@ -205,8 +207,7 @@ extension _LanShareDialogActions on _LanShareScreenState {
   Future<String?> _showManualAddDialog(
     BuildContext context,
     LanShareStrings strings,
-  ) async {
-    final controller = TextEditingController();
+  ) {
     final isEn = context.read<LanShareViewModel>().appSettings.isEnglish;
     final title = isEn ? 'Connect to Device' : '连接到设备';
     final description = isEn
@@ -218,45 +219,14 @@ extension _LanShareDialogActions on _LanShareScreenState {
     final cancelLabel = strings.cancel;
     final confirmLabel = isEn ? 'Connect' : '连接';
 
-    try {
-      return await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(title),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(description, style: Theme.of(ctx).textTheme.bodyMedium),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  decoration: InputDecoration(
-                    hintText: hint,
-                    border: const OutlineInputBorder(),
-                  ),
-                  onSubmitted: (val) => Navigator.pop(ctx, val.trim()),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(cancelLabel),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-              child: Text(confirmLabel),
-            ),
-          ],
-        ),
-      );
-    } finally {
-      controller.dispose();
-    }
+    return LanManualAddDialog.show(
+      context,
+      title: title,
+      description: description,
+      hint: hint,
+      cancelLabel: cancelLabel,
+      confirmLabel: confirmLabel,
+    );
   }
 
   /// 展示本机 LAN 地址选择器并更新 WebShare 地址覆盖值。

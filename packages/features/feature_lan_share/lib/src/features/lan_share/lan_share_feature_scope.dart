@@ -38,19 +38,21 @@ class _LanShareFeatureScopeState extends State<LanShareFeatureScope> {
     final coordinator = context.read<LanReceiverCoordinator>();
     if (!identical(_coordinator, coordinator)) {
       _coordinator = coordinator;
-      final existing = coordinator.viewModel;
-      if (existing != null) {
-        _inheritedViewModel = existing;
-      } else {
-        _viewModelFuture = coordinator.ensureViewModel();
-      }
+      _viewModelFuture = _activate(coordinator);
     }
   }
 
   void _retry() {
     setState(() {
-      _viewModelFuture = _coordinator!.ensureViewModel();
+      _viewModelFuture = _activate(_coordinator!);
     });
+  }
+
+  Future<LanShareViewModel> _activate(
+    LanReceiverCoordinator coordinator,
+  ) async {
+    await coordinator.activateReceiver();
+    return coordinator.ensureViewModel();
   }
 
   @override

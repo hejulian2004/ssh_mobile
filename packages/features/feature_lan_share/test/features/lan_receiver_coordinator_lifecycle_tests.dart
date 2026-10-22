@@ -1,6 +1,57 @@
 part of 'lan_receiver_coordinator_test.dart';
 
 void _registerReceiverLifecycleTests() {
+  test(
+    'enrollment stays light and page activation starts the deferred receiver once',
+    () async {
+      final database = LanShareDatabase.forTesting(NativeDatabase.memory());
+      final settings = FakeLanShareSettings();
+      final identity = FakeLanShareIdentity();
+      final native = FakeLanShareNetworkRuntime();
+      final discovery = FakeLanDiscoveryService();
+      final coordinator = LanReceiverCoordinator(
+        appSettings: settings,
+        logger: FakeLanShareLogger(),
+        dataProtection: FakeLanShareDataProtection(),
+        networkIdentity: identity,
+        networkAccess: FakeLanShareNetworkAccessPort(
+          networkFacade: FakeLanShareNetworkService(),
+        ),
+        bootstrapClient: FakeLanShareBootstrapClient(),
+        historyRepository: LanShareHistoryRepository(database),
+        networkRuntime: native,
+        transferServiceOverride: FakeLanTransferService(),
+        discoveryServiceOverride: discovery,
+        startReceiverOnInitialization: false,
+      );
+      try {
+        final enrollment = await coordinator.ensureRelayEnrollment();
+        expect(await coordinator.ensureRelayEnrollment(), same(enrollment));
+        expect(identity.loadCalls, 0);
+        expect(coordinator.initialized, isFalse);
+        expect(native.requestedCapabilities, isEmpty);
+        await coordinator.ensureInitialized();
+        expect(coordinator.receiverActive, isFalse);
+        expect(discovery.advertisedEndpoints, isEmpty);
+        expect(native.requestedCapabilities, isEmpty);
+        await Future.wait([
+          coordinator.activateReceiver(),
+          coordinator.activateReceiver(),
+        ]);
+        expect(coordinator.receiverActive, isTrue);
+        expect(identity.loadCalls, 1);
+        expect(native.requestedCapabilities, [NetworkCapability.runtime]);
+        expect(discovery.advertisedEndpoints, isNotEmpty);
+        await coordinator.deactivateReceiver();
+        expect(coordinator.receiverActive, isFalse);
+      } finally {
+        await coordinator.close();
+        settings.dispose();
+        await database.dispose();
+      }
+      await expectLater(coordinator.ensureRelayEnrollment(), throwsStateError);
+    },
+  );
   test('receiver coordinator starts uninitialized', () async {
     final database = LanShareDatabase.forTesting(NativeDatabase.memory());
     final settings = FakeLanShareSettings();
@@ -209,18 +260,18 @@ void _registerReceiverLifecycleTests() {
     );
 
     await coordinator.ensureInitialized();
-    transfer.emitHandshakeSuccess(
-      LanDiscoveredPeer(
-        deviceId: 'peer-a',
-        alias: 'Peer A',
-        ip: '192.0.2.5',
-        controlPort: 53317,
-        deviceType: LanDeviceType.desktop,
-        os: 'test',
-        lastSeen: DateTime.utc(2026),
-      ),
+    final pairedPeer = LanDiscoveredPeer(
+      deviceId: 'peer-a',
+      alias: 'Peer A',
+      ip: '192.0.2.5',
+      controlPort: 53317,
+      deviceType: LanDeviceType.desktop,
+      os: 'test',
+      lastSeen: DateTime.utc(2026),
     );
-    await Future<void>.delayed(const Duration(milliseconds: 10));
+    final pairingCallback = transfer.onPairingCommitted;
+    expect(pairingCallback, isNotNull);
+    await pairingCallback!(pairedPeer);
 
     expect(networkService.registerPeerCalls, 2);
     expect(networkService.lastPeerConfig?.endpointAddress, isEmpty);

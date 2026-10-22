@@ -10,13 +10,107 @@ const RTP_MTU: usize = 96;
 const INITIAL_SEQUENCE: u16 = 4_096;
 
 fn synthetic_h264_access_unit() -> Vec<u8> {
-    let mut access_unit = vec![
+    let mut access_unit = baseline_sps(1920, 1080);
+    access_unit.extend_from_slice(&[
         // SPS, PPS, then an IDR NALU, all in Annex-B form.
-        0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1f, 0xe5, 0x88, 0x68, 0x00, 0x00, 0x00, 0x01,
-        0x68, 0xce, 0x3c, 0x80, 0x00, 0x00, 0x00, 0x01, 0x65,
-    ];
+        0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x3c, 0x80, 0x00, 0x00, 0x00, 0x01, 0x65,
+    ]);
     access_unit.extend((0..640).map(|index| (index as u8).wrapping_mul(37)));
     access_unit
+}
+
+pub(crate) fn baseline_sps(width: u32, height: u32) -> Vec<u8> {
+    fn ue(bits: &mut Vec<bool>, value: u32) {
+        let code = value + 1;
+        let count = 32 - code.leading_zeros();
+        bits.extend(std::iter::repeat_n(false, (count - 1) as usize));
+        bits.extend((0..count).rev().map(|index| code & (1 << index) != 0));
+    }
+    let mut bits = Vec::new();
+    for value in [0, 0, 0, 0, 1] {
+        ue(&mut bits, value);
+    }
+    bits.push(false);
+    ue(&mut bits, width.div_ceil(16) - 1);
+    ue(&mut bits, height.div_ceil(16) - 1);
+    bits.extend([true, true, true]);
+    for value in [
+        0,
+        (width.div_ceil(16) * 16 - width) / 2,
+        0,
+        (height.div_ceil(16) * 16 - height) / 2,
+    ] {
+        ue(&mut bits, value);
+    }
+    bits.extend([false, true]);
+    while bits.len() % 8 != 0 {
+        bits.push(false);
+    }
+    let mut output = vec![0, 0, 0, 1, 0x67, 66, 0xc0, 51];
+    for byte_bits in bits.chunks_exact(8) {
+        let byte = byte_bits
+            .iter()
+            .fold(0u8, |value, bit| (value << 1) | u8::from(*bit));
+        if output.ends_with(&[0, 0]) && byte <= 3 {
+            output.push(3);
+        }
+        output.push(byte);
+    }
+    output
+}
+
+#[test]
+fn reassembler_reads_portrait_and_cropped_dimensions_from_sps_and_retains_them_for_deltas() {
+    for (width, height) in [(1080, 2424), (638, 478), (3840, 2160)] {
+        let mut payload = baseline_sps(width, height);
+        payload.extend_from_slice(&[0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80, 0, 0, 0, 1, 0x65, 0x88]);
+        payload.extend_from_slice(&[0x55; 128]);
+        let input = EncodedVideoFrame::new(
+            VideoCodec::H264,
+            0,
+            90000,
+            width,
+            height,
+            true,
+            payload,
+            Instant::now() + Duration::from_secs(1),
+        );
+        let mut packetizer = RtpPacketizer::new(RTP_MTU, H264_PAYLOAD_TYPE, SSRC, INITIAL_SEQUENCE);
+        let mut receiver = RtpReassembler::new();
+        let mut result = None;
+        for packet in packetizer.packetize(&input).unwrap() {
+            result = receiver.push(&packet).unwrap();
+        }
+        let result = result.unwrap();
+        assert_eq!((result.width, result.height), (width, height));
+        let delta = receiver
+            .push(&packet(
+                INITIAL_SEQUENCE + 10,
+                96000,
+                true,
+                &[0x41, 0x88, 0x55, 0x55],
+            ))
+            .unwrap()
+            .unwrap();
+        assert_eq!((delta.width, delta.height), (width, height));
+        for (index, bad_sps) in [baseline_sps(8000, 480), vec![0, 0, 0, 1, 0x67, 66, 0, 31]]
+            .into_iter()
+            .enumerate()
+        {
+            let bad_packet = Packet {
+                header: Header {
+                    version: 2,
+                    marker: true,
+                    sequence_number: INITIAL_SEQUENCE + 20 + index as u16,
+                    timestamp: 99000 + index as u32 * 3000,
+                    ..Default::default()
+                },
+                payload: Bytes::copy_from_slice(&bad_sps[4..]),
+            };
+            let unchanged = receiver.push(&bad_packet).unwrap().unwrap();
+            assert_eq!((unchanged.width, unchanged.height), (width, height));
+        }
+    }
 }
 
 fn frame(sequence: u64, timestamp: u64, keyframe: bool) -> EncodedVideoFrame {

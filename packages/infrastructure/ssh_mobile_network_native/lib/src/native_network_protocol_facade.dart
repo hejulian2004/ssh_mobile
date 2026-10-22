@@ -139,10 +139,12 @@ final class NativeNetworkProtocol {
     required String commandId,
     required String realtimeId,
     required String peerId,
+    bool screenVideo = false,
   }) => _NativeProtocolCommandEncoder.startRealtimeSessionCommand(
     commandId: commandId,
     realtimeId: realtimeId,
     peerId: peerId,
+    screenVideo: screenVideo,
   );
 
   static Uint8List stopRealtimeSessionCommand({

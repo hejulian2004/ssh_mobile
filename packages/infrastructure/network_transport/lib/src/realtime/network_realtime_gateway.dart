@@ -23,6 +23,7 @@ abstract interface class NetworkRealtimeGateway {
   NativeCommandTicket start({
     required String realtimeId,
     required String peerId,
+    bool screenVideo = false,
   });
 
   /// Queues a native stop command and returns its command identity.
@@ -138,6 +139,7 @@ final class RuntimeNetworkRealtimeGateway
   NativeCommandTicket start({
     required String realtimeId,
     required String peerId,
+    bool screenVideo = false,
   }) {
     final commandId = _nextCommandId('realtime-start');
     try {
@@ -147,6 +149,7 @@ final class RuntimeNetworkRealtimeGateway
           commandId: commandId,
           realtimeId: realtimeId,
           peerId: peerId,
+          screenVideo: screenVideo,
         ),
       );
     } on ArgumentError {

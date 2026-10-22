@@ -1,4 +1,4 @@
-最新更新时间：2026-09-07
+最新更新时间：2026-10-13
 
 # network_sdk 维护约束
 
@@ -42,7 +42,8 @@ and Native Network V2 remain separate domains.
   lifecycle belongs to `realtime_media`; no per-frame Dart API or
   SDP/ICE/PeerConnection/socket/native handle/media resource leaks to Features.
   App adapter maps backend events;
-  `start/stop` Futures complete only after `NativeCommandResultEvent`; queue
+  `start/stop` Futures complete only after a native terminal command result;
+  the App adapter correlates `NativeCommandResultV2Event` by command and peer; queue
   acceptance never advances state. `RealtimeStateChangedEvent` is the state
   source of truth, and stop waits for native `closed`.
 - Existing type aliases stay centralized here only while used outside the current

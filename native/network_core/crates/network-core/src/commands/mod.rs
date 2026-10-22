@@ -31,7 +31,9 @@ pub(crate) use ledger::{
     command_peer_id, dispatch_command, CommandResultLedger, MAX_COMPLETED_COMMANDS,
 };
 #[allow(unused_imports)]
-pub(crate) use peer_lifecycle::{emit_peer_diagnostics, remove_peer_v2, validate_e2ee_policy};
+pub(crate) use peer_lifecycle::{
+    emit_peer_diagnostics, emit_peer_diagnostics_with_error, remove_peer_v2, validate_e2ee_policy,
+};
 
 #[cfg(test)]
 #[path = "../tests/commands.rs"]

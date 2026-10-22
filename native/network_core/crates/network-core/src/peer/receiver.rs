@@ -156,6 +156,9 @@ impl ConnectionReceiverSupervisor {
                                 tracing::debug!(peer_id = %peer_id, error = %error, "rejected QUIC DeliveryAck");
                             }
                         }
+                        Ok((ChannelFrameKind::RealtimeSignal, payload)) => {
+                            let _ = crate::realtime::handle_direct_signal(&state, &peer_id, &payload).await;
+                        }
                         Err(error) => {
                             tracing::debug!(peer_id = %peer_id, error = %error, "QUIC channel stream failed");
                         }
@@ -249,6 +252,8 @@ impl ConnectionReceiverSupervisor {
                             return;
                         };
                         let result = match frame.kind {
+                            GenericFrameKind::RealtimeSignal => crate::realtime::handle_direct_signal(&state, &peer_id, &frame.payload)
+                                .await.map_err(|_| std::io::Error::other("direct signaling rejected")),
                             GenericFrameKind::DataMessage => crate::channel::handle_data_message(
                                 &state,
                                 &peer_id,

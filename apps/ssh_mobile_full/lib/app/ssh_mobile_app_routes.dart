@@ -75,6 +75,7 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
                       child: feature_developer.DeveloperPanelFloatingHost(
                         child: feature_lan_share.NetworkIncomingTransferHost(
                           child: feature_lan_share.LanPairingNavigationHost(
+                            initializeReceiver: false,
                             navigatorKey: _navigatorKey,
                             child: ShadAppBuilder(child: effectiveChild),
                           ),
@@ -121,7 +122,9 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
                               create: (context) => StartupViewModel(
                                 appSettings: context.read<AppSettings>(),
                               ),
-                              child: const StartupScreen(),
+                              child: StartupScreen(
+                                onReady: widget.onStartupReady,
+                              ),
                             ),
                           ),
                         );

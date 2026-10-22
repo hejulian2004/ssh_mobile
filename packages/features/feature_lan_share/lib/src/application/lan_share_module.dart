@@ -11,6 +11,7 @@ import 'package:network_transport/network_transport.dart';
 import '../data/database/lan_share_database.dart';
 import '../data/repositories/lan_share_history_repository.dart';
 import '../domain/lan_share_ports.dart';
+import '../domain/lan_discovery_bridge.dart';
 import '../features/lan_share/services/lan_receiver_coordinator.dart';
 import '../services/lan_share/lan_peer_trust.dart';
 
@@ -21,8 +22,8 @@ typedef LanShareDatabaseFactory = LanShareDatabase Function();
 final class LanShareModule implements AppModule {
   /// 创建尚未注册的 LAN Module。
   ///
-  /// [receiverEnabled] 为空时读取 App Shell 的设置；显式为 false 时只
-  /// 初始化数据库和服务依赖，不启动 HTTPS、mDNS 或原生网络监听。
+  /// [receiverEnabled] 控制 Module 自动接收，为空时读取 App Shell 设置。
+  /// false 时仅装配数据库与 Coordinator，首次进入页面仍可显式激活接收。
   LanShareModule({
     bool? receiverEnabled,
     LanShareDatabaseFactory? databaseFactory,
@@ -38,6 +39,7 @@ final class LanShareModule implements AppModule {
   LanShareNetworkIdentityPort? _networkIdentity;
   LanShareNetworkAccessPort? _networkAccess;
   LanShareLocalAddressSelectionPort? _localAddressSelectionPort;
+  LanShareDiscoveryBridgePort? _discoveryBridge;
   BootstrapClient? _bootstrapClient;
   NetworkRuntime? _networkRuntime;
   bool? _receiverEnabled;
@@ -90,6 +92,7 @@ final class LanShareModule implements AppModule {
     _localAddressSelectionPort = context
         .require<LanShareLocalAddressSelectionPort>();
     _bootstrapClient = context.require<BootstrapClient>();
+    _discoveryBridge = context.maybeGet<LanShareDiscoveryBridgePort>();
     _networkRuntime = context.require<NetworkRuntime>();
     _receiverEnabled = _configuredReceiverEnabled ?? _settings!.receiverEnabled;
   }
@@ -143,8 +146,9 @@ final class LanShareModule implements AppModule {
         historyRepository: repository,
         networkRuntime: networkRuntime,
         localAddressSelectionPort: localAddressSelectionPort,
+        discoveryBridge: _discoveryBridge,
         peerTrustStore: peerTrustStore,
-        initializeNetwork: receiverEnabled,
+        startReceiverOnInitialization: receiverEnabled,
       );
       _state = ModuleState.initialized;
     } catch (_) {
@@ -175,7 +179,7 @@ final class LanShareModule implements AppModule {
   @override
   Future<void> deactivate() async {
     if (_state != ModuleState.active) return;
-    if (receiverEnabled) await coordinator.deactivateReceiver();
+    await coordinator.deactivateReceiver();
     _state = ModuleState.inactive;
   }
 
@@ -201,7 +205,11 @@ final class LanShareModule implements AppModule {
       if (_state == ModuleState.active && receiverEnabled) {
         await coordinator.deactivateReceiver();
       }
-      await _coordinator?.close();
+      if (_coordinator case final coordinator?) {
+        await coordinator.close();
+      } else {
+        await _discoveryBridge?.close();
+      }
     });
     await attempt(() async {
       await _database?.dispose();

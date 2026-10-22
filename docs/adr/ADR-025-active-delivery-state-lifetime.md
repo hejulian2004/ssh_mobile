@@ -1,4 +1,4 @@
-> 最新更新时间：2026-08-12
+> 最新更新时间：2026-10-22
 
 # ADR-025：Active Delivery State Lifetime
 
@@ -33,9 +33,10 @@ Once；历史窗口之外的旧 duplicate 可能重新成为新消息。Active t
 
 ## 验证
 
-`native/network_core/crates/network-core/src/delivery.rs` 覆盖 active 超过 TTL、
+`native/network_core/crates/network-core/src/tests/delivery.rs` 覆盖 active 超过 TTL、
 ordered buffer 超过 TTL、processed capacity 淘汰、application ACK timeout 和
-Session close；`src/tests.rs` 通过 Runtime owner 验证 TTL 扫描不会清理 active
+Session close；`src/tests/runtime_integration/relay_data_and_runtime_lifecycle.rs`
+通过 Runtime owner 验证 TTL 扫描不会清理 active
 state，显式 peer disconnect 会清空接收端状态。
 
 ## 状态

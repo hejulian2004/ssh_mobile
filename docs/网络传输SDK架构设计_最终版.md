@@ -1,4 +1,4 @@
-> 最新更新时间：2026-08-23
+> 最新更新时间：2026-10-22
 
 # 网络传输 SDK 架构设计
 
@@ -6,7 +6,7 @@
 >
 > 目标平台：Android / iOS / Windows / macOS / Linux（Flutter 前端 + Rust Core SDK）
 >
-> 核心技术：Flutter、flutter_rust_bridge、Rust、Tokio、Quinn、TCP、UDP、WebSocket、QUIC、WebRTC
+> 核心技术：Flutter、`ssh_mobile_network_native` FFI、Rust、Tokio、Quinn、TCP、UDP、WebSocket、QUIC、WebRTC
 >
 > 可靠性核心：一次性 ConnectionSession + Delivery/Recovery + Application ACK + Dedup + File Checkpoint/Resume
 
@@ -234,7 +234,7 @@ DeliveryManager
 │ └─ Relay Server: IP/Domain + Port                                             │
 └────────────────────────────────┬─────────────────────────────────────────────┘
                                  │
-                        flutter_rust_bridge
+                   ssh_mobile_network_native
                                  │
                                  ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -2542,7 +2542,7 @@ E2EE
 实现：
 
 - Rust workspace；
-- flutter_rust_bridge；
+- `ssh_mobile_network_native` FFI；
 - Config；
 - Error model；
 - Event Bridge；

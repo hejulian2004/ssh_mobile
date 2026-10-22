@@ -83,6 +83,7 @@ impl RealtimeManager {
                 peer_id,
                 shared_session_instance_id: new_shared_session_instance_id(),
                 connection_session_id: None,
+                direct_signaling_path: None,
                 peer: None,
                 driver: Some(driver),
                 revision: 1,
@@ -209,7 +210,16 @@ pub(crate) async fn start_session_with_config(
         ));
     }
 
-    let mut driver = create_io_driver(&state, config).await.map_err(|error| {
+    let mut driver = create_io_driver(
+        &state,
+        config,
+        &command.peer_id,
+        command
+            .screen_video
+            .then_some(network_webrtc::MediaDirection::Sendonly),
+    )
+    .await
+    .map_err(|error| {
         realtime_error(
             network_protocol::NetworkErrorCode::IoError,
             error.to_string(),
@@ -266,6 +276,7 @@ pub(crate) async fn start_session_with_config(
             peer_id: peer_id.clone(),
             shared_session_instance_id: shared_session_instance_id.clone(),
             connection_session_id,
+            direct_signaling_path: None,
             peer: None,
             driver: Some(driver.clone()),
             revision,

@@ -30,6 +30,7 @@ async fn started_tcp_generic_route() -> StartedGenericRoute {
         .await
         .expect("accept generic route test client");
     let runtime = prepare_generic_route(connection);
+    assert_eq!(runtime.handle.peer_address(), Some(peer));
     let GenericRouteRuntime {
         handle,
         inbound,

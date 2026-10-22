@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
@@ -57,12 +58,39 @@ class NetworkIdentityService {
   }
 
   Future<NetworkIdentityBundle> _loadAndCreate() async {
+    // Secure storage remains on the platform isolate; key derivation does not.
+    // Join them before deriving or persisting keys, retaining single-flight
+    // identity creation and settling both reads before a failure is retried.
+    final storedSeeds = await Future.wait<String?>([
+      _secureStorage.read(key: _identitySeedKey),
+      _secureStorage.read(key: _x25519SeedKey),
+    ]);
+    final material = await Isolate.run(() => _deriveIdentity(storedSeeds));
+    if (storedSeeds[0] == null) {
+      await _secureStorage.write(
+        key: _identitySeedKey,
+        value: base64UrlEncode(material.ed25519PrivateSeed).replaceAll('=', ''),
+      );
+    }
+    if (storedSeeds[1] == null) {
+      await _secureStorage.write(
+        key: _x25519SeedKey,
+        value: base64UrlEncode(material.x25519PrivateSeed).replaceAll('=', ''),
+      );
+    }
+    _cached = material;
+    return material;
+  }
+
+  static Future<NetworkIdentityBundle> _deriveIdentity(
+    List<String?> storedSeeds,
+  ) async {
     final ed25519 = Ed25519();
     final ed25519Pair = await _loadOrCreateKeyPair(
       newKeyPair: ed25519.newKeyPair,
       newKeyPairFromSeed: ed25519.newKeyPairFromSeed,
-      storageKey: _identitySeedKey,
       description: 'QUIC Ed25519',
+      stored: storedSeeds[0],
     );
     final ed25519Private = await ed25519Pair.extractPrivateKeyBytes();
     final ed25519Public = await ed25519Pair.extractPublicKey();
@@ -71,8 +99,8 @@ class NetworkIdentityService {
     final x25519Pair = await _loadOrCreateKeyPair(
       newKeyPair: x25519.newKeyPair,
       newKeyPairFromSeed: x25519.newKeyPairFromSeed,
-      storageKey: _x25519SeedKey,
       description: 'Network X25519',
+      stored: storedSeeds[1],
     );
     final x25519Private = await x25519Pair.extractPrivateKeyBytes();
     final x25519Public = await x25519Pair.extractPublicKey();
@@ -90,27 +118,21 @@ class NetworkIdentityService {
       x25519PrivateSeed: Uint8List.fromList(x25519Private),
       x25519PublicKey: Uint8List.fromList(x25519Public.bytes),
     );
-    _cached = material;
     return material;
   }
 
-  Future<SimpleKeyPair> _loadOrCreateKeyPair({
+  static Future<SimpleKeyPair> _loadOrCreateKeyPair({
     required Future<SimpleKeyPair> Function() newKeyPair,
     required Future<SimpleKeyPair> Function(List<int>) newKeyPairFromSeed,
-    required String storageKey,
     required String description,
+    required String? stored,
   }) async {
-    final stored = await _secureStorage.read(key: storageKey);
     if (stored == null) {
       final pair = await newKeyPair();
       final seed = await pair.extractPrivateKeyBytes();
       if (seed.length != 32) {
         throw StateError('Generated $description identity seed is invalid.');
       }
-      await _secureStorage.write(
-        key: storageKey,
-        value: base64UrlEncode(seed).replaceAll('=', ''),
-      );
       return pair;
     }
 
@@ -118,7 +140,7 @@ class NetworkIdentityService {
     return newKeyPairFromSeed(seed);
   }
 
-  Uint8List _decodeSeed(String encoded, String description) {
+  static Uint8List _decodeSeed(String encoded, String description) {
     try {
       final seed = base64Url.decode(base64Url.normalize(encoded));
       if (seed.length != 32) {

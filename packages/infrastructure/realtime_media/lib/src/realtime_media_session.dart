@@ -54,6 +54,7 @@ final class RealtimeMediaSessionController {
     required String realtimeId,
     required String peerId,
     required this.generation,
+    this.codecMode = RealtimeMediaCodecMode.hardware,
   }) : realtimeId = _validateRealtimeId(realtimeId),
        peerId = _validatePeerId(peerId) {
     if (generation <= 0) {
@@ -65,6 +66,7 @@ final class RealtimeMediaSessionController {
   final String realtimeId;
   final String peerId;
   final int generation;
+  final RealtimeMediaCodecMode codecMode;
   final Map<RealtimeMediaEndpointId, RealtimeMediaEndpoint> _endpoints =
       <RealtimeMediaEndpointId, RealtimeMediaEndpoint>{};
   final Map<RealtimeMediaEndpointId, Future<void>> _endpointReleases =

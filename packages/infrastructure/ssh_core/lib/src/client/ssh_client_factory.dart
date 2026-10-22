@@ -58,7 +58,12 @@ class SshClientFactory {
   final SshPeerIdResolver? peerIdResolver;
 
   static final RegExp _passwordPromptPattern = RegExp(
-    r'password|passphrase|pass phrase',
+    r'password|passwd|passphrase|pass phrase|密码|口令|密碼|passwort|'
+    r'mot\s+de\s+passe|contraseña|пароль|비밀번호',
+    caseSensitive: false,
+  );
+  static final RegExp _usernamePromptPattern = RegExp(
+    r'username|user\s+name|login|account|用户名|用户|账号|帳號',
     caseSensitive: false,
   );
 
@@ -215,10 +220,15 @@ class SshClientFactory {
     final usesPassword = config.authMethod != AuthMethod.privateKey;
     return SshClientAuthOptions(
       identities: identities,
-      onPasswordRequest: usesPassword ? () => password : null,
+      onPasswordRequest: usesPassword && password != null
+          ? () => password
+          : null,
       onUserInfoRequest: usesPassword && password != null
-          ? (request) =>
-                keyboardInteractiveResponsesForPassword(request, password)
+          ? (request) => keyboardInteractiveResponsesForPassword(
+              request,
+              password,
+              username: config.username,
+            )
           : null,
     );
   }
@@ -240,22 +250,37 @@ class SshClientFactory {
     });
   }
 
-  /// 安全回答仅能识别为密码输入的 keyboard-interactive 提示。
+  /// 安全回答能识别为用户名或密码输入的 keyboard-interactive 提示。
   static List<String>? keyboardInteractiveResponsesForPassword(
     Object request,
-    String password,
-  ) {
+    String password, {
+    String? username,
+  }) {
     if (password.isEmpty) return null;
     final prompts = _keyboardInteractivePrompts(request);
     if (prompts.isEmpty) return const [];
-    final canAnswer = prompts.every((prompt) {
-      if (prompt.echo) return false;
-      if (prompts.length == 1) return true;
-      return prompt.promptText.trim().isEmpty ||
-          _passwordPromptPattern.hasMatch(prompt.promptText);
-    });
-    if (!canAnswer) return null;
-    return List<String>.filled(prompts.length, password);
+    final normalizedUsername = username?.trim();
+    final responses = <String>[];
+    for (final prompt in prompts) {
+      if (prompt.echo) {
+        if (normalizedUsername?.isEmpty != false ||
+            !_usernamePromptPattern.hasMatch(prompt.promptText)) {
+          return null;
+        }
+        responses.add(normalizedUsername!);
+        continue;
+      }
+      if (prompts.length == 1 ||
+          prompt.promptText.trim().isEmpty ||
+          _passwordPromptPattern.hasMatch(prompt.promptText)) {
+        responses.add(password);
+        continue;
+      }
+      // Do not send the SSH password to an unrecognized hidden prompt such as
+      // an OTP or approval challenge.
+      return null;
+    }
+    return responses;
   }
 
   /// 在建立 Socket 前校验认证材料是否完整。

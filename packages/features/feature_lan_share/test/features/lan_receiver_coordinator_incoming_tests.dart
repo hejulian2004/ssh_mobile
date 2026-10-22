@@ -23,6 +23,7 @@ void _registerReceiverIncomingTests() {
         networkRuntime: FakeLanShareNetworkRuntime(),
         peerTrustStore: trustStore,
         transferServiceOverride: transfer,
+        storageServiceOverride: FakeLanStorageService(),
         discoveryServiceOverride: FakeLanDiscoveryService(),
       );
 
@@ -48,7 +49,13 @@ void _registerReceiverIncomingTests() {
         );
 
         final result = await coordinator.acceptNativeIncomingTransfer(offer);
-        expect(result, isA<NetworkSuccess<void>>());
+        expect(
+          result,
+          isA<NetworkSuccess<void>>(),
+          reason: result is NetworkFailure<void>
+              ? result.error.toString()
+              : null,
+        );
 
         final record = await database.lanHistoryDao.getRecord('tx-$fileName');
         expect(record, isNotNull);
@@ -88,6 +95,7 @@ void _registerReceiverIncomingTests() {
         networkRuntime: FakeLanShareNetworkRuntime(),
         peerTrustStore: trustStore,
         transferServiceOverride: FakeLanTransferService(),
+        storageServiceOverride: FakeLanStorageService(),
         discoveryServiceOverride: FakeLanDiscoveryService(),
       );
       addTearDown(coordinator.close);
@@ -146,6 +154,7 @@ void _registerReceiverIncomingTests() {
         networkRuntime: FakeLanShareNetworkRuntime(),
         peerTrustStore: trustStore,
         transferServiceOverride: FakeLanTransferService(),
+        storageServiceOverride: FakeLanStorageService(),
         discoveryServiceOverride: FakeLanDiscoveryService(),
       );
       addTearDown(coordinator.close);
@@ -199,6 +208,7 @@ void _registerReceiverIncomingTests() {
         networkRuntime: FakeLanShareNetworkRuntime(),
         peerTrustStore: trustStore,
         transferServiceOverride: FakeLanTransferService(),
+        storageServiceOverride: FakeLanStorageService(),
         discoveryServiceOverride: FakeLanDiscoveryService(),
       );
       addTearDown(coordinator.close);

@@ -72,6 +72,7 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
         transferService: _transferService!,
         nativeTransferCoordinator: _nativeTransferCoordinator,
         historyDao: historyRepository.dao,
+        pairingMetadataDao: historyRepository.database.lanPairingMetadataDao,
         appSettings: appSettings,
         dataProtection: dataProtection,
         logger: logger,
@@ -111,6 +112,7 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
             currentDeviceId: deviceId,
             currentDeviceAlias: deviceAlias,
             localAddressSelectionPort: localAddressSelectionPort,
+            discoveryBridge: discoveryBridge,
           );
       // Network identity belongs to App Scope and is needed by LAN security
       // even when this Feature's listener/runtime activation is disabled.
@@ -122,10 +124,9 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
       );
       final lanStorage =
           storageServiceOverride ?? LanStorageService(logger: logger);
-      final relayEnrollmentService = RelayEnrollmentService(
-        currentDeviceId: deviceId,
-        bootstrapClient: bootstrapClient,
-      );
+      await ensureRelayEnrollment();
+      if (_disposed) throw StateError('LAN receiver coordinator is disposed.');
+      final relayEnrollmentService = _enrollmentService!;
       relay = LanRelayCoordinator(
         appSettings: appSettings,
         logger: logger,
@@ -142,7 +143,12 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
             networkIdentityPublicKeyProvider: () async => identity.publicKey,
             nativeTransferPortProvider: () =>
                 networkRuntime.diagnostics.boundLocalPort,
+            onPairingCommitted: _registerNewlyPairedPeer,
+            discoveryBridge: discoveryBridge,
           );
+      final configuredTransfer = transfer;
+      configuredTransfer.onPairingCommitted ??= _registerNewlyPairedPeer;
+      transfer = configuredTransfer;
 
       _discoveryService = discovery;
       _securityService = security;
@@ -153,10 +159,11 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
       if (security.activePin == null) security.generate6DigitPin();
 
       _initialized = true;
-      if (initializeNetwork) await _startReceiverRuntime();
-      _receiverActive = initializeNetwork;
+      final startReceiver = initializeNetwork && startReceiverOnInitialization;
+      if (startReceiver) await _startReceiverRuntime();
+      _receiverActive = startReceiver;
       _notifyListeners();
-      if (initializeNetwork) relay.connectConfiguredInBackground();
+      if (startReceiver) relay.connectConfiguredInBackground();
     } catch (_) {
       await _cancelReceiverSubscriptions();
       await discovery?.close();
@@ -296,7 +303,12 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
     await attempt(_detachBorrowedNetworkFacade);
     await attempt(() => relayCoordinator?.close());
     _relayCoordinator = null;
-    await attempt(() => discoveryService?.close());
+    _enrollmentService = null;
+    await attempt(
+      () => discoveryService != null
+          ? discoveryService.close()
+          : discoveryBridge?.close(),
+    );
     await attempt(() => transferService?.close());
     if (_ownsPeerTrustStore) {
       await attempt(peerTrustStore.dispose);

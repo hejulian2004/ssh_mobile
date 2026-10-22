@@ -183,6 +183,7 @@ final class MethodChannelAndroidRealtimeMediaPlatform
     'peer_id': identity.peerId,
     'generation': identity.generation,
     'direction': identity.direction.name,
+    'codec_mode': identity.codecMode.name,
     'owner_token': ownerToken?.value,
   };
 

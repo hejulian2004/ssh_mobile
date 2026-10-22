@@ -24,7 +24,12 @@ void main() {
       expect(adapter.relayEndpoint, 'https://relay.example.test');
       expect(adapter.relayHost, 'relay.example.test');
       expect(adapter.relayPort, 443);
-      expect(adapter.receiverEnabled, isTrue);
+      expect(
+        adapter.receiverEnabled,
+        isFalse,
+        reason:
+            'The global pairing host must not activate the receiver before the Network Transfer page is opened.',
+      );
 
       settings.language = AppLanguage.en;
       settings.emitChange();

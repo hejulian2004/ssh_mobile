@@ -1,8 +1,16 @@
-Last updated: 2026-09-12
+Last updated: 2026-10-22
 
 # WebRTC Screen Sharing Architecture
 
 ## Status and authority
+
+The paired Direct signaling extension is defined by
+[ADR-036](../adr/ADR-036-direct-screen-share-signaling.md): App prepares a pinned
+native carrier, native borrows the ready Direct PathLease, and dedicated frame 6
+uses current application encryption and authenticated Session/source/target
+binding. Relay Control remains available when Direct is absent. The unchanged
+provisional claim and explicit consent gates apply to both paths; media never
+crosses Dart or Delivery. Device capture/render acceptance remains separate.
 
 Status: Accepted architecture for Phase 0 through Phase 7. Phase 0 and Phase 1
 have committed implementation evidence without separate screen-share PRs; their
@@ -20,11 +28,10 @@ is shipped. The native plugin remains fail-closed when platform workers are
 unavailable; native implementation or compilation evidence is not evidence of
 a working capture-to-render pipeline.
 
-This is only the Screen Share slice of M8 (RTC) in
-[`NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md`](../NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md).
-Voice, camera/general video, and other M8 work remain outside this document and
-need their own contract and acceptance gates; an Accepted architecture is not a
-claim that M8 or screen sharing is shipped.
+This document covers screen sharing only. Voice, camera/general video, and other
+realtime work remain outside it and need their own contract and acceptance
+gates. An Accepted architecture is not a claim that screen sharing is shipped.
+The old M8 chapter in the platform implementation plan has been removed.
 
 This document accompanies [ADR-034](../adr/ADR-034-screen-share-realtime-media.md).
 It extends, rather than changes, the accepted ownership and lifecycle decisions

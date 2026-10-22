@@ -190,6 +190,8 @@ const compatibilityInventory = <CompatibilityModule>[
     baselineSourceCount: 0,
     appShellAdapters: <String>[
       'apps/ssh_mobile_full/lib/app/lan_share_feature_adapters.dart',
+      'apps/ssh_mobile_full/lib/app/lan_share_emulator_discovery.dart',
+      'apps/ssh_mobile_full/lib/app/lan_share_emulator_host.dart',
     ],
     removalCondition: '旧 LAN 路由、页面、测试、Service 和 Runtime getter 均为零引用。',
   ),

@@ -202,6 +202,42 @@ void main() {
       );
     });
 
+    test('answers a keyboard-interactive username and password challenge', () {
+      final responses =
+          SshClientFactory.keyboardInteractiveResponsesForPassword(
+            const _KeyboardRequest([
+              _KeyboardPrompt('Login: ', true),
+              _KeyboardPrompt('密码：', false),
+            ]),
+            'secret',
+            username: 'alice',
+          );
+
+      expect(responses, ['alice', 'secret']);
+    });
+
+    test(
+      'exposes the entered password to the password auth callback',
+      () async {
+        final options = SshClientFactory.buildAuthOptions(
+          config: ConnectionConfig(
+            id: 'connection-a',
+            name: 'server',
+            host: 'example.com',
+            username: 'alice',
+            authMethod: AuthMethod.password,
+          ),
+          credentials: const SshCredentials(
+            password: 'secret with spaces',
+            privateKey: null,
+          ),
+          identities: null,
+        );
+
+        expect(await options.onPasswordRequest!(), 'secret with spaces');
+      },
+    );
+
     test('target binding excludes secrets and detects route edits', () {
       final config = ConnectionConfig(
         id: 'connection-a',

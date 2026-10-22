@@ -1,75 +1,22 @@
 import 'dart:async';
+import 'dart:ui' show Size;
 
+import 'package:flutter/foundation.dart';
 import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'package:realtime_media/realtime_media.dart';
-import 'package:realtime_media_android/realtime_media_android.dart';
 import 'package:realtime_media_windows/realtime_media_windows.dart';
 
 import 'realtime_media_feature_adapters.dart';
 import 'screen_share_feature_adapters.dart';
+import 'screen_share_media_monitor.dart';
 
-typedef AppScreenShareOperationGuard = bool Function();
-
-/// Result of the App Shell's capture-preparation lifecycle.
-enum AppScreenSharePreparationResult {
-  /// The caller owns the prepared platform lease until attach or abandon.
-  acquired,
-
-  /// The platform owner invalidated and cleaned the preparation already.
-  invalidated,
-}
-
-/// App-owned platform capability boundary for one screen-share route.
-///
-/// It carries only source metadata and permission/lifecycle results. Platform
-/// adapters retain capture, codec, surface and native-owner ownership.
-abstract interface class AppScreenSharePlatformCapabilities {
-  factory AppScreenSharePlatformCapabilities({
-    required Future<AppScreenSharePreparationResult> Function(
-      AppScreenShareOperationGuard guard,
-    )
-    prepareCapture,
-    required Future<void> Function() abandonCapturePreparation,
-    required Future<List<ScreenCaptureSource>> Function() listCaptureSources,
-  }) = _AppScreenSharePlatformCapabilities;
-
-  Future<AppScreenSharePreparationResult> prepareCapture(
-    AppScreenShareOperationGuard guard,
-  );
-
-  Future<void> abandonCapturePreparation();
-
-  Future<List<ScreenCaptureSource>> listCaptureSources();
-}
-
-final class _AppScreenSharePlatformCapabilities
-    implements AppScreenSharePlatformCapabilities {
-  const _AppScreenSharePlatformCapabilities({
-    required this._prepareCapture,
-    required this._abandonCapturePreparation,
-    required this._listCaptureSources,
-  });
-
-  final Future<AppScreenSharePreparationResult> Function(
-    AppScreenShareOperationGuard guard,
-  )
-  _prepareCapture;
-  final Future<void> Function() _abandonCapturePreparation;
-  final Future<List<ScreenCaptureSource>> Function() _listCaptureSources;
-
-  @override
-  Future<AppScreenSharePreparationResult> prepareCapture(
-    AppScreenShareOperationGuard guard,
-  ) => _prepareCapture(guard);
-
-  @override
-  Future<void> abandonCapturePreparation() => _abandonCapturePreparation();
-
-  @override
-  Future<List<ScreenCaptureSource>> listCaptureSources() =>
-      _listCaptureSources();
-}
+export 'realtime_media_feature_adapters.dart'
+    show
+        AppScreenShareOperationGuard,
+        AppScreenSharePreparationResult,
+        AppScreenSharePlatformCapabilities,
+        appScreenSharePlatformCapabilitiesFor;
 
 /// Route-scoped owner that connects Feature consent to opaque media leases.
 final class AppScreenShareMediaCoordinator {
@@ -78,8 +25,11 @@ final class AppScreenShareMediaCoordinator {
     required this.resources,
     required this.capabilities,
     this.source,
+    this.codecMode = RealtimeMediaCodecMode.hardware,
+    this.admitOperation,
   }) {
     _port = AppScreenShareMediaPort(
+      logger: resources.logger,
       events: _events.stream,
       onStartCapture: _startCaptureTracked,
       onStartViewer: _startViewerTracked,
@@ -88,6 +38,8 @@ final class AppScreenShareMediaCoordinator {
   }
 
   final RealtimeSession session;
+  final RealtimeMediaCodecMode codecMode;
+  final bool Function(String operationId)? admitOperation;
   final AppRealtimeMediaResources resources;
   final AppScreenSharePlatformCapabilities capabilities;
   final ScreenCaptureSource? source;
@@ -99,6 +51,8 @@ final class AppScreenShareMediaCoordinator {
   RemoteVideoSurface? _remoteSurface;
   String? _operationId;
   Future<void>? _activeMediaOperation;
+  AppScreenShareMediaMonitor? _mediaMonitor;
+  final ValueNotifier<Size?> _remoteVideoSize = ValueNotifier(null);
   bool _prepared = false;
   bool _disposed = false;
   int _operationEpoch = 0;
@@ -107,6 +61,7 @@ final class AppScreenShareMediaCoordinator {
 
   /// Opaque platform presentation capability for the App-owned route.
   RemoteVideoSurface? get remoteSurface => _remoteSurface;
+  ValueListenable<Size?> get remoteVideoSize => _remoteVideoSize;
 
   /// Verifies the local native generation and source metadata.
   /// Permission, source enumeration, endpoint creation, and capture remain
@@ -120,7 +75,10 @@ final class AppScreenShareMediaCoordinator {
         'Native Realtime generation is not available.',
       );
     }
-    _mediaSession ??= resources.sessionFactory.create(session);
+    _mediaSession ??= resources.sessionFactory.create(
+      session,
+      codecMode: codecMode,
+    );
     if (capture && source == null) {
       throw const RealtimeMediaException(
         RealtimeMediaErrorCode.invalidArgument,
@@ -134,6 +92,7 @@ final class AppScreenShareMediaCoordinator {
     if (_disposed) return;
     ++_operationEpoch;
     _disposed = true;
+    _mediaMonitor?.dispose();
     final activeOperation = _activeMediaOperation;
     if (activeOperation != null) {
       try {
@@ -155,6 +114,7 @@ final class AppScreenShareMediaCoordinator {
       // retryable lease internally; no stale operation is allowed to proceed.
     }
     await _events.close();
+    _remoteVideoSize.dispose();
   }
 
   Future<void> _startCaptureTracked({
@@ -167,6 +127,7 @@ final class AppScreenShareMediaCoordinator {
       realtimeId: realtimeId,
       generation: generation,
     );
+    _admitOperation(operationId);
     final epoch = ++_operationEpoch;
     await _trackMediaOperation(
       () => _startCapture(
@@ -188,6 +149,7 @@ final class AppScreenShareMediaCoordinator {
       realtimeId: realtimeId,
       generation: generation,
     );
+    _admitOperation(operationId);
     final epoch = ++_operationEpoch;
     await _trackMediaOperation(
       () => _startViewer(
@@ -197,6 +159,15 @@ final class AppScreenShareMediaCoordinator {
         epoch: epoch,
       ),
     );
+  }
+
+  void _admitOperation(String operationId) {
+    if (admitOperation?.call(operationId) == false) {
+      throw const RealtimeMediaException(
+        RealtimeMediaErrorCode.duplicateAttach,
+        'Another screen-share operation is already active.',
+      );
+    }
   }
 
   Future<void> _trackMediaOperation(Future<void> Function() operation) {
@@ -268,7 +239,9 @@ final class AppScreenShareMediaCoordinator {
       }
       ownsPreparation = true;
       _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
-      final sources = await capabilities.listCaptureSources();
+      final sources = resources.backend is WindowsRealtimeMediaBackend
+          ? [selectedSource] // Native start validates the bound catalog token.
+          : await capabilities.listCaptureSources();
       _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
       if (!sources.any((item) => item.id.value == selectedSource.id.value)) {
         throw const RealtimeMediaException(
@@ -291,6 +264,7 @@ final class AppScreenShareMediaCoordinator {
         attachCompleted = true;
         ownsPreparation = false;
         _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
+        _monitor(endpoint, epoch, operationId, realtimeId, generation);
       } catch (_) {
         await _releaseCurrentEndpoint();
         rethrow;
@@ -340,6 +314,7 @@ final class AppScreenShareMediaCoordinator {
     try {
       _remoteSurface = await mediaSession.attachRemoteVideoSurface(endpoint);
       _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
+      _monitor(endpoint, epoch, operationId, realtimeId, generation);
     } catch (_) {
       await _releaseCurrentEndpoint();
       rethrow;
@@ -363,6 +338,7 @@ final class AppScreenShareMediaCoordinator {
       );
     }
     ++_operationEpoch;
+    _mediaMonitor?.dispose();
     final activeOperation = _activeMediaOperation;
     if (activeOperation != null) {
       try {
@@ -377,12 +353,15 @@ final class AppScreenShareMediaCoordinator {
   }
 
   Future<void> _releaseCurrentEndpoint() async {
+    _mediaMonitor?.dispose();
+    _mediaMonitor = null;
     final endpoint = _endpoint;
     if (endpoint == null) return;
     try {
       await _mediaSession!.release(endpoint);
       _endpoint = null;
       _remoteSurface = null;
+      _remoteVideoSize.value = null;
     } catch (_) {
       // Keep the endpoint reference so the controller can retry the native
       // cleanup. RealtimeMediaSessionController retains retryable leases.
@@ -400,6 +379,49 @@ final class AppScreenShareMediaCoordinator {
       // Keep the session controller's retryable lease; the stale operation
       // must still fail closed and never attach a later callback.
     }
+  }
+
+  void _monitor(
+    RealtimeMediaEndpoint endpoint,
+    int epoch,
+    String operationId,
+    String realtimeId,
+    int generation,
+  ) {
+    _mediaMonitor?.dispose();
+    _mediaMonitor = AppScreenShareMediaMonitor(
+      logger: resources.logger,
+      direction: endpoint.identity.direction,
+      onStats: (stats) {
+        if (endpoint.identity.direction == RealtimeMediaDirection.receive &&
+            stats.width > 0 &&
+            stats.height > 0) {
+          _remoteVideoSize.value = Size(
+            stats.width.toDouble(),
+            stats.height.toDouble(),
+          );
+        }
+      },
+      isCurrent: () =>
+          identical(_endpoint, endpoint) &&
+          _isCurrentOperation(epoch, operationId, realtimeId, generation),
+      readStats: () => resources.backend.readStats(
+        endpointId: endpoint.id,
+        identity: endpoint.identity,
+      ),
+      onFailure: (code) => _events.add(
+        ScreenShareMediaEvent(
+          operationId: operationId,
+          realtimeId: realtimeId,
+          generation: generation,
+          kind: code == RealtimeMediaErrorCode.captureSourceEnded
+              ? ScreenShareMediaEventKind.sourceEnded
+              : endpoint.identity.direction == RealtimeMediaDirection.send
+              ? ScreenShareMediaEventKind.encoderFailed
+              : ScreenShareMediaEventKind.decoderFailed,
+        ),
+      ),
+    );
   }
 
   bool _isCurrentOperation(
@@ -461,37 +483,4 @@ final class AppScreenShareMediaCoordinator {
       );
     }
   }
-}
-
-AppScreenSharePlatformCapabilities appScreenSharePlatformCapabilitiesFor(
-  RealtimeMediaBackend backend,
-) {
-  if (backend is WindowsRealtimeMediaBackend) {
-    final windows = backend;
-    return AppScreenSharePlatformCapabilities(
-      prepareCapture: (_) async => AppScreenSharePreparationResult.acquired,
-      abandonCapturePreparation: () async {},
-      listCaptureSources: windows.listCaptureSources,
-    );
-  }
-  if (backend is AndroidRealtimeMediaBackend) {
-    final android = backend;
-    return AppScreenSharePlatformCapabilities(
-      prepareCapture: (guard) async {
-        final result = await android.requestProjection(isCurrent: guard);
-        return switch (result) {
-          AndroidProjectionPreparationResult.acquired =>
-            AppScreenSharePreparationResult.acquired,
-          AndroidProjectionPreparationResult.invalidated =>
-            AppScreenSharePreparationResult.invalidated,
-        };
-      },
-      abandonCapturePreparation: android.abandonProjectionGrant,
-      listCaptureSources: android.listCaptureSources,
-    );
-  }
-  throw const RealtimeMediaException(
-    RealtimeMediaErrorCode.driverUnavailable,
-    'Screen sharing is unavailable on this platform.',
-  );
 }

@@ -88,6 +88,17 @@ pub struct TransportWriter {
 }
 
 impl Transport {
+    /// Physical address metadata for IP transports; never creates a route.
+    pub fn peer_address(&self) -> Option<SocketAddr> {
+        match self {
+            Self::Tcp(transport) => transport.peer_addr().ok(),
+            Self::Udp(transport) => Some(transport.peer_addr()),
+            Self::WebSocket(_) => None,
+            #[cfg(feature = "testkit")]
+            Self::Gated(_) => None,
+        }
+    }
+
     pub async fn connect_tcp(local: SocketAddr, peer: SocketAddr) -> Result<Self, TransportError> {
         Ok(Self::Tcp(TcpTransport::connect(local, peer).await?))
     }

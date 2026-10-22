@@ -1,4 +1,4 @@
-最新更新时间：2026-08-30
+最新更新时间：2026-10-15
 
 # ssh_mobile_full 维护约束
 
@@ -6,7 +6,9 @@
 
 - `AppRuntimeFactory` is the sole composition root for App identity,
   `NetworkRuntime`, native command gateway, and shared `NetworkFacade`; one
-  App process performs exactly one `ConfigureRuntime`. LAN, SSH, SFTP,
+  App process performs at most one successful `ConfigureRuntime`, on first
+  network use. Cold event/diagnostic subscriptions must not initialize keys
+  or native handles. LAN, SSH, SFTP,
   Realtime, and Relay borrow these resources.
 - `NetworkIdentityBundle` (Ed25519/X25519 key pairs) belongs to App/infrastructure;
   Features never create, persist, or replace it. `AppRuntime.dispose()` stops
@@ -36,6 +38,14 @@ failure propagates and never falls back to memory or `AppDatabase`. AppRuntime i
 owner of Network, SSH, Logger, Modules, and adapters and exposes explicit
 `dispose/close/cancel/release`; Route Scope releases only its ViewModel resources.
 Debug assertions verify observable Timer/Subscription/Lease/native-handle release.
+
+The receiving route's window-presentation controller owns one native fullscreen
+snapshot lease, separate from media/session ownership. Serialize enter/restore;
+route disposal compensates a late enter with the same lease. Windows restores
+the original placement/styles, Android restores the prior system-bar visibility
+and behavior. Stale lease release cannot affect a newer owner. Retain a failed
+restore for retry, surface a bounded error, and never guess a default window
+state or create/restart a media endpoint to change presentation.
 
 `BackgroundServiceManager` owns UI-isolate notifications/permissions/power lock/
 platform service. Background entry points create `_BackgroundSshRuntime`, which

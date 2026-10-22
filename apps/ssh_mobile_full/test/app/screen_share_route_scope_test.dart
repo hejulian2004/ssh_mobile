@@ -1,6 +1,9 @@
 import 'dart:async';
 
+import 'package:app_core/app_core.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:realtime_media_android/realtime_media_android.dart';
 import 'package:realtime_media_windows/realtime_media_windows.dart';
@@ -10,8 +13,12 @@ import 'package:feature_screen_share/feature_screen_share.dart';
 
 import 'package:ssh_mobile/app/realtime_media_feature_adapters.dart';
 import 'package:ssh_mobile/app/screen_share_route_scope.dart';
+import 'package:ssh_mobile/app/screen_share_peer_arbitration.dart';
+import 'package:ssh_mobile/app/screen_share_session_lease.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  const windowChannel = MethodChannel('ssh_mobile/window_presentation');
   const realtimeId = '00112233445566778899aabbccddeeff';
   final source = ScreenCaptureSource(
     id: ScreenCaptureSourceId('display:1'),
@@ -26,6 +33,12 @@ void main() {
   late _FakeRealtimeSession session;
 
   setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(windowChannel, (_) async => true);
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(windowChannel, null),
+    );
     backend = _RecordingMediaBackend();
     capabilities = _RecordingCapabilities(
       sources: <ScreenCaptureSource>[source],
@@ -36,6 +49,116 @@ void main() {
       generation: 7,
     );
     addTearDown(session.close);
+  });
+
+  test('identity wait ends immediately when its caller is disposed', () async {
+    session.mediaToken = null;
+    final cancellation = Completer<void>();
+    var completed = false;
+    final waiting = waitForScreenShareSessionIdentity(
+      session,
+      cancelled: cancellation.future,
+    ).then((_) => completed = true);
+    expect(completed, isFalse);
+    cancellation.complete();
+    // Stream.empty's cancellation Future lives outside FakeAsync's zone.
+    // Observe its actual completion, bounded below the identity timeout.
+    await waiting.timeout(const Duration(seconds: 5));
+    expect(completed, isTrue);
+  });
+
+  test('reports a capture worker failure after successful attachment', () {
+    fakeAsync((clock) {
+      final logger = _MediaHealthLogger();
+      final coordinator = _coordinator(
+        backend,
+        capabilities,
+        session,
+        source: source,
+        logger: logger,
+      );
+      final events = <ScreenShareMediaEvent>[];
+      final subscription = coordinator.port.events.listen(events.add);
+      unawaited(
+        coordinator
+            .prepare(capture: true)
+            .then(
+              (_) => coordinator.port.startCapture(
+                operationId: 'operation-a',
+                realtimeId: realtimeId,
+                generation: 7,
+              ),
+            ),
+      );
+      clock.flushMicrotasks();
+      expect(backend.operations, ['start:send', 'attach-capture:1']);
+      backend.statsFailure = const RealtimeMediaException(
+        RealtimeMediaErrorCode.frameRejected,
+        'private-native-payload',
+      );
+      clock.elapse(const Duration(seconds: 5));
+      clock.flushMicrotasks();
+      expect(events, hasLength(1));
+      expect(events.single.kind, ScreenShareMediaEventKind.encoderFailed);
+      expect(events.single.operationId, 'operation-a');
+      expect(
+        logger.messages,
+        contains('Screen-share media send failed: frameRejected'),
+      );
+      expect(logger.messages.join(), isNot(contains('private-native-payload')));
+      unawaited(subscription.cancel());
+      clock.flushMicrotasks();
+      var disposed = false;
+      unawaited(coordinator.dispose().then((_) => disposed = true));
+      clock.flushMicrotasks();
+      expect(disposed, isTrue);
+      final reads = backend.statsReads;
+      clock.elapse(const Duration(seconds: 10));
+      expect(backend.statsReads, reads);
+    });
+  });
+
+  test('samples receive progress only while the endpoint is owned', () {
+    fakeAsync((clock) {
+      final logger = _MediaHealthLogger();
+      final coordinator = _coordinator(
+        backend,
+        capabilities,
+        session,
+        logger: logger,
+      );
+      unawaited(
+        coordinator
+            .prepare(capture: false)
+            .then(
+              (_) => coordinator.port.startViewer(
+                operationId: 'operation-a',
+                realtimeId: realtimeId,
+                generation: 7,
+              ),
+            ),
+      );
+      clock.flushMicrotasks();
+      clock.elapse(const Duration(seconds: 5));
+      clock.flushMicrotasks();
+      expect(backend.statsReads, 1);
+      expect(
+        logger.messages.single,
+        contains('Screen-share media receive progress:'),
+      );
+      unawaited(
+        coordinator.port.stop(
+          operationId: 'operation-a',
+          realtimeId: realtimeId,
+          generation: 7,
+        ),
+      );
+      clock.flushMicrotasks();
+      clock.elapse(const Duration(seconds: 10));
+      expect(backend.statsReads, 1);
+      unawaited(coordinator.dispose());
+      clock.flushMicrotasks();
+    });
   });
 
   test('prepares capture and releases the endpoint in owner order', () async {
@@ -426,6 +549,40 @@ void main() {
     await coordinator.dispose();
   });
 
+  test('Windows capture keeps the selected native catalog token', () async {
+    final platform = _RecordingWindowsPlatform(sources: [source]);
+    final windowsBackend = WindowsRealtimeMediaBackend(
+      endpointBackend: _NativeOwnerBackend(),
+      platform: platform,
+    );
+    // Native enumeration replaces all catalog tokens, even for the same display.
+    capabilities.sources = [
+      ScreenCaptureSource(
+        id: ScreenCaptureSourceId('display:new-generation'),
+        kind: ScreenCaptureSourceKind.display,
+        label: 'Display 1',
+      ),
+    ];
+    final coordinator = AppScreenShareMediaCoordinator(
+      session: session,
+      resources: AppRealtimeMediaResources(
+        backend: windowsBackend,
+        sessionFactory: AppRealtimeMediaSessionFactory(backend: windowsBackend),
+      ),
+      capabilities: capabilities,
+      source: source,
+    );
+    await coordinator.prepare(capture: true);
+    await coordinator.port.startCapture(
+      operationId: 'operation-a',
+      realtimeId: realtimeId,
+      generation: 7,
+    );
+    expect(platform.capturedSource, same(source));
+    expect(capabilities.listCalls, 0);
+    await coordinator.dispose();
+  });
+
   test('stop rejects a different operation identity', () async {
     final coordinator = _coordinator(
       backend,
@@ -604,6 +761,205 @@ void main() {
     expect(backend.operations, contains('release:1'));
   });
 
+  testWidgets('received portrait video retains its native aspect ratio', (
+    tester,
+  ) async {
+    backend.statsSnapshot = RealtimeMediaStats(width: 1080, height: 2424);
+    await tester.pumpWidget(
+      _routeApp(
+        backend,
+        session,
+        capabilities,
+        presenter: const _FixtureVideoPresenter(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    session.emitConsent(_incomingConsent());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Accept screen share'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 5));
+    final displayed = tester.getSize(
+      find.byKey(const ValueKey('fixture-video')),
+    );
+    expect(displayed.width / displayed.height, closeTo(1080 / 2424, 0.001));
+    final mediaOperations = List<String>.of(backend.operations);
+    await tester.tap(find.byTooltip('Rotate view'));
+    await tester.pump();
+    expect(
+      tester.widget<AspectRatio>(find.byType(AspectRatio)).aspectRatio,
+      2424 / 1080,
+    );
+    await tester.tap(find.byTooltip('Enter fullscreen'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AppBar), findsNothing);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Screen sharing active'), findsOneWidget);
+    expect(backend.operations, mediaOperations);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets(
+    'busy admission prevents a second viewer before native allocation',
+    (tester) async {
+      final arbitration = AppScreenSharePeerArbitrationRegistry();
+      addTearDown(arbitration.dispose);
+      arbitration.acquire(
+        remotePeerId: session.peerId,
+        initiatorPeerId: session.peerId,
+        operationId: 'operation-a',
+      );
+      arbitration.acquire(
+        remotePeerId: 'occupied-peer',
+        initiatorPeerId: 'peer-local',
+        operationId: 'live',
+      );
+      arbitration.activate(
+        remotePeerId: 'occupied-peer',
+        initiatorPeerId: 'peer-local',
+        operationId: 'live',
+      );
+      await tester.pumpWidget(
+        _routeApp(
+          backend,
+          session,
+          capabilities,
+          arguments: AppScreenShareRouteArguments(
+            session: session,
+            localPeerId: 'peer-local',
+            arbitration: arbitration,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      session.emitConsent(_incomingConsent());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Accept screen share'));
+      await tester.pumpAndSettle();
+      expect(backend.operations, isEmpty);
+      expect(find.text('Screen sharing failed'), findsOneWidget);
+      expect(arbitration.isBusy, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
+    'stopping releases busy ownership while the result page remains open',
+    (tester) async {
+      final arbitration = AppScreenSharePeerArbitrationRegistry();
+      addTearDown(arbitration.dispose);
+      arbitration.acquire(
+        remotePeerId: session.peerId,
+        initiatorPeerId: session.peerId,
+        operationId: 'operation-a',
+      );
+      await tester.pumpWidget(
+        _routeApp(
+          backend,
+          session,
+          capabilities,
+          arguments: AppScreenShareRouteArguments(
+            session: session,
+            localPeerId: 'peer-local',
+            arbitration: arbitration,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      session.emitConsent(_incomingConsent());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Accept screen share'));
+      await tester.pumpAndSettle();
+      expect(arbitration.isBusy, isTrue);
+      await tester.tap(find.text('Stop screen share'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppScreenShareRouteScope), findsOneWidget);
+      expect(find.text('Screen sharing cancelled'), findsOneWidget);
+      expect(arbitration.isBusy, isFalse);
+      expect(
+        backend.operations.where((operation) => operation == 'release:1'),
+        hasLength(1),
+      );
+      expect(
+        arbitration.acquire(
+          remotePeerId: 'next-peer',
+          initiatorPeerId: 'peer-local',
+          operationId: 'next',
+        ),
+        isTrue,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
+
+  testWidgets('initialization failure releases claimed invitation admission', (
+    tester,
+  ) async {
+    final arbitration = AppScreenSharePeerArbitrationRegistry();
+    addTearDown(arbitration.dispose);
+    arbitration.acquire(
+      remotePeerId: session.peerId,
+      initiatorPeerId: session.peerId,
+      operationId: 'operation-a',
+    );
+    arbitration.activate(
+      remotePeerId: session.peerId,
+      initiatorPeerId: session.peerId,
+      operationId: 'operation-a',
+    );
+    session.mediaToken = null;
+    await tester.pumpWidget(
+      _routeApp(
+        backend,
+        session,
+        capabilities,
+        arguments: AppScreenShareRouteArguments(
+          session: session,
+          localPeerId: 'peer-local',
+          operationId: 'operation-a',
+          arbitration: arbitration,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Screen sharing unavailable'), findsOneWidget);
+    expect(arbitration.isBusy, isFalse);
+    expect(backend.operations, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('CPU route freezes the choice into native receive identity', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _routeApp(
+        backend,
+        session,
+        capabilities,
+        arguments: AppScreenShareRouteArguments(
+          session: session,
+          localPeerId: 'peer-local',
+          codecMode: RealtimeMediaCodecMode.cpu,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    session.emitConsent(_incomingConsent());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Accept screen share'));
+    await tester.pumpAndSettle();
+    expect(backend.identities.single.codecMode, RealtimeMediaCodecMode.cpu);
+    expect(find.text('Screen sharing active'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(backend.operations, contains('release:1'));
+  });
+
   testWidgets('incoming route can reject without creating media', (
     tester,
   ) async {
@@ -676,6 +1032,7 @@ Widget _routeApp(
   _FakeRealtimeSession session,
   _RecordingCapabilities? capabilities, {
   AppScreenShareRouteArguments? arguments,
+  AppRemoteVideoPresenter? presenter,
 }) => MaterialApp(
   home: AppScreenShareRouteScope(
     arguments:
@@ -689,6 +1046,7 @@ Widget _routeApp(
       sessionFactory: AppRealtimeMediaSessionFactory(backend: backend),
     ),
     capabilities: capabilities,
+    presenter: presenter,
   ),
 );
 
@@ -697,11 +1055,13 @@ AppScreenShareMediaCoordinator _coordinator(
   _RecordingCapabilities capabilities,
   _FakeRealtimeSession session, {
   ScreenCaptureSource? source,
+  AppLogger? logger,
 }) => AppScreenShareMediaCoordinator(
   session: session,
   resources: AppRealtimeMediaResources(
     backend: backend,
     sessionFactory: AppRealtimeMediaSessionFactory(backend: backend),
+    logger: logger,
   ),
   capabilities: capabilities,
   source: source,
@@ -761,11 +1121,29 @@ final class _RecordingCapabilities
   }
 }
 
-final class _RecordingMediaBackend implements RealtimeMediaBackend {
+final class _NativeOwnerBackend extends _RecordingMediaBackend
+    implements RealtimeMediaNativeOwnerBackend {
+  @override
+  Future<RealtimeMediaNativeOwnerToken> openNativeOwner({
+    required RealtimeMediaEndpointId endpointId,
+    required RealtimeMediaEndpointIdentity identity,
+  }) async => RealtimeMediaNativeOwnerToken('1');
+  @override
+  Future<void> closeNativeOwner({
+    required RealtimeMediaNativeOwnerToken token,
+    required RealtimeMediaEndpointIdentity identity,
+  }) async {}
+}
+
+class _RecordingMediaBackend implements RealtimeMediaBackend {
   final List<String> operations = <String>[];
+  final List<RealtimeMediaEndpointIdentity> identities = [];
   int _nextEndpoint = 0;
   Completer<void>? startGate;
   void Function()? afterAttach;
+  Object? statsFailure;
+  int statsReads = 0;
+  RealtimeMediaStats statsSnapshot = RealtimeMediaStats();
 
   @override
   Future<RealtimeMediaEndpointId> start(
@@ -775,6 +1153,7 @@ final class _RecordingMediaBackend implements RealtimeMediaBackend {
     if (gate != null) await gate.future;
     final id = RealtimeMediaEndpointId('${++_nextEndpoint}');
     operations.add('start:${identity.direction.name}');
+    identities.add(identity);
     return id;
   }
 
@@ -821,7 +1200,27 @@ final class _RecordingMediaBackend implements RealtimeMediaBackend {
   Future<RealtimeMediaStats> readStats({
     required RealtimeMediaEndpointId endpointId,
     required RealtimeMediaEndpointIdentity identity,
-  }) async => RealtimeMediaStats();
+  }) async {
+    statsReads++;
+    final failure = statsFailure;
+    if (failure != null) throw failure;
+    return statsSnapshot;
+  }
+}
+
+final class _MediaHealthLogger implements AppLogger {
+  final messages = <String>[];
+  @override
+  void log(LogRecord record) => messages.add(record.message);
+  @override
+  AppLogger scope(String name) => this;
+}
+
+final class _FixtureVideoPresenter implements AppRemoteVideoPresenter {
+  const _FixtureVideoPresenter();
+  @override
+  Widget build(BuildContext context, RemoteVideoSurface surface) =>
+      const ColoredBox(key: ValueKey('fixture-video'), color: Colors.blue);
 }
 
 final class _FakeRealtimeSession implements RealtimeSession {
@@ -917,6 +1316,7 @@ final class _RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
   _RecordingWindowsPlatform({required this.sources});
 
   final List<ScreenCaptureSource> sources;
+  ScreenCaptureSource? capturedSource;
 
   @override
   Future<List<ScreenCaptureSource>> listCaptureSources() async => sources;
@@ -927,7 +1327,9 @@ final class _RecordingWindowsPlatform implements WindowsRealtimeMediaPlatform {
     required RealtimeMediaEndpointIdentity identity,
     required ScreenCaptureSource source,
     RealtimeMediaNativeOwnerToken? ownerToken,
-  }) async {}
+  }) async {
+    capturedSource = source;
+  }
 
   @override
   Future<RemoteVideoSurface> attachRemoteVideoSurface({

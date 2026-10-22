@@ -1,3 +1,6 @@
+import 'package:realtime_media_android/realtime_media_android.dart';
+import 'package:realtime_media_windows/realtime_media_windows.dart';
+import 'package:app_core/app_core.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'package:network_transport/network_transport.dart';
 import 'package:realtime_media/realtime_media.dart';
@@ -205,7 +208,10 @@ final class AppRealtimeMediaSessionFactory {
 
   final RealtimeMediaBackend backend;
 
-  RealtimeMediaSessionController create(RealtimeSession session) {
+  RealtimeMediaSessionController create(
+    RealtimeSession session, {
+    RealtimeMediaCodecMode codecMode = RealtimeMediaCodecMode.hardware,
+  }) {
     final token = session.mediaToken;
     if (token == null) {
       throw const RealtimeMediaException(
@@ -218,6 +224,7 @@ final class AppRealtimeMediaSessionFactory {
       realtimeId: token.realtimeId,
       peerId: token.peerId,
       generation: token.generation,
+      codecMode: codecMode,
     );
   }
 }
@@ -227,8 +234,105 @@ final class AppRealtimeMediaResources {
   const AppRealtimeMediaResources({
     required this.backend,
     required this.sessionFactory,
+    this.logger,
   });
 
+  final AppLogger? logger;
   final RealtimeMediaBackend backend;
   final AppRealtimeMediaSessionFactory sessionFactory;
+}
+
+typedef AppScreenShareOperationGuard = bool Function();
+
+/// Result of the App Shell's capture-preparation lifecycle.
+enum AppScreenSharePreparationResult {
+  /// The caller owns the prepared platform lease until attach or abandon.
+  acquired,
+
+  /// The platform owner invalidated and cleaned the preparation already.
+  invalidated,
+}
+
+/// App-owned platform capability boundary for one screen-share route.
+///
+/// It carries only source metadata and permission/lifecycle results. Platform
+/// adapters retain capture, codec, surface and native-owner ownership.
+abstract interface class AppScreenSharePlatformCapabilities {
+  factory AppScreenSharePlatformCapabilities({
+    required Future<AppScreenSharePreparationResult> Function(
+      AppScreenShareOperationGuard guard,
+    )
+    prepareCapture,
+    required Future<void> Function() abandonCapturePreparation,
+    required Future<List<ScreenCaptureSource>> Function() listCaptureSources,
+  }) = _AppScreenSharePlatformCapabilities;
+
+  Future<AppScreenSharePreparationResult> prepareCapture(
+    AppScreenShareOperationGuard guard,
+  );
+
+  Future<void> abandonCapturePreparation();
+
+  Future<List<ScreenCaptureSource>> listCaptureSources();
+}
+
+final class _AppScreenSharePlatformCapabilities
+    implements AppScreenSharePlatformCapabilities {
+  const _AppScreenSharePlatformCapabilities({
+    required this._prepareCapture,
+    required this._abandonCapturePreparation,
+    required this._listCaptureSources,
+  });
+
+  final Future<AppScreenSharePreparationResult> Function(
+    AppScreenShareOperationGuard guard,
+  )
+  _prepareCapture;
+  final Future<void> Function() _abandonCapturePreparation;
+  final Future<List<ScreenCaptureSource>> Function() _listCaptureSources;
+
+  @override
+  Future<AppScreenSharePreparationResult> prepareCapture(
+    AppScreenShareOperationGuard guard,
+  ) => _prepareCapture(guard);
+
+  @override
+  Future<void> abandonCapturePreparation() => _abandonCapturePreparation();
+
+  @override
+  Future<List<ScreenCaptureSource>> listCaptureSources() =>
+      _listCaptureSources();
+}
+
+AppScreenSharePlatformCapabilities appScreenSharePlatformCapabilitiesFor(
+  RealtimeMediaBackend backend,
+) {
+  if (backend is WindowsRealtimeMediaBackend) {
+    final windows = backend;
+    return AppScreenSharePlatformCapabilities(
+      prepareCapture: (_) async => AppScreenSharePreparationResult.acquired,
+      abandonCapturePreparation: () async {},
+      listCaptureSources: windows.listCaptureSources,
+    );
+  }
+  if (backend is AndroidRealtimeMediaBackend) {
+    final android = backend;
+    return AppScreenSharePlatformCapabilities(
+      prepareCapture: (guard) async {
+        final result = await android.requestProjection(isCurrent: guard);
+        return switch (result) {
+          AndroidProjectionPreparationResult.acquired =>
+            AppScreenSharePreparationResult.acquired,
+          AndroidProjectionPreparationResult.invalidated =>
+            AppScreenSharePreparationResult.invalidated,
+        };
+      },
+      abandonCapturePreparation: android.abandonProjectionGrant,
+      listCaptureSources: android.listCaptureSources,
+    );
+  }
+  throw const RealtimeMediaException(
+    RealtimeMediaErrorCode.driverUnavailable,
+    'Screen sharing is unavailable on this platform.',
+  );
 }

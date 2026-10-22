@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -8,6 +9,7 @@ final class _MemorySecureStorage implements FlutterSecureStorage {
   final Map<String, String> values = <String, String>{};
   int readCount = 0;
   int writeCount = 0;
+  Completer<void>? readBarrier;
 
   @override
   dynamic noSuchMethod(Invocation invocation) {
@@ -15,7 +17,10 @@ final class _MemorySecureStorage implements FlutterSecureStorage {
     switch (invocation.memberName) {
       case #read:
         readCount++;
-        return Future<String?>.value(key == null ? null : values[key]);
+        return () async {
+          await readBarrier?.future;
+          return key == null ? null : values[key];
+        }();
       case #write:
         writeCount++;
         final value = invocation.namedArguments[#value] as String?;
@@ -37,6 +42,24 @@ final class _MemorySecureStorage implements FlutterSecureStorage {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test(
+    'both identity reads start before either secure-store read finishes',
+    () async {
+      final barrier = Completer<void>();
+      final storage = _MemorySecureStorage()..readBarrier = barrier;
+      final service = NetworkIdentityService(secureStorage: storage);
+      final identity = service.loadOrCreate();
+      try {
+        await Future<void>.delayed(Duration.zero);
+        expect(storage.readCount, 2);
+        expect(storage.writeCount, 0);
+      } finally {
+        barrier.complete();
+        await identity;
+      }
+    },
+  );
 
   test(
     'concurrent callers share one generated Ed25519/X25519 identity',

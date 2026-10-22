@@ -3,6 +3,50 @@ use network_nat::PathManager;
 use rustls::client::danger::ServerCertVerifier;
 use rustls::internal::msgs::codec::Codec;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use std::time::Duration;
+
+#[tokio::test]
+async fn quiet_signaling_connections_survive_the_default_idle_timeout() {
+    let server =
+        QuicEndpointManager::new("127.0.0.1:0".parse().unwrap(), Arc::new(PathManager::new()))
+            .unwrap();
+    let client =
+        QuicEndpointManager::new("127.0.0.1:0".parse().unwrap(), Arc::new(PathManager::new()))
+            .unwrap();
+    let address = server.endpoint.local_addr().unwrap();
+    let (outgoing, incoming) = tokio::join!(
+        async {
+            client
+                .endpoint
+                .connect(address, "ssh-mobile")
+                .unwrap()
+                .await
+                .unwrap()
+        },
+        async { server.endpoint.accept().await.unwrap().await.unwrap() },
+    );
+    // Screen video travels over a separate WebRTC socket. The parent signaling
+    // connection must remain alive without application streams or metadata.
+    tokio::time::sleep(Duration::from_secs(35)).await;
+    assert!(
+        outgoing.close_reason().is_none(),
+        "quiet caller connection expired"
+    );
+    assert!(
+        incoming.close_reason().is_none(),
+        "quiet responder connection expired"
+    );
+    outgoing.close(quinn::VarInt::from_u32(0), b"test complete");
+    tokio::time::timeout(Duration::from_secs(3), incoming.closed())
+        .await
+        .unwrap();
+    client
+        .endpoint
+        .close(quinn::VarInt::from_u32(0), b"test complete");
+    server
+        .endpoint
+        .close(quinn::VarInt::from_u32(0), b"test complete");
+}
 
 #[tokio::test]
 async fn from_bound_socket_keeps_the_bound_udp_port() {

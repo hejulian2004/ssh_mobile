@@ -16,3 +16,4 @@ include!("runtime_integration/tcp_fallback.rs");
 include!("runtime_integration/websocket_fallback_and_stream_helpers.rs");
 include!("runtime_integration/stream_transport.rs");
 include!("runtime_integration/ssh_gateway_and_test_helpers.rs");
+include!("runtime_integration/direct_realtime.rs");

@@ -25,11 +25,49 @@ fn host_rtc_candidate(address: impl Into<String>) -> RTCIceCandidate {
     }
 }
 
+#[tokio::test]
+async fn an_unanswered_offer_survives_the_driver_fallback_wakeup() {
+    let driver = RealtimeIoDriver::bind(
+        WebRtcPeer::new(WebRtcConfig::default()).unwrap(),
+        "127.0.0.1:0".parse().unwrap(),
+    )
+    .await
+    .unwrap();
+    let handle = Arc::new(Mutex::new(driver));
+    {
+        let mut driver = handle.lock().unwrap();
+        driver
+            .peer_mut()
+            .configure_h264_screen_video(MediaDirection::Sendonly, Some(0x12345678))
+            .unwrap();
+        driver.peer_mut().create_offer().unwrap();
+    }
+    let (events, mut receiver) = channel(16);
+    let mut task = tokio::spawn(run_realtime_io(handle, events));
+    let terminal = tokio::time::timeout(Duration::from_millis(2200), async {
+        loop {
+            tokio::select! {
+                result = &mut task => return format!("driver ended: {result:?}"),
+                event = receiver.recv() => match event {
+                    Some(RealtimeIoEvent::IceFailed | RealtimeIoEvent::PeerFailed | RealtimeIoEvent::PeerDisconnected) | None => return format!("terminal event: {event:?}"),
+                    _ => {}
+                }
+            }
+        }
+    }).await;
+    task.abort();
+    if !task.is_finished() {
+        let _ = task.await;
+    }
+    assert!(
+        terminal.is_err(),
+        "unanswered offer must remain live: {terminal:?}"
+    );
+}
+
 fn synthetic_h264_access_unit(sequence: u64, timestamp: u64) -> EncodedVideoFrame {
-    let mut payload = vec![
-        0, 0, 0, 1, 0x67, 0x42, 0, 0x1f, 0xe5, 0x88, 0x68, 0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80, 0,
-        0, 0, 1, 0x65,
-    ];
+    let mut payload = crate::rtp_media_tests::baseline_sps(1920, 1080);
+    payload.extend_from_slice(&[0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80, 0, 0, 0, 1, 0x65]);
     payload.extend((0..2_048).map(|index| (index as u8).wrapping_mul(17)));
     EncodedVideoFrame::new(
         VideoCodec::H264,
@@ -303,7 +341,13 @@ async fn two_local_drivers_exchange_h264_frames_over_rtp() {
         }
     }
 
-    let input = synthetic_h264_access_unit(7, 90_000);
+    // Emulator/NAT hops can have a smaller receive queue than our socket.
+    // A complete keyframe must survive that bounded downstream capacity.
+    socket2::SockRef::from(&responder.lock().unwrap().socket)
+        .set_recv_buffer_size(8 * 1024)
+        .unwrap();
+    let mut input = synthetic_h264_access_unit(7, 90_000);
+    input.payload.extend(std::iter::repeat_n(0x11, 64 * 1024));
     caller
         .lock()
         .unwrap()
@@ -378,6 +422,11 @@ async fn driver_bind_uses_explicit_advertised_ip_and_closes_cleanly() {
     assert_eq!(
         driver.local_addr().ip(),
         "127.0.0.1".parse::<std::net::IpAddr>().unwrap()
+    );
+    assert_eq!(
+        driver.local_addr_value().ip(),
+        "192.0.2.44".parse::<std::net::IpAddr>().unwrap(),
+        "ICE packet context must match the advertised socket candidate"
     );
     let handle = driver.into_handle();
     let mut driver = handle.lock().unwrap();

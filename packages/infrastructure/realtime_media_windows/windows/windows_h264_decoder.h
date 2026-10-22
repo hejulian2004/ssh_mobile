@@ -21,10 +21,10 @@ struct NativeH264Buffer {
   size_t len = 0;
 };
 
-using H264PullCallback = int(__cdecl *)(uint64_t owner,
-                                         NativeH264FrameMetadata* metadata,
-                                         NativeH264Buffer* payload);
-using H264BufferFreeCallback = void(__cdecl *)(NativeH264Buffer payload);
+using H264PullCallback = int(__cdecl*)(uint64_t owner,
+                                       NativeH264FrameMetadata* metadata,
+                                       NativeH264Buffer* payload);
+using H264BufferFreeCallback = void(__cdecl*)(NativeH264Buffer payload);
 
 struct DecoderStats {
   int width = 0;
@@ -33,6 +33,7 @@ struct DecoderStats {
   uint64_t frames_rendered = 0;
   uint64_t frames_dropped = 0;
   int terminal_status = 0;
+  const char* failure_stage = "decode";
 };
 
 enum class DecoderStatus {
@@ -45,7 +46,7 @@ enum class DecoderStatus {
   kBackendFailure,
 };
 
-// Owns the receive-side hardware decoder worker and Flutter GPU texture
+// Owns the selected receive decoder worker and native Flutter texture
 // registration. The class exposes only an opaque texture ID and payload-free
 // counters to the method-channel adapter.
 class WindowsDecoderManager final {
@@ -59,7 +60,8 @@ class WindowsDecoderManager final {
   void SetNativeCallbacks(H264PullCallback pull_callback,
                           H264BufferFreeCallback free_callback);
 
-  DecoderStatus Attach(uint64_t owner, int64_t* surface_id);
+  DecoderStatus Attach(uint64_t owner, int64_t* surface_id,
+                       NativeCodecMode mode = NativeCodecMode::Hardware);
   DecoderStatus Detach(uint64_t owner);
   DecoderStatus Release(uint64_t owner);
   DecoderStatus Reset(uint64_t owner);
@@ -70,7 +72,7 @@ class WindowsDecoderManager final {
   std::unique_ptr<Impl> impl_;
 };
 
-// Internal terminal value used when a native hardware decoder or GPU output
+// Internal terminal value used when the selected native decoder or output
 // surface fails before a Phase 2 status code exists.
 constexpr int kDecoderTerminalFailed = -1003;
 

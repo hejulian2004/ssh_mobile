@@ -14,6 +14,7 @@ import 'package:uuid/uuid.dart';
 import '../../../data/database/lan_share_database.dart';
 import '../../../data/repositories/lan_share_history_repository.dart';
 import '../../../domain/lan_share_ports.dart';
+import '../../../domain/lan_discovery_bridge.dart';
 import '../../../services/lan_share/lan_discovery_service.dart';
 import '../../../services/lan_share/lan_native_transfer_coordinator.dart';
 import '../../../services/lan_share/lan_peer_trust.dart';
@@ -47,8 +48,10 @@ final class LanReceiverCoordinator extends ChangeNotifier {
     required this.networkRuntime,
     this.localAddressSelectionPort =
         const LanShareSingleCandidateLocalAddressSelection(),
+    this.discoveryBridge,
     LanPeerTrustStore? peerTrustStore,
     this.initializeNetwork = true,
+    this.startReceiverOnInitialization = true,
     this.transferServiceOverride,
     this.discoveryServiceOverride,
     this.storageServiceOverride,
@@ -81,6 +84,7 @@ final class LanReceiverCoordinator extends ChangeNotifier {
 
   /// App-selected route-aware Automatic local IPv4 selector.
   final LanShareLocalAddressSelectionPort localAddressSelectionPort;
+  final LanShareDiscoveryBridgePort? discoveryBridge;
 
   /// Module-owned atomic trust store. The Coordinator only consumes it and
   /// never treats discovery/reachability as trust.
@@ -94,6 +98,9 @@ final class LanReceiverCoordinator extends ChangeNotifier {
 
   /// 测试中可关闭监听器和原生网络初始化，但仍保留服务装配流程。
   final bool initializeNetwork;
+
+  /// Whether initialization also starts listening, or page entry does so later.
+  final bool startReceiverOnInitialization;
 
   /// 可选的 LAN 传输服务覆盖；缺省时由初始化流程内部构造真实服务。
   ///
@@ -112,6 +119,7 @@ final class LanReceiverCoordinator extends ChangeNotifier {
   LanStorageService? _lanStorageService;
   LanTransferService? _transferService;
   LanRelayCoordinator? _relayCoordinator;
+  RelayEnrollmentService? _enrollmentService;
   LanNativeTransferCoordinator? _nativeTransferCoordinator;
   NetworkFacade? _networkFacade;
   bool _receiverActive = false;
@@ -122,7 +130,6 @@ final class LanReceiverCoordinator extends ChangeNotifier {
   StreamSubscription<LanPairingRequest>? _pairingInviteSubscription;
   StreamSubscription<LanDiscoveredPeer>? _announcedPeerSubscription;
   StreamSubscription<List<LanDiscoveredPeer>>? _discoveredPeersSubscription;
-  StreamSubscription<LanDiscoveredPeer>? _handshakeSuccessSubscription;
   StreamSubscription<IncomingTransferOffer>? _nativeOfferSubscription;
   final StreamController<IncomingTransferOffer> _incomingTransferController =
       StreamController<IncomingTransferOffer>.broadcast();
@@ -157,9 +164,19 @@ final class LanReceiverCoordinator extends ChangeNotifier {
   /// 初始化完成后返回唯一 LAN 传输服务。
   LanTransferService? get transferService => _transferService;
 
-  /// 初始化完成后返回 Relay enrollment 服务。
-  LanRelayEnrollmentPort? get relayEnrollmentService =>
-      _relayCoordinator?.enrollmentService;
+  /// enrollment 门禁准备完成后返回共享服务。
+  LanRelayEnrollmentPort? get relayEnrollmentService => _enrollmentService;
+
+  /// Prepare only the durable enrollment gate, without keys or listeners.
+  Future<LanRelayEnrollmentPort> ensureRelayEnrollment() async {
+    if (_disposed) throw StateError('LAN receiver coordinator is disposed.');
+    await appSettings.ensureLanIdentity();
+    if (_disposed) throw StateError('LAN receiver coordinator is disposed.');
+    return _enrollmentService ??= RelayEnrollmentService(
+      currentDeviceId: appSettings.lanDeviceId,
+      bootstrapClient: bootstrapClient,
+    );
+  }
 
   /// 当前是否已启用原生 Relay 配置。
   bool get nativeRelayActive => _relayCoordinator?.nativeRelayActive ?? false;

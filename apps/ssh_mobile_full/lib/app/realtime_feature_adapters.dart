@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:app_core/app_core.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'package:network_transport/network_transport.dart';
 import 'package:ssh_mobile_network_native/ssh_mobile_network_native.dart';
@@ -22,12 +23,16 @@ final class AppRealtimeSessionBackend
         RealtimeIncomingSessionBackend {
   AppRealtimeSessionBackend({
     required this._networkRuntime,
+    this.logger,
+    this.screenVideo = false,
     this.maxPendingCommands = _defaultMaxPendingCommands,
     this.commandResultTimeout = _defaultCommandResultTimeout,
   }) : assert(maxPendingCommands > 0),
        assert(commandResultTimeout > Duration.zero);
 
   final NetworkRuntime _networkRuntime;
+  final AppLogger? logger;
+  final bool screenVideo;
   final int maxPendingCommands;
   final Duration commandResultTimeout;
   final StreamController<RealtimeBackendEvent> _events =
@@ -42,6 +47,19 @@ final class AppRealtimeSessionBackend
 
   @override
   Stream<RealtimeBackendEvent> get events => _events.stream;
+
+  /// Borrows the configured App runtime's gateway for passive reception.
+  /// App startup stays cold; the composition root calls this on first network
+  /// activation, before publishing the configured facade to LAN callers.
+  void observeGateway(NetworkRealtimeGateway gateway) {
+    _ensureUsable();
+    if (identical(_gateway, gateway)) return;
+    if (_gateway != null) {
+      throw StateError('Realtime already observes another runtime gateway.');
+    }
+    _gateway = gateway;
+    _nativeSubscription = gateway.events.listen(_onNativeEvent);
+  }
 
   @override
   Future<SdkResult<void>> sendConsent({
@@ -173,7 +191,11 @@ final class AppRealtimeSessionBackend
   }) => _sendCommand(
     operation: NetworkOperation.connect,
     peerId: peerId,
-    send: (gateway) => gateway.start(realtimeId: realtimeId, peerId: peerId),
+    send: (gateway) => gateway.start(
+      realtimeId: realtimeId,
+      peerId: peerId,
+      screenVideo: screenVideo,
+    ),
   );
 
   @override
@@ -251,14 +273,20 @@ final class AppRealtimeSessionBackend
     if (existing != null) return existing;
 
     late final Future<NetworkRealtimeGateway> future;
-    future = _networkRuntime.openRealtimeGateway();
+    future = _networkRuntime.openRealtimeGateway().then((gateway) {
+      // Configuring the shared runtime may have attached its gateway while
+      // this first command awaited readiness. Keep that single subscription.
+      if (_disposed) return gateway;
+      final current = _gateway;
+      if (current != null) return current;
+      observeGateway(gateway);
+      return gateway;
+    });
     _gatewayFuture = future;
     future.then<void>(
       (gateway) {
         if (!identical(_gatewayFuture, future) || _disposed) return;
         _gatewayFuture = null;
-        _gateway = gateway;
-        _nativeSubscription = gateway.events.listen(_onNativeEvent);
       },
       onError: (Object _, StackTrace _) {
         if (identical(_gatewayFuture, future)) _gatewayFuture = null;

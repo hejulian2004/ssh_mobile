@@ -120,6 +120,43 @@ void main() {
     await database.dispose();
   });
 
+  testWidgets('subscription-only host keeps a cold receiver uninitialized', (
+    tester,
+  ) async {
+    final identity = FakeLanShareIdentity();
+    final cold = LanReceiverCoordinator(
+      appSettings: settings,
+      logger: FakeLanShareLogger(),
+      dataProtection: FakeLanShareDataProtection(),
+      networkIdentity: identity,
+      networkAccess: FakeLanShareNetworkAccessPort(),
+      bootstrapClient: FakeLanShareBootstrapClient(),
+      historyRepository: LanShareHistoryRepository(database),
+      networkRuntime: FakeLanShareNetworkRuntime(),
+      initializeNetwork: false,
+    );
+    final navigatorKey = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(
+      ChangeNotifierProvider<LanReceiverCoordinator>.value(
+        value: cold,
+        child: MaterialApp(
+          navigatorKey: navigatorKey,
+          builder: (context, child) => LanPairingNavigationHost(
+            initializeReceiver: false,
+            navigatorKey: navigatorKey,
+            child: child ?? const SizedBox.shrink(),
+          ),
+          home: const Scaffold(body: Text('home')),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(cold.initialized, isFalse);
+    expect(identity.loadCalls, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await cold.close();
+  });
+
   testWidgets(
     'subscribes to the coordinator pairing stream and opens the route',
     (tester) async {
@@ -166,6 +203,7 @@ void main() {
       expect(screen.sessionId, 'session-1');
       expect(screen.isIncomingRequest, isTrue);
       expect(screen.initialAlias, 'Peer peer-a');
+      expect(screen.initialPeer?.controlPort, 53317);
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();

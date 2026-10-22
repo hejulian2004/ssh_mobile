@@ -22,6 +22,16 @@ final class FakeLanShareStrings extends Fake implements LanShareStrings {
   String get reject => 'Reject';
 
   @override
+  String get save => 'Save';
+
+  @override
+  String get cancel => 'Cancel';
+  @override
+  String get lanShareOnline => english ? 'Online' : '在线';
+  @override
+  String get lanShareOffline => english ? 'Offline' : '离线';
+
+  @override
   String get networkIncomingTransferTitle => 'Incoming Transfer';
 
   @override
@@ -41,6 +51,7 @@ final class FakeLanShareSettings extends ChangeNotifier
   FakeLanShareSettings({this.english = false, this.relayEndpoint = ''});
 
   final bool english;
+  bool get hasActiveListeners => hasListeners;
 
   /// 已保存的 Relay origin；默认空字符串表示未配置。
   @override
@@ -60,8 +71,10 @@ final class FakeLanShareSettings extends ChangeNotifier
   @override
   String get lanDeviceId => 'test-device';
 
+  String _lanDeviceAlias = 'Test Device';
+
   @override
-  String get lanDeviceAlias => 'Test Device';
+  String get lanDeviceAlias => _lanDeviceAlias;
 
   @override
   String get relayHost => '';
@@ -76,7 +89,10 @@ final class FakeLanShareSettings extends ChangeNotifier
   Future<void> ensureLanIdentity() async {}
 
   @override
-  Future<void> setLanDeviceAlias(String alias) async {}
+  Future<void> setLanDeviceAlias(String alias) async {
+    _lanDeviceAlias = alias;
+    notifyListeners();
+  }
 
   @override
   Future<void> setRelayEndpoint(String endpoint) async {
@@ -542,6 +558,9 @@ final class FakeLanTransferService extends Fake implements LanTransferService {
   final List<LanMessage> messages = <LanMessage>[];
 
   @override
+  Future<void> Function(LanDiscoveredPeer peer)? onPairingCommitted;
+
+  @override
   String get currentDeviceId => 'test-device';
 
   @override
@@ -577,6 +596,10 @@ final class FakeLanTransferService extends Fake implements LanTransferService {
 
   @override
   bool hasPendingPairing(String peerId) => false;
+  @override
+  bool isWebSocketConnected(String peerId) => false;
+  @override
+  Future<void> disconnectPairedPeer(String peerId) async {}
 
   @override
   Stream<LanMessage> get incomingMessageStream => const Stream.empty();

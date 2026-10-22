@@ -1,4 +1,4 @@
-> Last updated: 2026-09-23
+> Last updated: 2026-10-14
 
 # Transport and Routing
 
@@ -57,6 +57,17 @@ Rationale: [path quality/migration ADR](../../../docs/adr/ADR-014-path-quality-a
 and [forward-secret Session E2EE](../../../docs/adr/ADR-028-forward-secret-session-e2ee.md).
 
 ## Realtime screen-share signaling
+
+Paired Direct peers can signal over a current, authorized QUIC/TCP reliable
+PathLease without Relay ([ADR-036](../../../docs/adr/ADR-036-direct-screen-share-signaling.md)).
+Dedicated frame kind 6 binds application encryption to the authenticated remote
+ConnectionSession; it never exposes SDP/ICE to Dart or uses Delivery/Transfer.
+Without Direct, the existing Relay Control path remains. Wildcard media binds
+advertise a concrete interface, and native receive context matches that address.
+Native Realtime retains the exact Direct signaling PathLease for its generation;
+terminal removal releases it. QUIC uses transport keep-alives so metadata silence
+does not end video on the separate WebRTC socket. Unused paths remain subject to
+peer-owner idle retirement, and a lost/revoked connection still closes Realtime.
 
 WebRTC screen sharing remains a native Realtime carrier, not Relay video
 forwarding. Relay Control V2 forwards the bounded signaling payload and writes

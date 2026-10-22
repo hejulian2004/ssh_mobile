@@ -19,6 +19,7 @@ async fn tcp_transport_round_trips_bounded_frames() {
     let mut transport = TcpTransport::connect("0.0.0.0:0".parse().unwrap(), peer)
         .await
         .unwrap();
+    assert_eq!(transport.peer_addr().unwrap(), peer);
     assert_eq!(transport.send_frame(b"tcp-frame").await.unwrap(), 9);
     assert_eq!(transport.recv_frame().await.unwrap(), b"tcp-frame");
     transport.close().await.unwrap();

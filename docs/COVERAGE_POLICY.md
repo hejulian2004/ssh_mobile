@@ -1,4 +1,4 @@
-> Last updated: 2026-09-07
+> Last updated: 2026-10-22
 
 # Coverage policy
 
@@ -46,7 +46,7 @@ added or changed under that root with `git diff --diff-filter=ACMR`, filters the
 generated/test/third-party/platform paths, and requires every remaining source
 to have an LCOV record and at least the active threshold on its own lines. The
 focused client gate uses the same mechanism for
-`lib/services/network/`. Local runs may set `FULL_TEST_COVERAGE_BASE_REF` or
+`apps/ssh_mobile_full/lib/services/network/`. Local runs may set `FULL_TEST_COVERAGE_BASE_REF` or
 `CLIENT_COVERAGE_BASE_REF`; an explicit `--source-manifest=<path>` is also
 supported for owners whose source inventory is generated elsewhere.
 

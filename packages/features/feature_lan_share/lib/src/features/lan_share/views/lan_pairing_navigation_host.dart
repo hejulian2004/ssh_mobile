@@ -91,11 +91,13 @@ class LanPairingNavigationQueue {
 class LanPairingNavigationHost extends StatefulWidget {
   final GlobalKey<NavigatorState> navigatorKey;
   final Widget child;
+  final bool initializeReceiver;
 
   const LanPairingNavigationHost({
     super.key,
     required this.navigatorKey,
     required this.child,
+    this.initializeReceiver = true,
   });
 
   @override
@@ -123,7 +125,7 @@ class _LanPairingNavigationHostState extends State<LanPairingNavigationHost> {
     } else if (coordinator is LanShareViewModel) {
       _subscription = coordinator.pairingRequestStream.listen(_handleRequest);
     }
-    if (coordinator != null) {
+    if (coordinator != null && widget.initializeReceiver) {
       unawaited(
         _ensureCoordinatorInitialized(coordinator).catchError((
           Object error,
@@ -212,6 +214,7 @@ class _LanPairingNavigationHostState extends State<LanPairingNavigationHost> {
                   targetDeviceId: currentRequest.peer.peerId,
                   initialAlias: currentRequest.peer.displayAlias,
                   sessionId: currentRequest.sessionId,
+                  initialPeer: currentRequest.peer.discovery,
                   isIncomingRequest: currentRequest.isIncoming,
                 ),
               ),

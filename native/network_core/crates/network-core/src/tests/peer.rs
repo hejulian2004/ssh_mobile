@@ -68,9 +68,9 @@ async fn send_channel_frame_for_test(
     payload: &[u8],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let required_capability = match kind {
-        GenericFrameKind::DataMessage | GenericFrameKind::DeliveryAck => {
-            crate::connect::CAPABILITY_RELIABLE_MESSAGE
-        }
+        GenericFrameKind::DataMessage
+        | GenericFrameKind::DeliveryAck
+        | GenericFrameKind::RealtimeSignal => crate::connect::CAPABILITY_RELIABLE_MESSAGE,
         GenericFrameKind::StreamOpen
         | GenericFrameKind::StreamBytes
         | GenericFrameKind::StreamClose => crate::connect::CAPABILITY_RELIABLE_STREAM,

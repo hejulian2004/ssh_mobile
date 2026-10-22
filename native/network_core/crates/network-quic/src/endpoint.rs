@@ -6,9 +6,14 @@ use quinn::{
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::info;
 
 pub const QUIC_ALPN_V2: &[&[u8]] = &[b"ssh-mobile/2"];
+
+// Media may flow on WebRTC while this authenticated signaling carrier is quiet.
+// Keep the finite idle timeout and let the business PathLease owner retire it.
+const QUIC_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
 
 /// A QUIC-bound UDP socket can advertise its QUIC and unreliable datagram
 /// capabilities. It must not be inferred to support TCP or WebSocket merely
@@ -27,6 +32,7 @@ impl QuicEndpointManager {
         path_manager: Arc<PathManager>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let socket = std::net::UdpSocket::bind(bind_addr)?;
+        socket.set_nonblocking(true)?;
         Self::from_bound_socket(socket, path_manager)
     }
 
@@ -36,6 +42,11 @@ impl QuicEndpointManager {
         socket: std::net::UdpSocket,
         path_manager: Arc<PathManager>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Tokio's `UdpSocket::from_std` requires a nonblocking descriptor. The
+        // native runtime already supplies one after STUN/candidate gathering,
+        // but this public constructor also accepts caller-owned sockets (and
+        // tests commonly pass a freshly bound blocking socket).
+        socket.set_nonblocking(true)?;
         let cert = rcgen::generate_simple_self_signed(vec!["ssh-mobile".to_string()])?;
         let cert_der = cert.cert.der().to_vec();
         let key_der = cert.key_pair.serialize_der();
@@ -48,9 +59,13 @@ impl QuicEndpointManager {
             )?;
         server_crypto.alpn_protocols = QUIC_ALPN_V2.iter().map(|s| s.to_vec()).collect();
 
-        let server_config = ServerConfig::with_crypto(Arc::new(
+        let mut transport = quinn::TransportConfig::default();
+        transport.keep_alive_interval(Some(QUIC_KEEP_ALIVE_INTERVAL));
+        let transport = Arc::new(transport);
+        let mut server_config = ServerConfig::with_crypto(Arc::new(
             quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto)?,
         ));
+        server_config.transport_config(Arc::clone(&transport));
         let local_addr = socket.local_addr()?;
         let mut endpoint = Endpoint::new(
             EndpointConfig::default(),
@@ -63,9 +78,10 @@ impl QuicEndpointManager {
             .with_custom_certificate_verifier(ApplicationIdentityVerifier::new())
             .with_no_client_auth();
         client_crypto.alpn_protocols = QUIC_ALPN_V2.iter().map(|s| s.to_vec()).collect();
-        endpoint.set_default_client_config(ClientConfig::new(Arc::new(
-            QuicClientConfig::try_from(client_crypto)?,
-        )));
+        let mut client_config =
+            ClientConfig::new(Arc::new(QuicClientConfig::try_from(client_crypto)?));
+        client_config.transport_config(transport);
+        endpoint.set_default_client_config(client_config);
 
         info!("QuicEndpointManager bound on {}", local_addr);
 

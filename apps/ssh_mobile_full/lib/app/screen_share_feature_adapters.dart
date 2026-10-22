@@ -1,5 +1,7 @@
+import 'package:app_core/app_core.dart';
 import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:network_sdk/network_sdk.dart';
+import 'package:realtime_media/realtime_media.dart';
 
 /// Adapts the App-owned Realtime session to the Feature's consent port.
 ///
@@ -29,8 +31,10 @@ final class AppScreenShareMediaPort implements ScreenShareMediaPort {
     required this.onStartCapture,
     required this.onStartViewer,
     required this.onStop,
+    this.logger,
   });
 
+  final AppLogger? logger;
   @override
   final Stream<ScreenShareMediaEvent> events;
   final Future<void> Function({
@@ -57,10 +61,13 @@ final class AppScreenShareMediaPort implements ScreenShareMediaPort {
     required String operationId,
     required String realtimeId,
     required int generation,
-  }) => onStartCapture(
-    operationId: operationId,
-    realtimeId: realtimeId,
-    generation: generation,
+  }) => _run(
+    'capture',
+    () => onStartCapture(
+      operationId: operationId,
+      realtimeId: realtimeId,
+      generation: generation,
+    ),
   );
 
   @override
@@ -68,10 +75,13 @@ final class AppScreenShareMediaPort implements ScreenShareMediaPort {
     required String operationId,
     required String realtimeId,
     required int generation,
-  }) => onStartViewer(
-    operationId: operationId,
-    realtimeId: realtimeId,
-    generation: generation,
+  }) => _run(
+    'viewer',
+    () => onStartViewer(
+      operationId: operationId,
+      realtimeId: realtimeId,
+      generation: generation,
+    ),
   );
 
   @override
@@ -79,9 +89,31 @@ final class AppScreenShareMediaPort implements ScreenShareMediaPort {
     required String operationId,
     required String realtimeId,
     required int generation,
-  }) => onStop(
-    operationId: operationId,
-    realtimeId: realtimeId,
-    generation: generation,
+  }) => _run(
+    'stop',
+    () => onStop(
+      operationId: operationId,
+      realtimeId: realtimeId,
+      generation: generation,
+    ),
   );
+
+  Future<void> _run(String phase, Future<void> Function() operation) async {
+    try {
+      await operation();
+    } catch (error) {
+      final code = error is RealtimeMediaException
+          ? error.code
+          : RealtimeMediaErrorCode.backendFailure;
+      logger?.log(
+        LogRecord(
+          timestamp: DateTime.now(),
+          level: LogLevel.warning,
+          source: 'AppScreenShareMediaPort',
+          message: 'Screen-share media $phase failed: ${code.name}',
+        ),
+      );
+      rethrow;
+    }
+  }
 }

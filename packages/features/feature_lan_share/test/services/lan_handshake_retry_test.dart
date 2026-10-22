@@ -14,6 +14,24 @@ void main() {
     FlutterSecureStorage.setMockInitialValues(<String, String>{});
   });
 
+  test(
+    'unsupported challenge protocol never sends a PIN confirmation',
+    () async {
+      final posts = <String>[];
+      final result = await _send(
+        posts,
+        (_) async =>
+            _ScriptedResponse(HttpStatus.ok, '{"protocolVersion":999}'),
+      );
+      expect(
+        (result as NetworkFailure<LanPairingHandshakeProgress>).error.code,
+        NetworkErrorCode.invalidArgument,
+      );
+      expect(posts.every((phase) => phase == 'begin'), isTrue);
+      expect(posts, isNotEmpty);
+    },
+  );
+
   test('a failed challenge is retried before confirm is sent', () async {
     final posts = <String>[];
     final result = await _send(posts, (body) async {

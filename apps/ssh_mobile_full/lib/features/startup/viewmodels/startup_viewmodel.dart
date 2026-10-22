@@ -41,7 +41,8 @@ class StartupViewModel extends ChangeNotifier {
   bool get isAndroidTarget =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   bool get checkingPowerStatus => _checkingPowerStatus;
-  bool get powerStatusChecked => _powerStatusChecked;
+  bool get powerStatusChecked =>
+      _powerStatusChecked || _appSettings.powerGuideSeen;
   bool get powerStatusCheckScheduled => _powerStatusCheckScheduled;
   bool get shouldShowPowerGuide => _shouldShowPowerGuide;
   bool get isExempt => _isExempt;
@@ -114,7 +115,7 @@ class StartupViewModel extends ChangeNotifier {
   }
 
   void schedulePowerGuideCheck(VoidCallback callback) {
-    if (_powerStatusChecked ||
+    if (powerStatusChecked ||
         _checkingPowerStatus ||
         _powerStatusCheckScheduled) {
       return;

@@ -76,6 +76,14 @@ pub(crate) async fn emit_peer_diagnostics(
     state: &RuntimeState,
     peer_id: String,
 ) -> Result<(), ProtocolError> {
+    emit_peer_diagnostics_with_error(state, peer_id, None).await
+}
+
+pub(crate) async fn emit_peer_diagnostics_with_error(
+    state: &RuntimeState,
+    peer_id: String,
+    last_error: Option<ProtocolError>,
+) -> Result<(), ProtocolError> {
     if PeerId::new(&peer_id).is_err() {
         return Err(protocol_error(
             NetworkErrorCode::InvalidArgument,
@@ -128,7 +136,7 @@ pub(crate) async fn emit_peer_diagnostics(
             queued_command_count,
             active_stream_count,
             active_transfer_count,
-            last_error: None,
+            last_error,
         },
     );
     Ok(())

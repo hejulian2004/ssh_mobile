@@ -7,6 +7,7 @@ import '../services/telemetry/app_crash_telemetry_bridge.dart';
 import 'app_runtime.dart';
 import 'app_runtime_factory.dart';
 import 'ssh_mobile_app.dart';
+import 'startup_branding.dart';
 
 /// 应用启动边界，负责 Flutter 绑定、异常 Zone 和 Runtime 装配。
 ///
@@ -29,23 +30,12 @@ final class AppBootstrap {
         WidgetsFlutterBinding.ensureInitialized();
         StartupInstrumentation.instance.recordMainStart();
 
-        // A Future alone only moves construction out of this synchronous
-        // callback; it can still run before Flutter paints the first frame.
-        // Register the production barrier synchronously, before runApp, so a
-        // host cannot consume the first frame before the callback is attached.
-        // Injected startApp callbacks are used by non-widget tests and retain
-        // their synchronous test contract.
-        final deferRuntimeUntilFirstFrame = startApp == null;
-        final firstFrameBarrier = deferRuntimeUntilFirstFrame
-            ? _waitForFirstFrame()
-            : null;
         final createRuntime = runtimeFactory ?? AppRuntimeFactory.create;
-        final runtimeFuture = deferRuntimeUntilFirstFrame
-            ? () async {
-                await firstFrameBarrier;
-                return createRuntime();
-              }()
-            : Future<AppRuntime>(createRuntime);
+        // Mount the lightweight shell in this turn, then start composition on
+        // the microtask queue without waiting for paint or rasterization. Async I/O
+        // can overlap the first frame; CPU-heavy network setup stays on-demand
+        // and key/certificate derivation runs in worker isolates.
+        final runtimeFuture = Future<AppRuntime>.microtask(createRuntime);
         final shellRuntimeFuture = runtimeFuture
             .then<_AppBootstrapRuntimeResult>(
               _AppBootstrapRuntimeResult.success,
@@ -85,14 +75,6 @@ final class AppBootstrap {
       },
     );
   }
-
-  static Future<void> _waitForFirstFrame() {
-    final completer = Completer<void>();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!completer.isCompleted) completer.complete();
-    });
-    return completer.future;
-  }
 }
 
 final class _AppBootstrapRuntimeResult {
@@ -123,6 +105,11 @@ final class _AppBootstrapShell extends StatefulWidget {
 final class _AppBootstrapShellState extends State<_AppBootstrapShell> {
   AppRuntime? _runtime;
   Object? _error;
+  bool _startupReady = false;
+
+  void _onStartupReady() {
+    if (mounted && !_startupReady) setState(() => _startupReady = true);
+  }
 
   @override
   void initState() {
@@ -148,15 +135,33 @@ final class _AppBootstrapShellState extends State<_AppBootstrapShell> {
   @override
   Widget build(BuildContext context) {
     final runtime = _runtime;
-    if (runtime != null) return SshMobileApp(runtime: runtime);
     if (_error != null) return const _AppBootstrapFailureScreen();
-    return const _AppBootstrapLoadingScreen();
+    return Stack(
+      textDirection: TextDirection.ltr,
+      children: [
+        if (runtime != null)
+          Offstage(
+            offstage: !_startupReady,
+            child: TickerMode(
+              enabled: _startupReady,
+              child: SshMobileApp(
+                runtime: runtime,
+                onStartupReady: _onStartupReady,
+              ),
+            ),
+          ),
+        if (!_startupReady)
+          const _AppBootstrapLoadingScreen(
+            key: ValueKey<String>('app-bootstrap-loading-surface'),
+          ),
+      ],
+    );
   }
 }
 
 /// A deliberately small first-frame surface; it must not depend on App Scope.
 final class _AppBootstrapLoadingScreen extends StatelessWidget {
-  const _AppBootstrapLoadingScreen();
+  const _AppBootstrapLoadingScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -164,16 +169,8 @@ final class _AppBootstrapLoadingScreen extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       home: Scaffold(
         key: ValueKey<String>('app-bootstrap-loading'),
-        backgroundColor: Color(0xFF0D1117),
-        body: Center(
-          child: SizedBox.square(
-            dimension: 28,
-            child: CircularProgressIndicator(
-              color: Color(0xFFB7C3FF),
-              strokeWidth: 2.5,
-            ),
-          ),
-        ),
+        backgroundColor: Colors.white,
+        body: StartupBranding(),
       ),
     );
   }
@@ -189,11 +186,11 @@ final class _AppBootstrapFailureScreen extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       home: Scaffold(
         key: ValueKey<String>('app-bootstrap-failed'),
-        backgroundColor: Color(0xFF0D1117),
+        backgroundColor: Colors.white,
         body: Center(
           child: Icon(
             Icons.error_outline_rounded,
-            color: Color(0xFFFFB4AB),
+            color: Color(0xFFB42318),
             size: 32,
           ),
         ),

@@ -1,24 +1,31 @@
-Last updated: 2026-09-11
+Last updated: 2026-10-15
 
 # realtime_media_android
 
 `realtime_media_android` is the Android platform owner for the public
 `realtime_media` endpoint lifecycle. Kotlin owns MediaProjection, the typed
-foreground service, hardware H.264 MediaCodec instances, and Flutter
+foreground service, selected H.264 MediaCodec instances, and Flutter
 SurfaceTexture resources. A small JNI bridge invokes the existing native-only
 owner-token ABI; encoded H.264 never enters Dart.
 
 The Dart method channel carries bounded endpoint identity, source metadata,
 projection/lifecycle commands, opaque texture IDs, and low-frequency counters.
 No runtime pointer, raw/encoded frame, `Uint8List` media API, or Surface handle
-is exposed. Hardware encoder/decoder unavailability is reported as a typed
-failure; there is no software or alternate-codec fallback.
+is exposed. Hardware mode is the default. Explicit CPU mode selects software
+H.264 using a scoped factory choice; it preserves system recording consent,
+owner cleanup, and the native frame path. Unknown modes and unavailable selected
+codecs fail with typed errors; there is no silent or alternate-codec fallback.
+Configuration tries H.264 candidates only within the explicitly selected
+hardware or CPU mode. Each failed attempt is released before trying the next;
+unconfirmed cleanup aborts acquisition. A configured codec transfers to the
+existing media owner; exhausting unsupported formats fails capture/decoder startup.
 
 Generation-bound owner tokens also carry payload-free `requestKeyframe`,
 `resetDecoder`, and bounded `applyAdaptation` commands. Kotlin/JNI and the
 native runtime validate the token before touching a codec. Android applies
-bitrate and frame-rate targets through the hardware MediaCodec; a resolution
-change is rejected until an explicit stop/release/recreate path is used. Send
+bitrate and frame-rate targets through the selected MediaCodec; a QoS-requested
+resolution change is rejected until explicit stop/release/recreate. Captured
+content rotation instead uses the same projection/display resize path below. Send
 owners request a MediaCodec sync frame and receive owners use the native
 WebRTC RTCP path; neither path exposes Dart bytes. Device capability and E2E
 remain acceptance gates.
@@ -41,7 +48,46 @@ drops deltas before CSD/recovery readiness. At most one pulled frame is held
 under MediaCodec input backpressure; a pending frame blocks another native
 pull, and reset clears it so pre-reset deltas are never replayed.
 
+`DecoderOutputPump` polls asynchronous codec output independently of new input,
+including while a static screen supplies only one access unit. Format/buffer
+notifications do not hide ready output, each drain is bounded, and a stopped
+owner cannot submit or release another output frame. Its independent JVM tests
+cover delayed single-frame output and cancellation.
+
+`DecoderPresentationGate` bounds presentation separately from decoding. Hidden
+Activities keep decoding and retain only the latest output buffer. Visible
+Activities submit another texture frame only after Flutter consumes the prior
+one, preventing a paused texture consumer from filling the Surface queue.
+Returning to the foreground can display the retained frame without new input.
+Flush/stop return pending codec indices before invalidating the codec. The
+engine-scoped visibility observer follows only its attached Activity and does
+not hold an Activity lock while calling MediaCodec. Receiver service/power
+retention and actual background device behavior remain acceptance gaps.
+
+Decoded size statistics use the current output format's validated crop rectangle,
+so portrait/landscape transitions can reduce either dimension. They do not retain
+the largest width and height seen across different orientations.
+
+The module-internal encoder, decoder, and teardown extensions borrow the same
+`AndroidMediaOwner` lock, worker flags, codec/surface references, and native
+token; they do not create another resource owner. MediaCodec/JNI/thread teardown
+wrappers require device acceptance rather than JVM line-coverage claims. The
+pure pump, H.264 gates, pending-frame buffer, and projection lease are covered
+by host unit tests, as are presentation backpressure, capture-input replacement
+ordering/cancellation, timestamp continuity, and output crop validation. The new
+Activity observer and MediaCodec/VirtualDisplay resize wrapper require Android
+device acceptance; their platform calls are excluded from JVM line-coverage
+claims rather than simulated with Android stub methods.
+
 ## Projection lease and teardown
+
+After system consent, the plugin waits for the typed foreground service's ready
+callback before obtaining `MediaProjection`. Android requires this ordering;
+requesting the projection before `startForeground()` can reject a granted
+session. Pending callbacks remain bound to their request and cannot create a
+lease after plugin disposal. An unconsumed grant keeps the service alive until
+capture starts or the grant is abandoned; release stops it when no capture
+owner still needs it.
 
 Each user grant is a one-shot `ProjectionLease`:
 
@@ -56,8 +102,18 @@ failure performs the same release when no worker cleanup is deferred. When
 `stopCapture` returns `cleanup_deferred`, the consumed lease remains associated
 with its owner, including its callback and projection, until a later retry
 reaches the safe point. Projection revoke is delivered only to that bound send
-owner. Display-size changes remain `capture_source_ended` and require restart
-with a new grant; rotation hot-resize is a known device-acceptance gap. The
+owner. Captured-content size changes are coalesced within this same lease.
+API 34+ uses `onCapturedContentResize`; earlier full-display capture observes
+the display size. The existing encoder worker detaches the VirtualDisplay input,
+releases the previous codec/surface, configures a replacement in the same frozen
+CPU/hardware mode, resizes that VirtualDisplay, and attaches the new input.
+It never calls `createVirtualDisplay` a second time. Stop/revoke interrupts this
+transaction at safe boundaries and leaves acquired resources with the same owner
+for acknowledged teardown. A release failure prevents replacement acquisition.
+The replacement emits fresh CSD/recovery IDR; the owner's sequence and timestamp
+timeline continue, including when a new codec restarts its presentation clock.
+Unsupported dimensions fail explicitly. Actual continuous rotated video still
+requires device acceptance. The
 lease transitions are claimed under one state-machine synchronization boundary
 for consume, revoke, release, and release-if-granted; callback unregister and
 `MediaProjection.stop()` run only after a successful terminal claim. A
@@ -89,3 +145,11 @@ flutter test --no-pub
 
 From the application Android project, use the repository's Gradle wrapper for
 the Android compile and instrumentation checks when an SDK/device is present.
+
+`test/android/DecoderSingleFrameProbe.java` is a device diagnostic for the
+Android software H.264 decoder. Compile it against `android.jar`, package with
+D8, and run through `app_process` with the fixed Annex-B fixture exported by
+the Windows encoder probe. It compares sparse input, repeated synthetic input,
+and end-of-stream flushing using bounded byte-buffer output polling. This
+checks codec buffering, not Flutter surface rendering; end-of-stream is only
+a diagnostic control and is never injected into a live sharing session.

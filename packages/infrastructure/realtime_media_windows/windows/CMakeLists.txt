@@ -23,6 +23,7 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE
   flutter
   flutter_wrapper_plugin
   d3d11.lib
+  dxguid.lib
   dxgi.lib
   mfplat.lib
   mfreadwrite.lib

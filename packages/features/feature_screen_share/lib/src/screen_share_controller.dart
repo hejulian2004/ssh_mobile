@@ -197,6 +197,7 @@ final class ScreenShareController extends ChangeNotifier
     _ensureUsable();
     final current = state;
     if (current == ScreenShareOperationState.idle ||
+        current == ScreenShareOperationState.failed ||
         current == ScreenShareOperationState.cancelled ||
         current == ScreenShareOperationState.rejected ||
         current == ScreenShareOperationState.expired) {
@@ -204,23 +205,12 @@ final class ScreenShareController extends ChangeNotifier
     }
     final epoch = ++_operationEpoch;
     final id = _snapshot.operationId;
-    final expires = _snapshot.expiresAt;
-    if (id != null && expires != null && _now().isBefore(expires)) {
-      _nextLocalActionRevision++;
-      await _send(
-        buildScreenShareConsent(
-          operationId: id,
-          realtimeId: realtimeId,
-          sharedSessionInstanceId: sharedSessionInstanceId,
-          issuedAt: _now(),
-          expiresAt: expires,
-          decision: RealtimeConsentDecision.cancel,
-          senderPeerId: localPeerId,
-          actionRevision: _nextLocalActionRevision,
-        ),
-      );
-      if (!_isCurrent(epoch, id)) return;
-    }
+    await _sendScreenShareCancellation(
+      this,
+      refresh:
+          current == ScreenShareOperationState.accepted ||
+          current == ScreenShareOperationState.active,
+    );
     if (!_isCurrent(epoch, id)) return;
     if (!await _stopMediaIfActive()) return;
     if (_isCurrent(epoch, id)) _setState(ScreenShareOperationState.cancelled);
@@ -232,7 +222,13 @@ final class ScreenShareController extends ChangeNotifier
   /// capability. It is intentionally a boolean, not a handle or frame.
   Future<void> setMediaReady(bool ready) async {
     _ensureUsable();
-    ++_operationEpoch;
+    // Readiness invalidates media work, but never a pending consent decision.
+    // Native Connected may arrive before the ACCEPT command result.
+    if (_snapshot.mediaReady != ready &&
+        (state == ScreenShareOperationState.accepted ||
+            state == ScreenShareOperationState.active)) {
+      ++_operationEpoch;
+    }
     _setSnapshot(
       ScreenShareOperationSnapshot(
         state: state,
@@ -296,6 +292,7 @@ final class ScreenShareController extends ChangeNotifier
 
   void _onMediaEvent(ScreenShareMediaEvent event) {
     if (_disposed ||
+        _snapshot.isTerminal ||
         event.realtimeId != realtimeId ||
         event.generation != generation ||
         event.operationId != _snapshot.operationId) {
@@ -372,7 +369,10 @@ final class ScreenShareController extends ChangeNotifier
   }
 
   void _expire() {
-    if (_disposed || snapshot.isTerminal || snapshot.operationId == null) {
+    if (_disposed ||
+        (state != ScreenShareOperationState.outgoingPending &&
+            state != ScreenShareOperationState.incomingPending) ||
+        snapshot.operationId == null) {
       return;
     }
     ++_operationEpoch;
@@ -382,6 +382,12 @@ final class ScreenShareController extends ChangeNotifier
 
   void _fail(String message) {
     if (_disposed || state == ScreenShareOperationState.failed) return;
+    final hadConsent =
+        state == ScreenShareOperationState.accepted ||
+        state == ScreenShareOperationState.active;
+    final activeId = state == ScreenShareOperationState.active
+        ? _snapshot.operationId
+        : null;
     ++_operationEpoch;
     _expiryTimer?.cancel();
     _setSnapshot(
@@ -396,10 +402,16 @@ final class ScreenShareController extends ChangeNotifier
         failure: message,
       ),
     );
+    if (hadConsent) {
+      unawaited(_sendScreenShareCancellation(this, refresh: true));
+    }
+    if (activeId != null) unawaited(_compensateMediaStart(activeId));
   }
 
   void _setState(ScreenShareOperationState next) {
-    if (next == ScreenShareOperationState.rejected ||
+    if (next == ScreenShareOperationState.accepted ||
+        next == ScreenShareOperationState.active ||
+        next == ScreenShareOperationState.rejected ||
         next == ScreenShareOperationState.cancelled ||
         next == ScreenShareOperationState.expired ||
         next == ScreenShareOperationState.failed) {

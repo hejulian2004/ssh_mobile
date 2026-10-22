@@ -9,6 +9,8 @@
 
 namespace realtime_media_windows {
 
+enum class NativeCodecMode { Hardware, Cpu };
+
 // These descriptors deliberately contain no HWND/HMONITOR or graphics
 // resource. The native implementation keeps those handles behind this
 // translation unit and only returns bounded UI metadata to the platform
@@ -45,13 +47,14 @@ struct NativeH264FrameMetadata {
   uint8_t keyframe = 0;
 };
 
-using H264PushCallback = int(__cdecl *)(uint64_t owner,
-                                         NativeH264FrameMetadata metadata,
-                                         const uint8_t* payload,
-                                         size_t payload_length);
+using H264PushCallback = int(__cdecl*)(uint64_t owner,
+                                       NativeH264FrameMetadata metadata,
+                                       const uint8_t* payload,
+                                       size_t payload_length);
 
-static_assert(sizeof(NativeH264FrameMetadata) == 32,
-              "Windows and Rust H.264 metadata layouts must stay ABI-identical");
+static_assert(
+    sizeof(NativeH264FrameMetadata) == 32,
+    "Windows and Rust H.264 metadata layouts must stay ABI-identical");
 
 // Internal terminal values used when a platform encoder fails before a Phase
 // 2 status code exists. They never cross Dart; the plugin maps them to typed
@@ -86,21 +89,17 @@ class WindowsCaptureManager final {
 
   void SetPushCallback(H264PushCallback callback);
   bool EnumerateSources(std::vector<CaptureSourceDescriptor>* sources);
-  CaptureStatus Start(uint64_t owner,
-                      const std::string& source_id,
-                      const std::string& source_kind);
+  CaptureStatus Start(uint64_t owner, const std::string& source_id,
+                      const std::string& source_kind,
+                      NativeCodecMode mode = NativeCodecMode::Hardware);
   CaptureStatus Stop(uint64_t owner);
   CaptureStatus Release(uint64_t owner);
-  CaptureStatus ApplyAdaptation(uint64_t owner,
-                                uint32_t bitrate_kbps,
-                                uint32_t framerate,
-                                uint32_t width,
+  CaptureStatus ApplyAdaptation(uint64_t owner, uint32_t bitrate_kbps,
+                                uint32_t framerate, uint32_t width,
                                 uint32_t height);
-  CaptureStatus CurrentAdaptation(uint64_t owner,
-                                  uint32_t* bitrate_kbps,
+  CaptureStatus CurrentAdaptation(uint64_t owner, uint32_t* bitrate_kbps,
                                   uint32_t* framerate);
-  CaptureStatus RestoreAdaptation(uint64_t owner,
-                                  uint32_t bitrate_kbps,
+  CaptureStatus RestoreAdaptation(uint64_t owner, uint32_t bitrate_kbps,
                                   uint32_t framerate);
   void MarkAdaptationRecreateRequired(uint64_t owner);
   CaptureStatus RequestKeyframe(uint64_t owner);

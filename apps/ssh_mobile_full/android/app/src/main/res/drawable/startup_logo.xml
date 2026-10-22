@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Vector counterpart of assets/app_icon.svg for the native launch surface. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="128dp" android:height="128dp"
+    android:viewportWidth="1024" android:viewportHeight="1024">
+    <path android:fillColor="#EFF6FF" android:pathData="M276,56H748Q968,56 968,276V748Q968,968 748,968H276Q56,968 56,748V276Q56,56 276,56Z" />
+    <path android:fillColor="#00000000" android:strokeColor="#2563EB"
+        android:strokeWidth="96" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M260,320L480,512L260,704" />
+    <path android:fillColor="#00000000" android:strokeColor="#0D9488"
+        android:strokeWidth="82" android:strokeLineCap="round" android:pathData="M560,690H790" />
+    <path android:fillColor="#FFFFFF" android:pathData="M706,270a74,74 0,1 0,148 0a74,74 0,1 0,-148 0" />
+    <path android:fillColor="#16A34A" android:pathData="M728,270a52,52 0,1 0,104 0a52,52 0,1 0,-104 0" />
+</vector>

@@ -1,4 +1,4 @@
-最新更新时间：2026-08-24
+最新更新时间：2026-10-22
 
 # feature_connection
 
@@ -14,7 +14,7 @@ SSH Mobile 的连接 Feature，负责连接配置编辑界面和连接配置的�
 - 保存、删除、批量删除和排序共用同一 mutation queue；删除一旦开始结构持久化，
   即使 Route generation 已切换也会继续完成凭据清理，避免残留孤儿秘密。
 - 不拥有 Connection 数据库；数据库生命周期仍由 AppRuntime 管理。
-- 连接专属页面组件、布局指标和双语文案由本 Feature 维护；本包当前不依赖共享 `app_ui`。
+- 连接专属页面组件、布局指标和双语文案由本 Feature 维护，并使用共享 `app_ui`。
 - 公共入口同时提供纯 Route metadata；App Shell 只聚合这些描述并在 Route Scope 创建
   ViewModel，不把 Widget 或 ViewModel 放入 Core。
 - Full App 中旧 `features/connection/` 路径已完成零引用清理并删除；
@@ -41,7 +41,7 @@ SSH Mobile 的连接 Feature，负责连接配置编辑界面和连接配置的�
 - 职责：提供连接编辑页面、ViewModel、文案和 Route metadata。
 - 不负责：Connection 数据库、Secure Storage、SSH/SFTP 实现或 App Scope 资源。
 - Public API：`package:feature_connection/feature_connection.dart`。
-- 依赖：`app_core`、`connection_core`、Flutter、Provider 和 UI 直接依赖。
+- 依赖：`app_core`、`app_ui`、`connection_core`、Flutter、Provider 和 UI 直接依赖。
 - 数据库：不拥有数据库；Connection 数据由 `connection_core` 管理。
 - 生命周期与资源 Owner：Route Scope 拥有 `ConnectionViewModel`；AppRuntime 拥有
   Repository、凭据、Host Key 和 SSH/SFTP 资源。

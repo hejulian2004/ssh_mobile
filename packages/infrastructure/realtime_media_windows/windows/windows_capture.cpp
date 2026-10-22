@@ -1,14 +1,14 @@
 #include "windows_capture.h"
 
-#include "windows_capture_state.h"
-
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <mfapi.h>
+#include <unknwn.h>
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 #include <windows.h>
-#include <unknwn.h>
+
+#include "windows_capture_state.h"
 
 // C++/WinRT's generated headers are consumed alongside the Windows SDK COM
 // headers. Some SDK/Flutter wrapper combinations do not expose the marker
@@ -20,8 +20,8 @@
 
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Graphics.Capture.h>
-#include <winrt/Windows.Graphics.DirectX.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
+#include <winrt/Windows.Graphics.DirectX.h>
 #include <winrt/base.h>
 
 #include <algorithm>
@@ -65,12 +65,11 @@ std::string Utf8FromWide(const wchar_t* value, int length) {
     size_t boundary = 0;
     while (boundary < result.size()) {
       const auto lead = static_cast<unsigned char>(result[boundary]);
-      const size_t width =
-          lead < 0x80       ? 1
-          : (lead & 0xE0) == 0xC0 ? 2
-          : (lead & 0xF0) == 0xE0 ? 3
-          : (lead & 0xF8) == 0xF0 ? 4
-                                  : 1;
+      const size_t width = lead < 0x80             ? 1
+                           : (lead & 0xE0) == 0xC0 ? 2
+                           : (lead & 0xF0) == 0xE0 ? 3
+                           : (lead & 0xF8) == 0xF0 ? 4
+                                                   : 1;
       if (boundary + width > 128) break;
       boundary += width;
     }
@@ -96,9 +95,7 @@ struct WindowsCaptureManager::Impl final {
   std::mutex mutex;
   std::vector<NativeSource> sources;
   std::unordered_map<uint64_t, std::shared_ptr<CaptureState>> captures;
-  winrt::com_ptr<ID3D11Device> d3d_device;
-  winrt::com_ptr<ID3D11DeviceContext> d3d_context;
-  IDirect3DDevice winrt_device{nullptr};
+  CaptureGraphicsDevice hardware_graphics, cpu_graphics;
   H264PushCallback push_h264 = nullptr;
   bool com_initialized = false;
   bool mf_initialized = false;
@@ -106,7 +103,9 @@ struct WindowsCaptureManager::Impl final {
   Impl() {
     const HRESULT com_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     com_initialized = com_result == S_OK || com_result == S_FALSE;
-    if (com_initialized) {
+    // Flutter's platform thread already owns a COM apartment. Reuse it when
+    // changing its model is rejected; only uninitialize an apartment we own.
+    if (com_initialized || com_result == RPC_E_CHANGED_MODE) {
       mf_initialized = SUCCEEDED(MFStartup(MF_VERSION, MFSTARTUP_LITE));
     }
   }
@@ -120,54 +119,18 @@ struct WindowsCaptureManager::Impl final {
       sources.clear();
     }
     for (const auto& capture : captures_to_stop) capture->Stop();
-    winrt_device = nullptr;
-    d3d_context = nullptr;
-    d3d_device = nullptr;
+    hardware_graphics = {};
+    cpu_graphics = {};
     if (mf_initialized) MFShutdown();
     if (com_initialized) CoUninitialize();
-  }
-
-  bool EnsureDevice() {
-    if (winrt_device != nullptr) return true;
-    constexpr D3D_FEATURE_LEVEL kFeatureLevels[] = {
-        D3D_FEATURE_LEVEL_11_1,
-        D3D_FEATURE_LEVEL_11_0,
-    };
-    D3D_FEATURE_LEVEL feature_level = D3D_FEATURE_LEVEL_11_0;
-    const HRESULT device_result = D3D11CreateDevice(
-        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-        kFeatureLevels, ARRAYSIZE(kFeatureLevels), D3D11_SDK_VERSION,
-        d3d_device.put(), &feature_level, d3d_context.put());
-    if (FAILED(device_result) || d3d_device == nullptr) return false;
-
-    winrt::com_ptr<IDXGIDevice> dxgi_device;
-    if (FAILED(d3d_device->QueryInterface(IID_PPV_ARGS(dxgi_device.put())))) {
-      d3d_device = nullptr;
-      d3d_context = nullptr;
-      return false;
-    }
-    winrt::com_ptr<IInspectable> inspectable_device;
-    if (FAILED(CreateDirect3D11DeviceFromDXGIDevice(
-            dxgi_device.get(), inspectable_device.put()))) {
-      d3d_device = nullptr;
-      d3d_context = nullptr;
-      return false;
-    }
-    try {
-      winrt_device = inspectable_device.as<IDirect3DDevice>();
-    } catch (...) {
-      d3d_device = nullptr;
-      d3d_context = nullptr;
-      return false;
-    }
-    return winrt_device != nullptr;
   }
 
   static std::optional<GraphicsCaptureItem> CreateCaptureItem(
       const NativeSource& source) {
     try {
-      auto interop = winrt::get_activation_factory<
-          GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
+      auto interop =
+          winrt::get_activation_factory<GraphicsCaptureItem,
+                                        IGraphicsCaptureItemInterop>();
       GraphicsCaptureItem item{nullptr};
       // The WinRT projection's guid type is not ABI-identical to the SDK's
       // REFIID on all MSVC/Windows SDK combinations. Use the ABI default
@@ -180,8 +143,8 @@ struct WindowsCaptureManager::Impl final {
         result = interop->CreateForMonitor(source.monitor, iid,
                                            winrt::put_abi(item));
       } else if (source.descriptor.kind == "window") {
-        result = interop->CreateForWindow(source.window, iid,
-                                          winrt::put_abi(item));
+        result =
+            interop->CreateForWindow(source.window, iid, winrt::put_abi(item));
       }
       if (FAILED(result) || item == nullptr) return std::nullopt;
       return item;
@@ -198,15 +161,18 @@ struct WindowsCaptureManager::Impl final {
                  candidate.descriptor.kind == source_kind;
         });
     if (source == sources.end()) return std::nullopt;
-    if ((source->descriptor.kind == "display" && !IsLiveMonitor(source->monitor)) ||
-        (source->descriptor.kind == "window" && !IsLiveWindow(source->window))) {
+    if ((source->descriptor.kind == "display" &&
+         !IsLiveMonitor(source->monitor)) ||
+        (source->descriptor.kind == "window" &&
+         !IsLiveWindow(source->window))) {
       return std::nullopt;
     }
     return *source;
   }
 };
 
-WindowsCaptureManager::WindowsCaptureManager() : impl_(std::make_unique<Impl>()) {}
+WindowsCaptureManager::WindowsCaptureManager()
+    : impl_(std::make_unique<Impl>()) {}
 
 WindowsCaptureManager::~WindowsCaptureManager() = default;
 
@@ -291,7 +257,8 @@ bool WindowsCaptureManager::EnumerateSources(
 
 CaptureStatus WindowsCaptureManager::Start(uint64_t owner,
                                            const std::string& source_id,
-                                           const std::string& source_kind) {
+                                           const std::string& source_kind,
+                                           NativeCodecMode mode) {
   if (owner == 0 || source_id.empty() ||
       (source_kind != "display" && source_kind != "window")) {
     return CaptureStatus::kBackendFailure;
@@ -303,7 +270,10 @@ CaptureStatus WindowsCaptureManager::Start(uint64_t owner,
   if (impl_->push_h264 == nullptr || !impl_->mf_initialized) {
     return CaptureStatus::kBackendFailure;
   }
-  if (!GraphicsCaptureSession::IsSupported() || !impl_->EnsureDevice()) {
+  auto& graphics = mode == NativeCodecMode::Cpu ? impl_->cpu_graphics
+                                                : impl_->hardware_graphics;
+  if (!GraphicsCaptureSession::IsSupported() ||
+      !EnsureCaptureGraphicsDevice(mode, &graphics)) {
     return CaptureStatus::kUnsupported;
   }
   const auto source = impl_->FindSource(source_id, source_kind);
@@ -312,12 +282,12 @@ CaptureStatus WindowsCaptureManager::Start(uint64_t owner,
   if (!item) return CaptureStatus::kBackendFailure;
 
   try {
-    auto encoder = HardwareH264Encoder::Create(impl_->d3d_device.get(),
-                                                impl_->d3d_context.get());
+    auto encoder = NativeH264Encoder::Create(graphics.d3d_device.get(),
+                                             graphics.d3d_context.get(), mode);
     if (encoder == nullptr) return CaptureStatus::kEncoderUnavailable;
     const auto size = item->Size();
     auto frame_pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
-        impl_->winrt_device, DirectXPixelFormat::B8G8R8A8UIntNormalized,
+        graphics.winrt_device, DirectXPixelFormat::B8G8R8A8UIntNormalized,
         kFramePoolBufferCount, size);
     auto session = frame_pool.CreateCaptureSession(*item);
     session.IsCursorCaptureEnabled(false);
@@ -328,7 +298,7 @@ CaptureStatus WindowsCaptureManager::Start(uint64_t owner,
     state->push_h264 = impl_->push_h264;
     state->encoder = std::move(encoder);
     state->started_at = std::chrono::steady_clock::now();
-    state->device = impl_->winrt_device;
+    state->device = graphics.winrt_device;
     state->item = *item;
     state->frame_pool = frame_pool;
     state->session = session;
@@ -381,8 +351,7 @@ CaptureStatus WindowsCaptureManager::ApplyAdaptation(uint64_t owner,
                                                      uint32_t width,
                                                      uint32_t height) {
   if (owner == 0 || bitrate_kbps < 256 || bitrate_kbps > 3 * 1024 ||
-      framerate < 5 || framerate > 30 ||
-      ((width == 0) != (height == 0))) {
+      framerate < 5 || framerate > 30 || ((width == 0) != (height == 0))) {
     return CaptureStatus::kBackendFailure;
   }
   std::shared_ptr<CaptureState> capture;
@@ -462,7 +431,7 @@ CaptureStatus WindowsCaptureManager::RequestKeyframe(uint64_t owner) {
   std::lock_guard<std::mutex> encoder_lock(capture->encoder_mutex);
   if (capture->encoder == nullptr) return CaptureStatus::kEncoderUnavailable;
   return capture->encoder->RequestKeyframe() ? CaptureStatus::kOk
-                                              : CaptureStatus::kEncoderFailed;
+                                             : CaptureStatus::kEncoderFailed;
 }
 
 CaptureStatus WindowsCaptureManager::ReadStats(uint64_t owner,

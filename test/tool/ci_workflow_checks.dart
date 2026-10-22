@@ -2,6 +2,78 @@
 
 part of 'ci_workflow_test.dart';
 
+void _testNativeBuildArtifacts(String workflow) {
+  final producer = _jobSection(workflow, 'native-linux-build');
+  _expect(
+    producer.contains(
+          'cargo build -p network-ffi --release --locked --target x86_64-unknown-linux-gnu',
+        ) &&
+        producer.contains(r'name: native-linux-${{ github.sha }}') &&
+        producer.contains('include-hidden-files: true') &&
+        producer.contains('native/network_core/target/release/') &&
+        producer.contains(
+          'native/network_core/target/x86_64-unknown-linux-gnu/release/',
+        ) &&
+        producer.contains('if-no-files-found: error'),
+    'Native Linux producer must upload this commit\'s library, host dependencies and Cargo fingerprints',
+  );
+  for (final name in <String>[
+    'sdk-dart-quality',
+    'workspace-features-quality',
+    'lan-network-v2-targeted',
+    'client-backend-e2e',
+    'app-unit-tests',
+    'app-isolated-tests',
+  ]) {
+    final job = _jobSection(workflow, name);
+    _expect(
+      job.contains('native-linux-build') &&
+          job.contains('uses: ./.github/actions/restore-native-linux'),
+      '$name must depend on and restore the exact-commit native artifact before Flutter work',
+    );
+    _expect(
+      job.indexOf('name: Restore native build artifacts') <
+          job.indexOf('run: dart pub get'),
+      '$name must restore native artifacts before invoking package hooks',
+    );
+  }
+  final restore = File(
+    '${_findRepositoryRoot().path}/.github/actions/restore-native-linux/action.yml',
+  ).readAsStringSync();
+  _expect(loadYaml(restore) is YamlMap, 'Native restore action 必须是合法 YAML');
+  _expect(
+    restore.contains(
+          'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093',
+        ) &&
+        restore.contains(r'name: native-linux-${{ github.sha }}') &&
+        restore.contains('path: native/network_core/target') &&
+        restore.contains('sha256sum -c') &&
+        restore.contains('git diff --exit-code -- native/network_core') &&
+        restore.contains(
+          'git ls-files --others --exclude-standard -- native/network_core',
+        ) &&
+        restore.contains(r'"$GITHUB_SHA"') &&
+        restore.contains(
+          'cargo build -p network-ffi --release --locked --target x86_64-unknown-linux-gnu',
+        ),
+    'Restore must validate provenance/integrity and retain Cargo configuration checks',
+  );
+  _testActionsArePinned(
+    restore,
+    workflowName: 'restore-native-linux/action.yml',
+  );
+  final android = _jobSection(workflow, 'android-build');
+  _expect(
+    android.contains(
+          'sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /opt/ghc',
+        ) &&
+        !android.contains('rm -rf /usr/local/lib/android') &&
+        android.indexOf('name: Prepare Android runner disk') <
+            android.indexOf('subosito/flutter-action@'),
+    'Android may reclaim unused hosted toolchains before downloads, while preserving its SDK',
+  );
+}
+
 void _verifyScriptTrees(Directory root) {
   final bashRoot = Directory('${root.path}/scripts/bash');
   final powerShellRoot = Directory('${root.path}/scripts/powershell');

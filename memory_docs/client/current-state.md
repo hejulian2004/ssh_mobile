@@ -1,4 +1,4 @@
-> Last updated: 2026-10-09
+> Last updated: 2026-10-22
 
 # Client Current State
 
@@ -11,8 +11,9 @@ data-protection key. It does not construct a `NetworkFacade`: the production
 Native file transfer and the relay data plane therefore stay on the Full App.
 `apps/ssh_mobile_terminal/` validates the minimal Terminal-only dependency crop.
 Owners are Core (app/UI/Telemetry/Connection), Features (Connection, Terminal,
-SFTP, Monitoring, System Administration, LAN Share, Playbook, RAG, MCP, AI,
-WebView, Developer), and App-scoped SSH infrastructure. Legacy Full App paths
+SFTP, Monitoring, System Administration, LAN Share, Screen Share, Playbook, RAG,
+MCP, AI, WebView, Developer), App-scoped SSH infrastructure, and the realtime
+media adapters. Legacy Full App paths
 remain only for consumers listed in the [compatibility inventory](../../docs/architecture/COMPATIBILITY_MIGRATION_INVENTORY.md);
 new code belongs in the owning package.
 
@@ -30,8 +31,9 @@ even when AppRuntime creates the facade.
 
 The Full App exposes screen sharing as a secondary action in the device chat
 header for a trusted online LAN peer, and as a global incoming request host.
-Outgoing flow selects an
-App-issued route-scoped source token, creates a valid 32-character lowercase
+Outgoing flow selects an App-issued route-scoped source token, prepares the
+pinned native carrier through LAN's public `prepareRealtimeConnection` boundary,
+creates a valid 32-character lowercase
 hex Realtime ID, waits only for Negotiating identity, then lets the Feature
 send REQUEST. Incoming Dart metadata is published only after native pairs an
 authenticated Offer with the complete typed REQUEST. Accept pre-registers the
@@ -39,6 +41,12 @@ SDK responder before native claim/Answer, seeds the original REQUEST once, sends
 ACCEPT immediately, and gates viewer/capture on Connected plus matching
 generation/shared-session identity. Route cleanup is role-aware and never stops
 App Runtime.
+
+Authenticated Direct QUIC/TCP signaling works without Relay under
+[ADR-036](../../docs/adr/ADR-036-direct-screen-share-signaling.md). The App selects
+the capture source before carrier preparation; native signaling remains encrypted
+and bound to current ConnectionSession admission. Relay Control remains the
+signaling path when Direct is unavailable; actual capture/render stays a device gate.
 
 ## Validation
 

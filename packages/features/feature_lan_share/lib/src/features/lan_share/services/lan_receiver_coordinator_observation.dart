@@ -49,9 +49,6 @@ extension LanReceiverCoordinatorObservation on LanReceiverCoordinator {
     _announcedPeerSubscription = transfer.announcedPeerStream.listen(
       _publishIncomingPeer,
     );
-    _handshakeSuccessSubscription = transfer.handshakeSuccessPeerStream.listen(
-      (device) => unawaited(_registerNewlyPairedPeer(device)),
-    );
     _discoveredPeersSubscription = discovery.discoveredPeersStream.listen(
       (peers) => unawaited(_syncDiscoveredEndpoints(peers)),
       onError: (Object error, StackTrace stackTrace) {
@@ -76,7 +73,11 @@ extension LanReceiverCoordinatorObservation on LanReceiverCoordinator {
     }
   }
 
-  /// 配对完成后立即同步当前 native runtime 的完整信任注册。
+  /// 配对完成后同步当前 native runtime 的完整信任注册。
+  ///
+  /// LanTransferService awaits this callback before publishing pairing
+  /// success, so a caller cannot race native peer authentication with the
+  /// trust-to-peer registration.
   Future<void> _registerNewlyPairedPeer(LanDiscoveredPeer peer) async {
     final facade = _networkFacade;
     if (facade == null || _disposed) return;
@@ -152,8 +153,6 @@ extension LanReceiverCoordinatorObservation on LanReceiverCoordinator {
     _pairingInviteSubscription = null;
     await _announcedPeerSubscription?.cancel();
     _announcedPeerSubscription = null;
-    await _handshakeSuccessSubscription?.cancel();
-    _handshakeSuccessSubscription = null;
     await _discoveredPeersSubscription?.cancel();
     _discoveredPeersSubscription = null;
   }

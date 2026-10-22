@@ -5,7 +5,7 @@ import 'package:feature_lan_share/feature_lan_share.dart' as lan;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:network_sdk/network_sdk.dart';
+import 'package:realtime_media/realtime_media.dart';
 import 'package:network_transport/network_transport.dart';
 import 'package:ssh_mobile_network_native/ssh_mobile_network_native.dart';
 import 'package:ssh_mobile/app/app_runtime.dart';
@@ -36,23 +36,22 @@ void main() {
     network.realtimeGateway = RuntimeNetworkRealtimeGateway(commandGateway);
   });
 
-  testWidgets('active replacement ignores stale route completion', (
+  testWidgets('disposed host cannot install a late accepted route', (
     tester,
   ) async {
-    final navigatorKey = GlobalKey<NavigatorState>();
     final arbitration = AppScreenSharePeerArbitrationRegistry();
-    final installedOperations = <String>[];
-    final disposedOperations = <String>[];
-    const claimRealtimeIds = <String>[
-      '00112233445566778899aabbccddee11',
-      '00112233445566778899aabbccddee22',
-    ];
+    addTearDown(arbitration.dispose);
+    final visible = ValueNotifier(true);
+    addTearDown(visible.dispose);
+    final gate = Completer<void>();
+    final installed = <String>[];
     var cleanedUp = false;
     Future<void> cleanUp() async {
       if (cleanedUp) return;
       cleanedUp = true;
+      if (!gate.isCompleted) gate.complete();
       await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump();
+      await _settle(tester);
       debugPrint = debugPrintSynchronously;
       await commandGateway.close();
     }
@@ -63,108 +62,188 @@ void main() {
       runtime: runtime,
       commandGateway: commandGateway,
       arbitration: arbitration,
-      navigatorKey: navigatorKey,
+      hostVisible: visible,
       routeBuilder: (arguments) {
-        installedOperations.add(arguments.operationId!);
+        installed.add(arguments.operationId!);
         return _ControlledScreenShareRoute(
           arguments: arguments,
-          onDisposed: (operationId) => disposedOperations.add(operationId!),
+          onDisposed: (_) {},
         );
       },
     );
     _installCommandAutomation(
       commandGateway,
-      claimRealtimeIds: claimRealtimeIds,
-      sharedSessionIds: const <String, String>{
+      claimRealtimeIds: ['00112233445566778899aabbccddee11'],
+      sharedSessionIds: {
         '00112233445566778899aabbccddee11': 'ffeeddccbbaa99887766554433221100',
-        '00112233445566778899aabbccddee22': '11223344556677889900aabbccddeeff',
       },
-      stopRealtimeIds: const <String>[
-        '00112233445566778899aabbccddee11',
-        '00112233445566778899aabbccddee22',
-      ],
+      stopRealtimeIds: ['00112233445566778899aabbccddee11'],
+      claimGate: gate,
     );
-    final discardBaseline = commandGateway.countCommands(
-      'realtime-discard-incoming',
-    );
-    final claimBaseline = commandGateway.countCommands(
-      'realtime-claim-incoming',
-    );
-    final now = DateTime.now().toUtc();
-
     await _emitOffer(
       tester,
       commandGateway,
       realtimeId: '00112233445566778899aabbccddee11',
       sharedSessionInstanceId: 'ffeeddccbbaa99887766554433221100',
-      operationId: 'operation-z',
-      bindingExpiry: now.add(const Duration(seconds: 30)),
-    );
-    await tester.tap(find.text('Accept'));
-    await _settle(tester);
-    expect(
-      commandGateway.countCommands('realtime-claim-incoming') - claimBaseline,
-      1,
-    );
-    expect(installedOperations, <String>['operation-z']);
-
-    // operation-a wins over operation-z for the same initiator. A's route is
-    // popped, but its navigation completion must not touch B's Host owner.
-    await _emitOffer(
-      tester,
-      commandGateway,
-      realtimeId: '00112233445566778899aabbccddee22',
-      sharedSessionInstanceId: '11223344556677889900aabbccddeeff',
       operationId: 'operation-a',
-      bindingExpiry: now.add(const Duration(seconds: 30)),
+      bindingExpiry: DateTime.now().toUtc().add(const Duration(seconds: 30)),
     );
-    await _settle(tester);
-    expect(disposedOperations, contains('operation-z'));
-    expect(find.text('Incoming screen-share request'), findsOneWidget);
-
-    // A worse candidate cannot replace B or invalidate its expiry timer.
-    await _emitOffer(
-      tester,
-      commandGateway,
-      realtimeId: '00112233445566778899aabbccddee33',
-      sharedSessionInstanceId: '223344556677889900aabbccddeeff00',
-      operationId: 'operation-z',
-      bindingExpiry: now.add(const Duration(seconds: 30)),
-    );
-    await _settle(tester);
-    expect(find.text('Incoming screen-share request'), findsOneWidget);
-    expect(
-      commandGateway.countCommands('realtime-discard-incoming') -
-          discardBaseline,
-      1,
-    );
-
     await tester.tap(find.text('Accept'));
     await _settle(tester);
-    expect(
-      commandGateway.countCommands('realtime-claim-incoming') - claimBaseline,
-      2,
-    );
-    expect(installedOperations, <String>['operation-z', 'operation-a']);
+    expect(commandGateway.countCommands('realtime-claim-incoming'), 1);
+    visible.value = false;
+    await tester.pump();
+    gate.complete();
+    await _settle(tester);
+    expect(installed, isEmpty);
+    expect(commandGateway.countCommands('realtime-stop'), 1);
+    expect(arbitration.isBusy, isFalse);
     await cleanUp();
   });
-
   testWidgets(
-    'active replacement stale completion preserves replacement expiry',
+    'busy sharing rejects another peer without claiming or replacing it',
     (tester) async {
-      final navigatorKey = GlobalKey<NavigatorState>();
       final arbitration = AppScreenSharePeerArbitrationRegistry();
-      final disposedOperations = <String>[];
-      const claimRealtimeIds = <String>[
-        '00112233445566778899aabbccddee77',
-        '00112233445566778899aabbccddee88',
-      ];
+      addTearDown(arbitration.dispose);
       var cleanedUp = false;
       Future<void> cleanUp() async {
         if (cleanedUp) return;
         cleanedUp = true;
         await tester.pumpWidget(const SizedBox.shrink());
-        await tester.pump();
+        await _settle(tester);
+        debugPrint = debugPrintSynchronously;
+        await commandGateway.close();
+      }
+
+      addTearDown(cleanUp);
+      await _mountHost(
+        tester: tester,
+        runtime: runtime,
+        commandGateway: commandGateway,
+        arbitration: arbitration,
+      );
+      _installCommandAutomation(
+        commandGateway,
+        claimRealtimeIds: [],
+        sharedSessionIds: {},
+      );
+      arbitration.acquire(
+        remotePeerId: 'another-peer',
+        initiatorPeerId: 'local',
+        operationId: 'live',
+      );
+      expect(
+        arbitration.activate(
+          remotePeerId: 'another-peer',
+          initiatorPeerId: 'local',
+          operationId: 'live',
+        ),
+        isTrue,
+      );
+      await _emitOffer(
+        tester,
+        commandGateway,
+        realtimeId: '00112233445566778899aabbccddee11',
+        sharedSessionInstanceId: 'ffeeddccbbaa99887766554433221100',
+        operationId: 'operation-a',
+        bindingExpiry: DateTime.now().toUtc().add(const Duration(seconds: 30)),
+      );
+      expect(commandGateway.countCommands('realtime-reject-incoming'), 1);
+      expect(commandGateway.countCommands('realtime-claim-incoming'), 0);
+      expect(find.text('Incoming screen-share request'), findsNothing);
+      expect(arbitration.isBusy, isTrue);
+      await cleanUp();
+    },
+  );
+
+  testWidgets(
+    'accepted route rejects earlier invitations without replacement',
+    (tester) async {
+      final arbitration = AppScreenSharePeerArbitrationRegistry();
+      addTearDown(arbitration.dispose);
+      final installed = <AppScreenShareRouteArguments>[];
+      final disposed = <String>[];
+      var cleanedUp = false;
+      Future<void> cleanUp() async {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _settle(tester);
+        debugPrint = debugPrintSynchronously;
+        await commandGateway.close();
+      }
+
+      addTearDown(cleanUp);
+      await _mountHost(
+        tester: tester,
+        runtime: runtime,
+        commandGateway: commandGateway,
+        arbitration: arbitration,
+        routeBuilder: (arguments) {
+          installed.add(arguments);
+          return _ControlledScreenShareRoute(
+            arguments: arguments,
+            onDisposed: (id) => disposed.add(id!),
+          );
+        },
+      );
+      _installCommandAutomation(
+        commandGateway,
+        claimRealtimeIds: ['00112233445566778899aabbccddee11'],
+        sharedSessionIds: {
+          '00112233445566778899aabbccddee11':
+              'ffeeddccbbaa99887766554433221100',
+        },
+        stopRealtimeIds: ['00112233445566778899aabbccddee11'],
+      );
+      final now = DateTime.now().toUtc();
+      await _emitOffer(
+        tester,
+        commandGateway,
+        realtimeId: '00112233445566778899aabbccddee11',
+        sharedSessionInstanceId: 'ffeeddccbbaa99887766554433221100',
+        operationId: 'operation-z',
+        bindingExpiry: now.add(const Duration(seconds: 30)),
+      );
+      await tester.tap(find.text('CPU mode'));
+      await tester.pump();
+      await tester.tap(find.text('Accept'));
+      await _settle(tester);
+      expect(arbitration.isBusy, isTrue);
+      await _emitOffer(
+        tester,
+        commandGateway,
+        realtimeId: '00112233445566778899aabbccddee22',
+        sharedSessionInstanceId: '11223344556677889900aabbccddeeff',
+        operationId: 'operation-a',
+        bindingExpiry: now.add(const Duration(seconds: 30)),
+      );
+      expect(commandGateway.countCommands('realtime-reject-incoming'), 1);
+      expect(commandGateway.countCommands('realtime-claim-incoming'), 1);
+      expect(find.text('Incoming screen-share request'), findsNothing);
+      expect(installed.map((arguments) => arguments.operationId), [
+        'operation-z',
+      ]);
+      expect(installed.single.codecMode, RealtimeMediaCodecMode.cpu);
+      expect(disposed, isEmpty);
+      expect(arbitration.isBusy, isTrue);
+      await cleanUp();
+    },
+  );
+
+  testWidgets(
+    'completed route frees admission and the next invitation still expires',
+    (tester) async {
+      final navigatorKey = GlobalKey<NavigatorState>();
+      final arbitration = AppScreenSharePeerArbitrationRegistry();
+      addTearDown(arbitration.dispose);
+      final disposed = <String>[];
+      var cleanedUp = false;
+      Future<void> cleanUp() async {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _settle(tester);
         debugPrint = debugPrintSynchronously;
         await commandGateway.close();
       }
@@ -178,80 +257,50 @@ void main() {
         navigatorKey: navigatorKey,
         routeBuilder: (arguments) => _ControlledScreenShareRoute(
           arguments: arguments,
-          onDisposed: (operationId) => disposedOperations.add(operationId!),
+          onDisposed: (id) => disposed.add(id!),
         ),
       );
       _installCommandAutomation(
         commandGateway,
-        claimRealtimeIds: claimRealtimeIds,
-        sharedSessionIds: const <String, String>{
+        claimRealtimeIds: ['00112233445566778899aabbccddee77'],
+        sharedSessionIds: {
           '00112233445566778899aabbccddee77':
               'ffeeddccbbaa99887766554433221177',
-          '00112233445566778899aabbccddee88':
-              '11223344556677889900aabbccddeeff',
         },
-        stopRealtimeIds: claimRealtimeIds,
+        stopRealtimeIds: ['00112233445566778899aabbccddee77'],
       );
-      final discardBaseline = commandGateway.countCommands(
-        'realtime-discard-incoming',
-      );
-      final claimBaseline = commandGateway.countCommands(
-        'realtime-claim-incoming',
-      );
-      final now = DateTime.now().toUtc();
-
       await _emitOffer(
         tester,
         commandGateway,
         realtimeId: '00112233445566778899aabbccddee77',
         sharedSessionInstanceId: 'ffeeddccbbaa99887766554433221177',
         operationId: 'operation-z',
-        bindingExpiry: now.add(const Duration(seconds: 30)),
+        bindingExpiry: DateTime.now().toUtc().add(const Duration(seconds: 30)),
       );
       await tester.tap(find.text('Accept'));
       await _settle(tester);
-      expect(
-        commandGateway.countCommands('realtime-claim-incoming') - claimBaseline,
-        1,
-      );
-
-      // B wins while A's route is active. Its binding expiry is deliberately
-      // earlier than the request expiry so the Host timer owns the assertion.
+      expect(arbitration.isBusy, isTrue);
+      navigatorKey.currentState!.pop();
+      await _settle(tester);
+      expect(disposed, contains('operation-z'));
+      expect(arbitration.isBusy, isFalse);
       await _emitOffer(
         tester,
         commandGateway,
         realtimeId: '00112233445566778899aabbccddee88',
         sharedSessionInstanceId: '11223344556677889900aabbccddeeff',
         operationId: 'operation-a',
-        bindingExpiry: now.add(const Duration(seconds: 1)),
+        bindingExpiry: DateTime.now().toUtc().add(const Duration(seconds: 1)),
       );
-      await _settle(tester);
-      expect(disposedOperations, contains('operation-z'));
       expect(find.text('Incoming screen-share request'), findsOneWidget);
-      expect(
-        commandGateway.countCommands('realtime-discard-incoming') -
-            discardBaseline,
-        0,
-      );
-
-      // Let B's replacement timer fire after A's navigation Future has
-      // completed. A's stale completion must not cancel B's timer.
       await tester.pump(const Duration(milliseconds: 1100));
       await _settle(tester);
       expect(find.text('Incoming screen-share request'), findsNothing);
-      expect(
-        commandGateway.countCommands('realtime-discard-incoming') -
-            discardBaseline,
-        1,
-      );
-      expect(
-        commandGateway.countCommands('realtime-claim-incoming') - claimBaseline,
-        1,
-      );
+      expect(commandGateway.countCommands('realtime-discard-incoming'), 1);
+      expect(commandGateway.countCommands('realtime-claim-incoming'), 1);
       await cleanUp();
     },
   );
-
   testWidgets('accept resolution is not duplicated by expiry', (tester) async {
     final arbitration = AppScreenSharePeerArbitrationRegistry();
     final claimRelease = Completer<void>();
@@ -262,7 +311,7 @@ void main() {
       if (cleanedUp) return;
       cleanedUp = true;
       await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump();
+      await _settle(tester);
       debugPrint = debugPrintSynchronously;
       await commandGateway.close();
     }
@@ -341,7 +390,7 @@ void main() {
       if (cleanedUp) return;
       cleanedUp = true;
       await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump();
+      await _settle(tester);
       debugPrint = debugPrintSynchronously;
       await commandGateway.close();
     }
@@ -411,7 +460,7 @@ void main() {
         if (cleanedUp) return;
         cleanedUp = true;
         await tester.pumpWidget(const SizedBox.shrink());
-        await tester.pump();
+        await _settle(tester);
         debugPrint = debugPrintSynchronously;
         await commandGateway.close();
       }
@@ -459,6 +508,7 @@ Future<void> _mountHost({
   required AppScreenSharePeerArbitrationRegistry arbitration,
   GlobalKey<NavigatorState>? navigatorKey,
   Widget Function(AppScreenShareRouteArguments arguments)? routeBuilder,
+  ValueListenable<bool>? hostVisible,
 }) async {
   final key = navigatorKey ?? GlobalKey<NavigatorState>();
   await tester.pumpWidget(
@@ -474,29 +524,25 @@ Future<void> _mountHost({
                 return routeBuilder(arguments);
               },
             },
-      home: AppScreenShareIncomingRequestHost(
-        runtime: runtime,
-        navigatorKey: key,
-        screenSharePort: const _TestScreenSharePort(),
-        arbitration: arbitration,
-        child: const ColoredBox(color: Colors.white),
+      home: ValueListenableBuilder<bool>(
+        valueListenable: hostVisible ?? const AlwaysStoppedAnimation(true),
+        builder: (context, visible, _) => visible
+            ? AppScreenShareIncomingRequestHost(
+                runtime: runtime,
+                navigatorKey: key,
+                screenSharePort: const _TestScreenSharePort(),
+                arbitration: arbitration,
+                child: const ColoredBox(color: Colors.white),
+              )
+            : const SizedBox.shrink(),
       ),
     ),
   );
-  final now = DateTime.now().toUtc();
-  final warmupRealtimeId = '00112233445566778899aabbccddee00';
-  await runtime.realtimeClient.discardIncomingOffer(
-    _testOffer(
-      realtimeId: warmupRealtimeId,
-      sharedSessionInstanceId: 'ffeeddccbbaa99887766554433221100',
-      operationId: 'host-test-warmup-operation',
-      offerId: 'host-test-warmup',
-      claimToken: 'host-test-warmup-token',
-      bindingExpiry: now.add(const Duration(seconds: 5)),
-    ),
-  );
+  // Simulate first LAN activation, without a synthetic Realtime warmup command.
+  // Real identity initialization stays outside WidgetTest's fake-async zone.
+  await tester.runAsync(() => runtime.networkRuntime.openCommandGateway());
   await _settle(tester);
-  expect(commandGateway.commands, isNotEmpty);
+  expect(commandGateway.commands, isEmpty);
 }
 
 Future<void> _emitOffer(
@@ -580,35 +626,6 @@ void _installCommandAutomation(
   };
 }
 
-RealtimeIncomingSessionOffer _testOffer({
-  required String realtimeId,
-  required String sharedSessionInstanceId,
-  required String operationId,
-  required DateTime bindingExpiry,
-  required String offerId,
-  required String claimToken,
-}) {
-  final now = DateTime.now().toUtc();
-  return RealtimeIncomingSessionOffer(
-    offerId: offerId,
-    claimToken: claimToken,
-    realtimeId: realtimeId,
-    authenticatedPeerId: 'peer-a',
-    sharedSessionInstanceId: sharedSessionInstanceId,
-    bindingExpiresAt: bindingExpiry,
-    request: RealtimeConsent(
-      operationId: operationId,
-      realtimeId: realtimeId,
-      sharedSessionInstanceId: sharedSessionInstanceId,
-      issuedAt: now,
-      expiresAt: now.add(const Duration(seconds: 2)),
-      decision: RealtimeConsentDecision.request,
-      senderPeerId: 'peer-a',
-      actionRevision: 1,
-    ),
-  );
-}
-
 Uint8List _realtimeStateEvent({
   required String realtimeId,
   required String sharedSessionInstanceId,
@@ -647,7 +664,15 @@ final class _ControlledScreenShareRouteState
   void dispose() {
     widget.onDisposed(widget.arguments.operationId);
     final lease = widget.arguments.sessionLease;
-    if (lease != null) unawaited(lease.stopAndRelease());
+    unawaited(() async {
+      await lease?.stopAndRelease();
+      final arguments = widget.arguments;
+      arguments.arbitration?.release(
+        remotePeerId: arguments.session.peerId,
+        initiatorPeerId: arguments.initialIncomingRequest!.senderPeerId,
+        operationId: arguments.operationId!,
+      );
+    }());
     super.dispose();
   }
 

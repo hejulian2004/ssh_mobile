@@ -49,3 +49,35 @@ final class AppScreenShareSessionLease {
     }
   }
 }
+
+/// Waits for native identity without requiring media transport to connect.
+Future<void> waitForScreenShareSessionIdentity(
+  RealtimeSession session, {
+  Future<void>? cancelled,
+}) async {
+  bool ready(RealtimeSnapshot? snapshot) {
+    final state = snapshot?.state ?? session.state;
+    return (state == RealtimeSessionState.negotiating ||
+            state == RealtimeSessionState.connected) &&
+        (snapshot?.generation ?? session.generation) != null &&
+        (snapshot?.sharedSessionInstanceId ??
+                session.sharedSessionInstanceId) !=
+            null;
+  }
+
+  if (ready(session.currentSnapshot)) return;
+  final completer = Completer<void>();
+  late final StreamSubscription<RealtimeSnapshot> subscription;
+  subscription = session.snapshots.listen((snapshot) {
+    if (!completer.isCompleted && ready(snapshot)) completer.complete();
+  });
+  try {
+    if (ready(session.currentSnapshot)) return;
+    await Future.any<void>([
+      completer.future,
+      ?cancelled,
+    ]).timeout(const Duration(seconds: 30));
+  } finally {
+    await subscription.cancel();
+  }
+}
