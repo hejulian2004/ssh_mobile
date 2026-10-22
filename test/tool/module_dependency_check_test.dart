@@ -23,6 +23,21 @@ void _testCurrentRepositoryPasses() {
     ),
     '应保留 AI 到 Playbook 公共能力边界的显式依赖。',
   );
+  _expect(
+    !report.edges.any(
+      (edge) =>
+          edge.source.name == 'feature_lan_share' &&
+          edge.target.name == 'network_transport',
+    ),
+    '局域网业务包不能直接依赖 network_transport。',
+  );
+  final sftp = report.packages.singleWhere(
+    (package) => package.name == 'feature_sftp',
+  );
+  _expect(
+    !sftp.productionDependencies.contains('dartssh2'),
+    'SFTP 业务包不能直接依赖 dartssh2。',
+  );
 }
 
 void _testForbiddenDependenciesAndCyclesAreReported() {
@@ -54,6 +69,51 @@ void _testForbiddenDependenciesAndCyclesAreReported() {
       '应检查 Infrastructure 反向依赖 Feature。',
     );
     _expect(rules.contains('dependency-cycle'), '应检查依赖循环。');
+    _expect(rules.contains('business-forward-dependency'), '未登记的业务包依赖应视为跳跃。');
+
+    final forwardRoot = Directory.systemTemp.createTempSync(
+      'ssh_mobile_forward_',
+    );
+    try {
+      _writeRootPubspec(forwardRoot, <String>[
+        'packages/features/feature_lan_share',
+        'packages/infrastructure/network_transport',
+        'packages/infrastructure/network_sdk',
+      ]);
+      _writePackage(
+        forwardRoot,
+        'packages/features/feature_lan_share',
+        'feature_lan_share',
+        <String>['network_sdk', 'network_transport', 'dartssh2'],
+      );
+      _writePackage(
+        forwardRoot,
+        'packages/infrastructure/network_transport',
+        'network_transport',
+        <String>[],
+      );
+      _writePackage(
+        forwardRoot,
+        'packages/infrastructure/network_sdk',
+        'network_sdk',
+        <String>[],
+      );
+      final forwardReport = ModuleDependencyAuditor(
+        repositoryRoot: forwardRoot,
+      ).audit();
+      final skipped = forwardReport.violations
+          .where((item) => item.rule == 'business-forward-dependency')
+          .map((item) => item.target)
+          .toSet();
+      _expect(
+        skipped.contains('network_transport'),
+        '应拒绝局域网包跳到 network_transport。',
+      );
+      _expect(skipped.contains('dartssh2'), '应拒绝业务包跳到 dartssh2。');
+      _expect(!skipped.contains('network_sdk'), '已登记的 network_sdk 前向依赖应保留。');
+    } finally {
+      forwardRoot.deleteSync(recursive: true);
+    }
   } finally {
     root.deleteSync(recursive: true);
   }

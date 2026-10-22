@@ -10,7 +10,7 @@ import 'package:network_sdk/network_sdk.dart';
 import '../../../domain/lan_relay_ports.dart';
 import 'lan_relay_state.dart';
 
-export 'lan_relay_state.dart' show LanRelayStatus;
+export 'lan_relay_state.dart' show LanRelayLinkState, LanRelayStatus;
 
 /// 创建一个 Relay 重连计时器。
 typedef LanRelayTimerFactory =

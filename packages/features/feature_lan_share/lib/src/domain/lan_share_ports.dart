@@ -342,6 +342,22 @@ abstract interface class LanShareNetworkAccessPort {
   Future<NetworkFacade?> borrowFacade();
 }
 
+/// App-owned native runtime borrowed by LAN.
+///
+/// The Feature asks for the two capabilities it is allowed to prepare. The
+/// App adapter maps them onto the process `NetworkRuntime`. This port does
+/// not expose QUIC, sockets, or native handles.
+abstract interface class LanShareNetworkRuntimePort {
+  /// Prepare the shared native runtime handle.
+  Future<void> ensureRuntime();
+
+  /// Prepare the WebSocket Relay data plane.
+  Future<void> ensureWebSocketRelay();
+
+  /// Confirmed local port of the already configured runtime, when known.
+  int? get boundLocalPort;
+}
+
 /// Narrow App-owned capability for peer-scoped screen-share actions.
 ///
 /// The LAN Feature does not construct Realtime sessions or import the

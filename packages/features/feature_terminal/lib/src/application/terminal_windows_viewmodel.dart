@@ -5,11 +5,14 @@
 
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
+import 'package:provider/provider.dart';
 import 'package:ssh_core/ssh_core.dart';
 
+import '../domain/terminal_models.dart';
 import '../domain/terminal_ports.dart';
+import 'terminal_window_snapshot.dart';
 
 /// 终端窗口列表和批量选择状态。
 final class TerminalWindowsViewModel extends ChangeNotifier {
@@ -20,6 +23,17 @@ final class TerminalWindowsViewModel extends ChangeNotifier {
   }) {
     _changesSubscription = _terminal.changes.listen((_) => _onServiceChanged());
     _settings.addListener(_onSettingsChanged);
+  }
+
+  /// 从 Scope 中已注入的 SSH Manager 创建窗口 ViewModel。
+  factory TerminalWindowsViewModel.fromContext(
+    BuildContext context, {
+    required TerminalSettingsPort settings,
+  }) {
+    return TerminalWindowsViewModel(
+      sshSessionManager: context.read<SshSessionManager>(),
+      settings: settings,
+    );
   }
 
   final SshSessionManager _sshSessionManager;
@@ -56,13 +70,23 @@ final class TerminalWindowsViewModel extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  /// 当前过滤后的会话快照。
-  List<SshTerminalSession> get sessions => _terminal.sessions
-      .where(
-        (session) =>
-            connectionId == null || session.connectionId == connectionId,
-      )
-      .toList(growable: false);
+  /// 当前过滤后的窗口快照。
+  List<TerminalWindowSnapshot> get sessions => [
+    for (final session in _terminal.sessions)
+      if (connectionId == null || session.connectionId == connectionId)
+        terminalWindowSnapshotOf(session),
+  ];
+
+  /// 最近一次 Capability 级错误。
+  String? get capabilityError =>
+      _sshSessionManager.terminalCapability?.errorMessage;
+
+  /// 按会话 ID 查找窗口，不受当前连接过滤影响。
+  TerminalWindowSnapshot? windowById(String id) {
+    final session = _terminal.getSession(id);
+    if (session == null) return null;
+    return terminalWindowSnapshotOf(session);
+  }
 
   Set<String> get selectedSessionIds => _selectedSessionIds;
   bool get selectionMode => _selectionMode;

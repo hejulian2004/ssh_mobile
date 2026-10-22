@@ -14,4 +14,5 @@ export 'src/presentation/views/system_admin_screen.dart'
         PerformanceMonitorService,
         PerformanceMonitorViewModel;
 export 'src/presentation/system_power_confirm_flow.dart';
-export 'src/presentation/viewmodels/system_admin_viewmodel.dart';
+export 'src/presentation/viewmodels/system_admin_viewmodel.dart'
+    hide showSshHostKeyTrustDialog;

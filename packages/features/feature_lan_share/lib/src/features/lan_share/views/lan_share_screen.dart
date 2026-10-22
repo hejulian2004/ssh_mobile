@@ -11,10 +11,9 @@ import 'package:share_handler/share_handler.dart';
 import '../../../domain/lan_share_ports.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:feature_lan_share/src/features/lan_share/viewmodels/lan_share_viewmodel.dart';
+import 'package:feature_lan_share/src/features/lan_share/viewmodels/lan_ui_outcome.dart';
 import 'package:feature_lan_share/src/services/lan_share/lan_share_models.dart';
-import 'package:feature_lan_share/src/services/lan_share/lan_discovery_service.dart';
 import 'package:feature_lan_share/src/services/lan_share/lan_web_share_url.dart';
-import 'package:network_sdk/network_sdk.dart';
 import '../lan_share_feature_scope.dart';
 import 'lan_chat_screen.dart';
 import 'lan_qr_scanner_screen.dart';
@@ -45,22 +44,27 @@ class _LanShareScreenState extends State<LanShareScreen>
   late Future<Map<String, String>> _localIpsFuture;
   bool _isRefreshingIps = false;
   bool _scanningInitialized = false;
+  bool _ipsInitialized = false;
   void _refreshView(VoidCallback change) => setState(change);
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _localIpsFuture = LanDiscoveryService.getLocalIpInterfaces();
+    _localIpsFuture = Future<Map<String, String>>.value(const {});
     unawaited(_initShareHandler());
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final vm = context.read<LanShareViewModel>();
+    if (!_ipsInitialized) {
+      _ipsInitialized = true;
+      _localIpsFuture = vm.localIpInterfaces();
+    }
     if (!_scanningInitialized) {
       _scanningInitialized = true;
-      final vm = context.read<LanShareViewModel>();
       if (!vm.isScanning) {
         unawaited(vm.startScanning());
       }
@@ -363,7 +367,7 @@ class _LanShareScreenState extends State<LanShareScreen>
     onRefresh: () async {
       _refreshView(() {
         _isRefreshingIps = true;
-        _localIpsFuture = LanDiscoveryService.getLocalIpInterfaces();
+        _localIpsFuture = vm.localIpInterfaces();
       });
       await _localIpsFuture;
       if (mounted) _refreshView(() => _isRefreshingIps = false);

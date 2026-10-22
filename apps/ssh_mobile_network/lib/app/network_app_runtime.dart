@@ -19,6 +19,24 @@ import '../lan/network_lan_protection.dart';
 import '../lan/network_lan_settings.dart';
 import '../lan/network_secret_store.dart';
 
+/// Maps LAN runtime requests onto this App's [NetworkRuntime].
+final class _NetworkLanRuntimeAdapter implements LanShareNetworkRuntimePort {
+  const _NetworkLanRuntimeAdapter(this._runtime);
+
+  final NetworkRuntime _runtime;
+
+  @override
+  Future<void> ensureRuntime() =>
+      _runtime.ensureCapability(NetworkCapability.runtime);
+
+  @override
+  Future<void> ensureWebSocketRelay() =>
+      _runtime.ensureCapability(NetworkCapability.webSocketRelay);
+
+  @override
+  int? get boundLocalPort => _runtime.diagnostics.boundLocalPort;
+}
+
 /// 网络传输页的资源 Owner。
 final class NetworkTransportAppRuntime implements Disposable {
   NetworkTransportAppRuntime._({
@@ -134,7 +152,7 @@ final class NetworkTransportAppRuntime implements Disposable {
         LanShareNetworkAccessPort: networkAccess,
         LanShareLocalAddressSelectionPort: localAddressSelection,
         BootstrapClient: bootstrap,
-        NetworkRuntime: networkRuntime,
+        LanShareNetworkRuntimePort: _NetworkLanRuntimeAdapter(networkRuntime),
       }),
     );
     await module.initialize();

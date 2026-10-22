@@ -373,6 +373,10 @@ class LanShareViewModel extends ChangeNotifier {
   /// 返回可选的 WebShare IP 覆盖值。
   String? get customIp => discoveryService.customIp;
 
+  /// 本机可用于发现和 WebShare 的地址。页面不直接调用发现服务。
+  Future<Map<String, String>> localIpInterfaces() =>
+      LanDiscoveryService.getLocalIpInterfaces();
+
   /// 当前 WebShare 本地地址选择状态，供 Feature UI 显示本地化原因。
   LanShareLocalAddressSelectionResult? get webShareAddressSelectionResult =>
       discoveryService.webShareAddressSelectionResult;

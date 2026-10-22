@@ -1,4 +1,4 @@
-最新更新时间：2026-10-12
+最新更新时间：2026-10-22
 
 # feature_lan_share
 
@@ -26,10 +26,11 @@ control HTTP、WSS Relay enrollment/编排、Web Share、传输历史和非秘�
 
 ## 边界
 
-- 只通过 `app_core`、`app_ui`、`network_transport`、`network_sdk` 及本包定义的
+- 只通过 `app_core`、`app_ui`、`network_sdk` 及本包定义的
   Port 使用 App 设置、日志、数据保护、网络和 Relay 能力；`network_sdk` 只提供
   Flutter 客户端契约和 canonical 网络模型，不拥有传输实现；本 Feature 不再维护
-  本地网络模型桥接。
+  本地网络模型桥接。页面只依赖本包 ViewModel：发现地址和传输结果由应用层转成
+  `LanUiOutcome`，页面不导入 `network_sdk` 或 `LanDiscoveryService`。
 - `LAN Control Protocol V2` 与 Native `Network Protocol V2` 版本域独立。LAN Control
   不得推动 Native wire schema 升级或恢复旧 V1/V2 双栈、旧 pairing migration、
   compatibility adapter 或 HTTPS binary fallback。
@@ -143,7 +144,8 @@ Control 只暴露 V2 pairing/upload contract。
   `LanWebShareRequestHandler` 及其 DTO/回调契约，不携带 Flutter 服务或页面。
   worker 只验证真实 TLS listener 与 production route handler；Native Network V2
   transfer 由独立测试负责。
-- 依赖：`app_core`、`app_ui`、`network_transport`、`network_sdk` 及 LAN 直接插件。
+- 依赖：`app_core`、`app_ui`、`network_sdk` 及 LAN 直接插件。运行时准备走
+  `LanShareNetworkRuntimePort`，不依赖 `network_transport`。
 - 数据库：`LanShareModule` 独占 `lan_share.db`，只存历史和非秘密配对 metadata。
 - 生命周期与资源 Owner：Module 负责数据库、历史 Repository、Receiver、TrustStore
   和 `LanNativePeerRegistry`；Receiver 内部 Relay Owner 负责 Relay Timer、credential
@@ -151,9 +153,10 @@ Control 只暴露 V2 pairing/upload contract。
   AppRuntime/NetworkRuntime 负责 NetworkIdentity、native handle 和共享
   NetworkFacade。Feature 只能释放自己的订阅、HTTP/Discovery/Transfer 资源和
   Session 使用状态，不能停止或释放 App Scope 网络资源。
-  Receiver 初始化只请求 `NetworkCapability.runtime`；App Shell adapter 将
-  Runtime-owned `NetworkCommandGateway`（因此不隐式要求 QUIC）适配为
-  `network_sdk.SessionClient`，并将控制面请求执行器组装为
+  Receiver 初始化只调用 `LanShareNetworkRuntimePort.ensureRuntime`。App Shell
+  adapter 把它映射为 `NetworkCapability.runtime`，把 Runtime-owned
+  `NetworkCommandGateway`（因此不隐式要求 QUIC）适配为
+  `network_sdk.SessionClient`，并把控制面请求执行器组装为
   `network_sdk.BootstrapClient`；Feature 只能释放自己的订阅和 Session 使用状态。
   最终释放先等待 Discovery/WebShare 停止，再等待 Transfer 关闭全部
   socket/server 和事件流；ViewModel 在释放前还会收敛 keep-alive、历史迁移和

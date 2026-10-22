@@ -32,11 +32,16 @@ void _registerReceiverRelayTests() {
       expect(result, isA<NetworkSuccess<void>>());
       expect(
         networkRuntime.requestedCapabilities,
-        contains(NetworkCapability.webSocketRelay),
+        contains(LanShareRuntimeRequest.webSocketRelay),
       );
       expect(
         networkRuntime.requestedCapabilities,
-        isNot(contains(NetworkCapability.quic)),
+        everyElement(
+          isIn(<LanShareRuntimeRequest>[
+            LanShareRuntimeRequest.runtime,
+            LanShareRuntimeRequest.webSocketRelay,
+          ]),
+        ),
       );
       expect(networkService.configureRelayCalls, 1);
 
@@ -82,7 +87,7 @@ void _registerReceiverRelayTests() {
       );
       expect(
         networkRuntime.requestedCapabilities,
-        contains(NetworkCapability.webSocketRelay),
+        contains(LanShareRuntimeRequest.webSocketRelay),
       );
       expect(networkService.configureRelayCalls, 0);
       expect(networkService.disconnectRelayCalls, 0);

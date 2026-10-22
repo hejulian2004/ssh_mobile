@@ -1,4 +1,4 @@
-最新更新时间：2026-10-09
+最新更新时间：2026-10-22
 
 # ssh_mobile_network
 
@@ -14,9 +14,9 @@
 
 - `NetworkTransportAppRuntime` 持有 Logger、`NetworkRuntime`、LAN 设置、身份、
   数据保护和 Bootstrap 客户端；
-- `LanShareModule` 持有 `lan_share.db`。生产启动启用接收器，接收器只会确保
-  `NetworkCapability.runtime`，不会从本 Shell 启用 QUIC、WebSocket Relay 或
-  Realtime，也不会调用 `NetworkFacade.start`；
+- `LanShareModule` 持有 `lan_share.db`。生产启动启用接收器。本 Shell 把
+  `LanShareNetworkRuntimePort.ensureRuntime` 映射为 `NetworkCapability.runtime`，
+  不从这里启用 QUIC、WebSocket Relay 或 Realtime，也不调用 `NetworkFacade.start`；
 - `NetworkTransportAppState` 是可等待、幂等的 Widget Owner。退出时先卸载页面，
   再释放 Module、设置、NetworkRuntime 和 Logger。单项失败仍继续，并重新抛出
   第一个错误；
@@ -38,7 +38,8 @@ flutter test
 
 下列入口会打开平台安全存储或平台数据库，widget 测试改走 `open`。
 页面测试在 App 外提供 Feature 已支持的 `LanShareViewModel`，因此不会启动真实
-mDNS/UDP。生产 `create()` 仍启用接收器，并且只确保 `NetworkCapability.runtime`。
+mDNS/UDP。生产 `create()` 仍启用接收器。本 Shell 把
+`LanShareNetworkRuntimePort.ensureRuntime` 映射为 `NetworkCapability.runtime`。
 
 - `lib/main.dart`：委托给 `NetworkAppBootstrap.run`，用 `coverage:ignore` 标记。
 - `lib/app/network_app_bootstrap.dart`：绑定 Flutter 并 `runApp`。

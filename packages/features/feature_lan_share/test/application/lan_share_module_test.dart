@@ -11,7 +11,6 @@ import 'package:feature_lan_share/feature_lan_share.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_sdk/network_sdk.dart';
-import 'package:network_transport/network_transport.dart';
 
 void main() {
   test(
@@ -36,7 +35,7 @@ void main() {
           LanShareNetworkAccessPort: networkAccess,
           LanShareLocalAddressSelectionPort: addressSelector,
           BootstrapClient: _FakeBootstrapClient(),
-          NetworkRuntime: networkRuntime,
+          LanShareNetworkRuntimePort: networkRuntime,
           LanShareDiscoveryBridgePort: bridge,
         }),
       );
@@ -231,40 +230,19 @@ final class _FakeNetworkAccessPort implements LanShareNetworkAccessPort {
   }
 }
 
-final class _FakeNetworkRuntime implements NetworkRuntime {
+final class _FakeNetworkRuntime implements LanShareNetworkRuntimePort {
   int ensureCalls = 0;
-  bool disposed = false;
 
   @override
-  NetworkRuntimeState get state =>
-      disposed ? NetworkRuntimeState.disposed : NetworkRuntimeState.idle;
+  int? get boundLocalPort => null;
 
   @override
-  NetworkRuntimeDiagnostics get diagnostics => NetworkRuntimeDiagnostics(
-    state: state,
-    activeConnections: 0,
-    nativeHandles: 0,
-    readyCapabilities: const <NetworkCapability>[],
-  );
-
-  @override
-  Future<void> ensureCapability(NetworkCapability capability) async {
+  Future<void> ensureRuntime() async {
     ensureCalls++;
   }
 
   @override
-  Future<NetworkCommandGateway> openCommandGateway() async =>
-      throw UnsupportedError('fake runtime has no command gateway');
-
-  @override
-  Future<NetworkRealtimeGateway> openRealtimeGateway() async =>
-      throw UnsupportedError('fake runtime has no realtime gateway');
-
-  @override
-  bool isCapabilityReady(NetworkCapability capability) => false;
-
-  @override
-  Future<void> dispose() async {
-    disposed = true;
+  Future<void> ensureWebSocketRelay() async {
+    ensureCalls++;
   }
 }

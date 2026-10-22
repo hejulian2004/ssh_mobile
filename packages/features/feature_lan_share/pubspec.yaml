@@ -14,8 +14,6 @@ dependencies:
     path: ../../core/app_core
   app_ui:
     path: ../../core/app_ui
-  network_transport:
-    path: ../../infrastructure/network_transport
   network_sdk:
     path: ../../infrastructure/network_sdk
   basic_utils: ^5.8.2

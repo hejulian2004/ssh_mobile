@@ -1,9 +1,11 @@
-最新更新时间：2026-08-30
+最新更新时间：2026-10-22
 
 # feature_terminal 维护约束
 
 - Owns terminal page/interactive VM, history model, and `terminal.db`.
-  SSH comes from injected `ssh_core.SshSessionManager`; never create
+  SSH comes from injected `ssh_core.SshSessionManager` into
+  `TerminalFeatureScope` and the ViewModel. Presentation reads only that
+  ViewModel and does not import `ssh_core`. Never create
   `SshService`/`SshSessionManagerImpl`/a global connection owner. Public API is
   only `lib/feature_terminal.dart`; text/settings/commands/connection/logs arrive through
   Ports. `TerminalFeatureScope` owns Provider composition; App/Terminal-only

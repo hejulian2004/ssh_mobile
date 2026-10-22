@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:ssh_core/ssh_core.dart';
 
 import 'package:app_ui/app_ui.dart';
 
 import '../application/terminal_windows_viewmodel.dart';
+import '../domain/terminal_models.dart';
 import '../domain/terminal_ports.dart';
 import '../domain/terminal_strings.dart';
 
@@ -48,8 +48,8 @@ class _TerminalWindowsPageState extends State<TerminalWindowsPage> {
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider<TerminalWindowsViewModel>(
-      create: (context) => TerminalWindowsViewModel(
-        sshSessionManager: context.read<SshSessionManager>(),
+      create: (context) => TerminalWindowsViewModel.fromContext(
+        context,
         settings: context.read<TerminalSettingsPort>(),
       )..connectionId = widget.connectionId,
       child: Consumer<TerminalWindowsViewModel>(
@@ -85,7 +85,7 @@ class _TerminalServerGroup {
   });
 
   final String connectionName;
-  final List<SshTerminalSession> sessions;
+  final List<TerminalWindowSnapshot> sessions;
 }
 
 class _MetaChip extends StatelessWidget {

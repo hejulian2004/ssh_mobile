@@ -7,9 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../domain/lan_share_ports.dart';
-import '../../../services/lan_share/lan_share_models.dart';
-import 'package:network_sdk/network_sdk.dart';
 import '../services/lan_receiver_coordinator.dart';
+import '../viewmodels/lan_ui_outcome.dart';
 
 /// UI state for the incoming transfer approval dialog.
 enum IncomingApprovalUiState {
@@ -37,7 +36,7 @@ class NetworkIncomingTransferHost extends StatefulWidget {
 class _NetworkIncomingTransferHostState
     extends State<NetworkIncomingTransferHost> {
   final List<IncomingApprovalRequest> _pending = [];
-  StreamSubscription<IncomingTransferOffer>? _nativeSubscription;
+  StreamSubscription<LanPageIncomingOffer>? _nativeSubscription;
   bool _showingDialog = false;
 
   /// 订阅协调器的类型化传入申请流。
@@ -46,9 +45,7 @@ class _NetworkIncomingTransferHostState
     super.didChangeDependencies();
     if (_nativeSubscription != null) return;
     final coordinator = context.read<LanReceiverCoordinator>();
-    _nativeSubscription = coordinator.nativeIncomingTransferOffers.listen((
-      offer,
-    ) {
+    _nativeSubscription = coordinator.pageIncomingOffers.listen((offer) {
       _handleRequest(
         IncomingApprovalRequest(
           sessionId: offer.transferId,
@@ -56,8 +53,8 @@ class _NetworkIncomingTransferHostState
           fileName: offer.fileName,
           totalBytes: offer.fileSize,
           expiresAt: DateTime.now().add(coordinator.incomingOfferTimeout),
-          accept: () => coordinator.acceptNativeIncomingTransfer(offer),
-          reject: () => coordinator.rejectNativeIncomingTransfer(offer),
+          accept: offer.accept,
+          reject: offer.reject,
         ),
       );
     });
@@ -106,10 +103,11 @@ class _NetworkIncomingTransferHostState
     final logger = context.read<LanShareLoggerPort>();
     try {
       final result = await request.reject();
-      if (result is NetworkFailure<void>) {
+      final failure = result.failure;
+      if (failure != null) {
         logger.warning(
           'Expired network offer rejection returned failure',
-          details: result.error.toString(),
+          details: failure.detail,
         );
       }
     } on Object catch (error, stackTrace) {
@@ -192,25 +190,25 @@ class _IncomingApprovalDialogState extends State<IncomingApprovalDialog> {
     try {
       final result = await widget.request.accept();
       if (!mounted) return;
-      if (result is NetworkSuccess<void>) {
+      if (result.succeeded) {
         Navigator.of(context).pop();
         return;
       }
 
-      final failure = result as NetworkFailure<void>;
+      final failure = result.failure!;
       final isExpiredNow = widget.request.isExpired || _expired;
       if (isExpiredNow) {
         await _reject(isTimeout: true);
-      } else if (isRetryableNetworkError(failure.error.code)) {
+      } else if (failure.retryable) {
         setState(() {
           _state = IncomingApprovalUiState.retryableFailure;
-          _errorMessage = failure.error.message;
+          _errorMessage = failure.message;
         });
       } else {
         final messenger = ScaffoldMessenger.of(context);
         final strings = context.read<LanShareSettingsPort>().strings;
         Navigator.of(context).pop();
-        _showTerminalFailureSnackBar(messenger, strings, failure.error);
+        _showTerminalFailureSnackBar(messenger, strings, failure);
       }
     } on Object catch (error, stackTrace) {
       logger.warning(
@@ -240,14 +238,15 @@ class _IncomingApprovalDialogState extends State<IncomingApprovalDialog> {
     try {
       final result = await widget.request.reject();
       if (!mounted) return;
-      if (result is NetworkFailure<void>) {
+      final failure = result.failure;
+      if (failure != null) {
         logger.warning(
           'Incoming transfer rejection returned failure',
-          details: result.error.toString(),
+          details: failure.detail,
         );
         setState(() {
           _state = IncomingApprovalUiState.retryableRejectFailure;
-          _errorMessage = result.error.message;
+          _errorMessage = failure.message;
         });
         return;
       }
@@ -269,21 +268,21 @@ class _IncomingApprovalDialogState extends State<IncomingApprovalDialog> {
   void _showTerminalFailureSnackBar(
     ScaffoldMessengerState messenger,
     LanShareStrings strings,
-    NetworkError error,
+    LanUiFailure failure,
   ) {
-    final message = switch (error.code) {
-      NetworkErrorCode.resourceLimit =>
+    final message = switch (failure.kind) {
+      LanUiFailureKind.resourceLimit =>
         strings.isEnglish
             ? 'Insufficient storage space for incoming transfer.'
             : '存储空间不足，无法接收文件。',
-      NetworkErrorCode.authenticationFailed =>
+      LanUiFailureKind.authenticationFailed =>
         strings.isEnglish
             ? 'Transfer peer is not trusted or route unauthorized.'
             : '设备未通过信任校验或未授权传输路由。',
       _ =>
         strings.isEnglish
-            ? 'Incoming transfer failed: ${error.message}'
-            : '接收文件失败：${error.message}',
+            ? 'Incoming transfer failed: ${failure.message}'
+            : '接收文件失败：${failure.message}',
     };
     messenger.showSnackBar(SnackBar(content: Text(message)));
   }
@@ -364,8 +363,8 @@ class IncomingApprovalRequest {
   final String fileName;
   final int totalBytes;
   final DateTime expiresAt;
-  final Future<NetworkResult<void>> Function() accept;
-  final Future<NetworkResult<void>> Function() reject;
+  final Future<LanUiOutcome<void>> Function() accept;
+  final Future<LanUiOutcome<void>> Function() reject;
 
   /// 此审批请求是否已过期。
   bool get isExpired => DateTime.now().isAfter(expiresAt);

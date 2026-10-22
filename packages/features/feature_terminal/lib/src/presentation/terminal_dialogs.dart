@@ -71,7 +71,7 @@ extension _TerminalDialogs on _TerminalScreenState {
     final colorScheme = Theme.of(context).colorScheme;
     final strings = _strings(context);
     final connections = context.read<TerminalConnectionPort>();
-    final ssh = context.read<SshSessionManager>().terminalCapability;
+    final viewModel = context.read<TerminalSessionViewModel>();
     final config = connections.getConnection(connectionId);
     final connectionName = config?.name ?? _serverName ?? strings.currentServer;
 
@@ -98,14 +98,16 @@ extension _TerminalDialogs on _TerminalScreenState {
     if (sessionId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(_formatConnectionFailure(strings, ssh?.errorMessage)),
+          content: Text(
+            _formatConnectionFailure(strings, viewModel.capabilityError),
+          ),
           backgroundColor: colorScheme.error,
         ),
       );
       return;
     }
 
-    final session = ssh?.getSession(sessionId);
+    final session = viewModel.windowById(sessionId);
     if (session == null) return;
 
     _replaceWithTerminalSession(session, animated: true);
@@ -123,8 +125,8 @@ extension _TerminalDialogs on _TerminalScreenState {
 
   Future<void> _showSessionSwitcher(BuildContext context) async {
     final strings = _strings(context);
-    final ssh = context.read<SshSessionManager>().terminalCapability;
-    final sessions = ssh?.sessions ?? const <SshTerminalSession>[];
+    final viewModel = context.read<TerminalSessionViewModel>();
+    final sessions = viewModel.windows;
     if (sessions.isEmpty) return;
 
     final action = await showModalBottomSheet<_SessionSwitcherAction>(
@@ -176,11 +178,11 @@ extension _TerminalDialogs on _TerminalScreenState {
     if (!context.mounted || action == null) return;
 
     if (action.close) {
-      await ssh?.disconnectSession(action.sessionId);
+      await viewModel.disconnectWindow(action.sessionId);
       if (!context.mounted) return;
 
       if (action.sessionId == widget.sessionId) {
-        final nextSession = _nextSessionAfterClose(ssh);
+        final nextSession = viewModel.nextWindowAfter(widget.sessionId);
         if (nextSession != null) {
           _replaceWithTerminalSession(nextSession, animated: true);
         } else {
@@ -192,22 +194,10 @@ extension _TerminalDialogs on _TerminalScreenState {
 
     if (action.sessionId == widget.sessionId) return;
 
-    final target = ssh?.getSession(action.sessionId);
+    final target = viewModel.windowById(action.sessionId);
     if (target == null) return;
 
     _replaceWithTerminalSession(target);
-  }
-
-  SshTerminalSession? _nextSessionAfterClose(SshTerminalCapability? ssh) {
-    if (ssh == null) return null;
-    final otherSessions = ssh.sessions
-        .where((session) => session.id != widget.sessionId)
-        .toList()
-        .reversed;
-    for (final session in otherSessions) {
-      if (session.isConnected) return session;
-    }
-    return otherSessions.isEmpty ? null : otherSessions.first;
   }
 
   Future<void> _showTerminalEditMenu(TerminalSessionViewModel viewModel) async {
@@ -293,8 +283,8 @@ extension _TerminalDialogs on _TerminalScreenState {
 
   Future<void> _confirmDisconnect(BuildContext context) async {
     final strings = _strings(context);
-    final ssh = context.read<SshSessionManager>().terminalCapability;
-    final session = ssh?.getSession(widget.sessionId);
+    final viewModel = context.read<TerminalSessionViewModel>();
+    final session = viewModel.windowById(widget.sessionId);
     final windowName =
         session?.displayName ?? _serverName ?? strings.defaultTerminal;
     final isConnected = session?.isConnected == true;
@@ -313,10 +303,10 @@ extension _TerminalDialogs on _TerminalScreenState {
     );
 
     if (confirmed && context.mounted) {
-      await ssh?.disconnectSession(widget.sessionId);
+      await viewModel.disconnectWindow(widget.sessionId);
       if (!context.mounted) return;
 
-      final nextSession = _nextSessionAfterClose(ssh);
+      final nextSession = viewModel.nextWindowAfter(widget.sessionId);
       if (nextSession != null) {
         _replaceWithTerminalSession(nextSession, animated: true);
       } else {

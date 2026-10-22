@@ -9,8 +9,8 @@ import '../../../domain/lan_share_ports.dart';
 import '../../../domain/lan_device_strings.dart';
 import '../../../services/lan_share/lan_pairing_reciprocal.dart';
 import '../../../services/lan_share/lan_share_models.dart';
-import 'package:network_sdk/network_sdk.dart';
 import 'package:app_ui/app_ui.dart';
+import '../viewmodels/lan_ui_outcome.dart';
 import '../lan_share_feature_scope.dart';
 import '../viewmodels/lan_share_viewmodel.dart';
 import 'lan_chat_screen.dart';
@@ -233,28 +233,29 @@ class _LanPairingScreenState extends State<LanPairingScreen>
     }
 
     try {
-      final result = await vm.authenticateDevice(
-        targetDevice,
-        pin,
-        isInitiator: !_isIncomingRequest,
+      final result = await lanUiOf(
+        vm.authenticateDevice(
+          targetDevice,
+          pin,
+          isInitiator: !_isIncomingRequest,
+        ),
       );
       if (!mounted || generation != _attemptGeneration) return;
-      if (result is NetworkSuccess<LanPairingHandshakeProgress> &&
-          result.data == LanPairingHandshakeProgress.paired) {
+      if (result.succeeded &&
+          result.value == LanPairingHandshakeProgress.paired) {
         _openChat();
         return;
       }
       setState(() {
         _isLoading = false;
-        if (result is NetworkSuccess<LanPairingHandshakeProgress>) {
+        final failure = result.failure;
+        if (failure == null) {
           _errorMessage = null;
           _directionNotice =
               vm.transferService.pairingDirectionFor(_targetDeviceId) ??
               _directionNotice;
-        } else if (result is NetworkFailure<LanPairingHandshakeProgress>) {
-          _errorMessage = _pairingFailureMessage(result.error, strings);
         } else {
-          _errorMessage = strings.lanSharePinMismatch;
+          _errorMessage = _pairingFailureMessage(failure, strings);
         }
       });
     } catch (e) {
@@ -276,34 +277,33 @@ class _LanPairingScreenState extends State<LanPairingScreen>
     Navigator.maybePop(context);
   }
 
-  String _pairingFailureMessage(NetworkError error, LanShareStrings strings) {
-    if (error.code == NetworkErrorCode.authenticationFailed) {
-      return strings.lanSharePinMismatch;
+  String _pairingFailureMessage(LanUiFailure failure, LanShareStrings strings) {
+    switch (failure.kind) {
+      case LanUiFailureKind.authenticationFailed:
+        return strings.lanSharePinMismatch;
+      case LanUiFailureKind.identityConflict:
+        return strings.isEnglish
+            ? 'Device identity changed. Unpair it and try pairing again.'
+            : '设备身份已变化，请先解除配对后重试。';
+      case LanUiFailureKind.timeout:
+        return strings.isEnglish
+            ? 'Pairing timed out. Check that both devices are on the same Wi-Fi.'
+            : '配对请求超时，请检查两端设备是否在同一 Wi-Fi。';
+      case LanUiFailureKind.unreachable:
+        return strings.isEnglish
+            ? 'The device is unreachable. Check its address and Wi-Fi connection.'
+            : '无法连接到设备，请检查设备地址和 Wi-Fi 连接。';
+      case LanUiFailureKind.invalidArgument:
+        return strings.isEnglish
+            ? 'The pairing request is invalid. Enter the current 6-digit PIN.'
+            : '配对请求无效，请输入当前显示的 6 位 PIN 码。';
+      case LanUiFailureKind.cancelled:
+      case LanUiFailureKind.resourceLimit:
+      case LanUiFailureKind.other:
+        return strings.isEnglish
+            ? 'Pairing failed: ${failure.message}'
+            : '配对失败：${failure.message}';
     }
-    if (error.code == NetworkErrorCode.identityConflict) {
-      return strings.isEnglish
-          ? 'Device identity changed. Unpair it and try pairing again.'
-          : '设备身份已变化，请先解除配对后重试。';
-    }
-    if (error.code == NetworkErrorCode.timeout) {
-      return strings.isEnglish
-          ? 'Pairing timed out. Check that both devices are on the same Wi-Fi.'
-          : '配对请求超时，请检查两端设备是否在同一 Wi-Fi。';
-    }
-    if (error.code == NetworkErrorCode.noRoute ||
-        error.code == NetworkErrorCode.peerOffline) {
-      return strings.isEnglish
-          ? 'The device is unreachable. Check its address and Wi-Fi connection.'
-          : '无法连接到设备，请检查设备地址和 Wi-Fi 连接。';
-    }
-    if (error.code == NetworkErrorCode.invalidArgument) {
-      return strings.isEnglish
-          ? 'The pairing request is invalid. Enter the current 6-digit PIN.'
-          : '配对请求无效，请输入当前显示的 6 位 PIN 码。';
-    }
-    return strings.isEnglish
-        ? 'Pairing failed: ${error.message}'
-        : '配对失败：${error.message}';
   }
 
   @override

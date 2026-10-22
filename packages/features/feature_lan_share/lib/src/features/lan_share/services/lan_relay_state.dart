@@ -2,6 +2,9 @@
 
 import 'package:network_sdk/network_sdk.dart';
 
+/// 页面展示的 Relay 连接状态。
+enum LanRelayLinkState { connected, connecting, failed, idle }
+
 /// Relay 配置和数据面状态的安全快照；不包含秘密材料。
 final class LanRelayStatus {
   const LanRelayStatus({
@@ -20,6 +23,15 @@ final class LanRelayStatus {
 
   bool get isConnected => state == RelayConnectionState.connected;
   bool get isConnecting => state == RelayConnectionState.connecting;
+
+  /// 页面使用的连接状态。SDK 枚举留在应用层。
+  LanRelayLinkState get linkState => switch (state) {
+    RelayConnectionState.connected => LanRelayLinkState.connected,
+    RelayConnectionState.connecting => LanRelayLinkState.connecting,
+    RelayConnectionState.failed => LanRelayLinkState.failed,
+    RelayConnectionState.disconnected ||
+    RelayConnectionState.unspecified => LanRelayLinkState.idle,
+  };
 }
 
 /// Relay 失败后的下一项生命周期动作。

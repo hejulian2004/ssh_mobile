@@ -6,7 +6,6 @@ import 'package:feature_lan_share/feature_lan_share.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_sdk/network_sdk.dart';
-import 'package:network_transport/network_transport.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
 import '../fakes/lan_share_test_fakes.dart';

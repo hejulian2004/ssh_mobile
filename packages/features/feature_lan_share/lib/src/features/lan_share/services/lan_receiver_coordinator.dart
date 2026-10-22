@@ -8,7 +8,6 @@ import 'dart:async';
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
 import 'package:network_sdk/network_sdk.dart';
-import 'package:network_transport/network_transport.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../data/database/lan_share_database.dart';
@@ -24,10 +23,11 @@ import '../../../services/lan_share/lan_storage_service.dart';
 import '../../../services/lan_share/lan_transfer_service.dart';
 import '../../../services/relay/relay_enrollment_service.dart';
 import '../viewmodels/lan_share_viewmodel.dart';
+import '../viewmodels/lan_ui_outcome.dart';
 import 'lan_native_peer_registry.dart';
 import 'lan_relay_coordinator.dart';
 
-export 'lan_relay_coordinator.dart' show LanRelayStatus;
+export 'lan_relay_coordinator.dart' show LanRelayLinkState, LanRelayStatus;
 
 part 'lan_receiver_coordinator_incoming.dart';
 part 'lan_receiver_coordinator_lifecycle.dart';
@@ -79,8 +79,8 @@ final class LanReceiverCoordinator extends ChangeNotifier {
   /// Module 所有的历史 Repository。
   final LanShareHistoryRepository historyRepository;
 
-  /// App Scope 唯一网络运行时，用于按需准备 native runtime Capability。
-  final NetworkRuntime networkRuntime;
+  /// App Scope 网络运行时端口，只准备 runtime 与 WebSocket Relay。
+  final LanShareNetworkRuntimePort networkRuntime;
 
   /// App-selected route-aware Automatic local IPv4 selector.
   final LanShareLocalAddressSelectionPort localAddressSelectionPort;
@@ -206,6 +206,19 @@ final class LanReceiverCoordinator extends ChangeNotifier {
   /// 接收器初始化后发布原生传入传输申请。
   Stream<IncomingTransferOffer> get nativeIncomingTransferOffers =>
       _incomingTransferController.stream;
+
+  /// 页面审批使用的传入申请。传输对象留在协调器。
+  Stream<LanPageIncomingOffer> get pageIncomingOffers =>
+      nativeIncomingTransferOffers.map(
+        (offer) => LanPageIncomingOffer(
+          transferId: offer.transferId,
+          peerId: offer.peerId,
+          fileName: offer.fileName,
+          fileSize: offer.fileSize,
+          accept: () => lanUiIgnored(acceptNativeIncomingTransfer(offer)),
+          reject: () => lanUiIgnored(rejectNativeIncomingTransfer(offer)),
+        ),
+      );
 
   /// Flutter 兼容入口；正式 Module 会等待 [close] 完成。
   @override

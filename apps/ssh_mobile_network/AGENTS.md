@@ -1,4 +1,4 @@
-最新更新时间：2026-10-09
+最新更新时间：2026-10-22
 
 # Network-transfer App Guidelines
 
@@ -13,7 +13,8 @@
   awaitable, idempotent exit owner. It removes the route first, then disposes
   the module, settings, runtime, and logger. The Feature must not dispose the
   runtime.
-- `create` enables the LAN receiver. The receiver may ensure only
+- `create` enables the LAN receiver. The receiver calls only
+  `LanShareNetworkRuntimePort.ensureRuntime`. This shell maps that call to
   `NetworkCapability.runtime`. Do not enable QUIC, WebSocket Relay, or
   Realtime from this shell, and do not call `NetworkFacade.start`.
 - Screen share is fail-closed. Do not import `feature_screen_share`.

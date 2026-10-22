@@ -26,8 +26,22 @@ void main() {
 
     expect(connected.isConnected, isTrue);
     expect(connected.isConnecting, isFalse);
+    expect(connected.linkState, LanRelayLinkState.connected);
     expect(connecting.isConnected, isFalse);
     expect(connecting.isConnecting, isTrue);
+    expect(connecting.linkState, LanRelayLinkState.connecting);
+    expect(
+      _status(RelayConnectionState.failed).linkState,
+      LanRelayLinkState.failed,
+    );
+    expect(
+      _status(RelayConnectionState.disconnected).linkState,
+      LanRelayLinkState.idle,
+    );
+    expect(
+      _status(RelayConnectionState.unspecified).linkState,
+      LanRelayLinkState.idle,
+    );
   });
 
   test('inactive or exhausted state does not retry', () {
@@ -97,6 +111,13 @@ void main() {
     expect(fallback.delay, const Duration(seconds: 1));
   });
 }
+
+LanRelayStatus _status(RelayConnectionState state) => LanRelayStatus(
+  endpoint: '',
+  state: state,
+  enrolled: false,
+  reconnectAttempt: 0,
+);
 
 LanRelayRetryDecision _decide(
   LanRelayRetryPolicy policy, {

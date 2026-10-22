@@ -6,11 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:xterm/xterm.dart';
 import 'package:animations/animations.dart';
-import 'package:ssh_core/ssh_core.dart';
 
 import 'package:app_ui/app_ui.dart';
 
 import '../application/terminal_session_viewmodel.dart';
+import '../domain/terminal_models.dart';
 import '../domain/terminal_ports.dart';
 import '../domain/terminal_strings.dart';
 import 'terminal_app_bar.dart';
@@ -40,8 +40,10 @@ class TerminalScreen extends StatefulWidget {
 
 class _TerminalScreenState extends State<TerminalScreen>
     with WidgetsBindingObserver {
-  static const double _minTerminalFontSize = SshSession.minTerminalFontSize;
-  static const double _maxTerminalFontSize = SshSession.maxTerminalFontSize;
+  static const double _minTerminalFontSize =
+      TerminalSessionViewModel.minFontSize;
+  static const double _maxTerminalFontSize =
+      TerminalSessionViewModel.maxFontSize;
 
   final GlobalKey<TerminalViewState> _terminalViewKey =
       GlobalKey<TerminalViewState>();
@@ -88,7 +90,7 @@ class _TerminalScreenState extends State<TerminalScreen>
   }
 
   void _replaceWithTerminalSession(
-    SshTerminalSession session, {
+    TerminalWindowSnapshot session, {
     bool animated = false,
   }) {
     Navigator.of(context).pushAndRemoveUntil(
@@ -97,7 +99,7 @@ class _TerminalScreenState extends State<TerminalScreen>
     );
   }
 
-  Route<void> _instantTerminalRoute(SshTerminalSession session) {
+  Route<void> _instantTerminalRoute(TerminalWindowSnapshot session) {
     return PageRouteBuilder<void>(
       transitionDuration: Duration.zero,
       reverseTransitionDuration: Duration.zero,
@@ -108,7 +110,7 @@ class _TerminalScreenState extends State<TerminalScreen>
     );
   }
 
-  Route<void> _fadeTerminalRoute(SshTerminalSession session) {
+  Route<void> _fadeTerminalRoute(TerminalWindowSnapshot session) {
     return PageRouteBuilder<void>(
       transitionDuration: const Duration(milliseconds: 300),
       reverseTransitionDuration: const Duration(milliseconds: 200),
@@ -334,8 +336,8 @@ class _TerminalScreenState extends State<TerminalScreen>
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider<TerminalSessionViewModel>(
-      create: (context) => TerminalSessionViewModel(
-        sshSessionManager: context.read<SshSessionManager>(),
+      create: (context) => TerminalSessionViewModel.fromContext(
+        context,
         sessionId: widget.sessionId,
         connectionId: widget.connectionId,
       ),
@@ -395,10 +397,10 @@ class _TerminalScreenState extends State<TerminalScreen>
               : viewModel.complexInputController;
 
           final shortcutPanel = TerminalShortcutPanel(
-            sessionId: widget.sessionId,
             strings: strings,
             toolbarColor: toolbarColor,
             complexInputController: complexInputController,
+            onSendData: viewModel.sendData,
             onSendComplexInput: (text) {
               viewModel.submitCommandText(text);
               _requestWindowsAwareTerminalFocus(viewModel);

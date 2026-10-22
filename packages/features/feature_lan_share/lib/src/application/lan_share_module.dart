@@ -6,7 +6,6 @@
 
 import 'package:app_core/app_core.dart';
 import 'package:network_sdk/network_sdk.dart';
-import 'package:network_transport/network_transport.dart';
 
 import '../data/database/lan_share_database.dart';
 import '../data/repositories/lan_share_history_repository.dart';
@@ -41,7 +40,7 @@ final class LanShareModule implements AppModule {
   LanShareLocalAddressSelectionPort? _localAddressSelectionPort;
   LanShareDiscoveryBridgePort? _discoveryBridge;
   BootstrapClient? _bootstrapClient;
-  NetworkRuntime? _networkRuntime;
+  LanShareNetworkRuntimePort? _networkRuntime;
   bool? _receiverEnabled;
   LanShareDatabase? _database;
   LanShareHistoryRepository? _historyRepository;
@@ -93,7 +92,7 @@ final class LanShareModule implements AppModule {
         .require<LanShareLocalAddressSelectionPort>();
     _bootstrapClient = context.require<BootstrapClient>();
     _discoveryBridge = context.maybeGet<LanShareDiscoveryBridgePort>();
-    _networkRuntime = context.require<NetworkRuntime>();
+    _networkRuntime = context.require<LanShareNetworkRuntimePort>();
     _receiverEnabled = _configuredReceiverEnabled ?? _settings!.receiverEnabled;
   }
 

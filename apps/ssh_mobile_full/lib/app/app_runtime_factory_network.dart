@@ -1,5 +1,24 @@
 part of 'app_runtime_factory.dart';
 
+/// Maps LAN's two runtime requests onto the App-owned [NetworkRuntime].
+final class _LanShareNetworkRuntimeAdapter
+    implements feature_lan_share.LanShareNetworkRuntimePort {
+  const _LanShareNetworkRuntimeAdapter(this._runtime);
+
+  final NetworkRuntime _runtime;
+
+  @override
+  Future<void> ensureRuntime() =>
+      _runtime.ensureCapability(NetworkCapability.runtime);
+
+  @override
+  Future<void> ensureWebSocketRelay() =>
+      _runtime.ensureCapability(NetworkCapability.webSocketRelay);
+
+  @override
+  int? get boundLocalPort => _runtime.diagnostics.boundLocalPort;
+}
+
 /// Configures the shared Network V2 facade and registers the LAN module.
 extension _AppRuntimeFactoryNetwork on _AppRuntimeFactoryContext {
   Future<void> _prepareNetworkResources() async {
@@ -34,7 +53,8 @@ extension _AppRuntimeFactoryNetwork on _AppRuntimeFactoryContext {
                 host: AdbAndroidEmulatorHost(),
                 logger: AppLanShareLoggerAdapter(logger),
               ),
-        NetworkRuntime: runtimeNetworkRuntime,
+        feature_lan_share.LanShareNetworkRuntimePort:
+            _LanShareNetworkRuntimeAdapter(runtimeNetworkRuntime),
       }),
     );
     await lanShareModule.initialize();

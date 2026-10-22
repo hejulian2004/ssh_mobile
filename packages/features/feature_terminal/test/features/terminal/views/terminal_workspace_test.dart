@@ -54,7 +54,7 @@ void main() {
               displayName: 'Production shell with a long session name',
               serverName: 'Production',
               serverEndpoint: 'deployment@prod.example.com:2222',
-              connectionState: SshConnectionState.error,
+              connectionState: TerminalLinkState.error,
               isDarkMode: false,
               reconnectInProgress: false,
               onReconnect: () => reconnectCalls++,
@@ -114,7 +114,7 @@ void main() {
           home: Scaffold(
             body: TerminalConnectionOverlay(
               strings: const TerminalStrings('en'),
-              connectionState: SshConnectionState.error,
+              connectionState: TerminalLinkState.error,
               reconnectInProgress: false,
               terminalBackground: const Color(0xFF09090B),
               endpoint: 'deployment@prod.example.com:2222',
@@ -164,7 +164,7 @@ void main() {
           home: Scaffold(
             body: TerminalConnectionOverlay(
               strings: const TerminalStrings('en'),
-              connectionState: SshConnectionState.connecting,
+              connectionState: TerminalLinkState.connecting,
               reconnectInProgress: false,
               terminalBackground: const Color(0xFF09090B),
               endpoint: 'ops@staging.example.com:22',
@@ -229,10 +229,10 @@ void main() {
                 body: Align(
                   alignment: Alignment.bottomCenter,
                   child: TerminalShortcutPanel(
-                    sessionId: 'session-1',
                     strings: const TerminalStrings('en'),
                     toolbarColor: const Color(0xFF09090B),
                     complexInputController: inputController,
+                    onSendData: (_) {},
                     onSendComplexInput: (value) => submittedCommand = value,
                     onTerminalStroke: (_) {},
                     terminalFocusNode: focusNode,
