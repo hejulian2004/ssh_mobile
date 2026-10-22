@@ -1,4 +1,4 @@
-> Last updated: 2026-10-12
+> Last updated: 2026-10-22
 
 # Client Current State
 
@@ -11,8 +11,9 @@ data-protection key. It does not construct a `NetworkFacade`: the production
 Native file transfer and the relay data plane therefore stay on the Full App.
 `apps/ssh_mobile_terminal/` validates the minimal Terminal-only dependency crop.
 Owners are Core (app/UI/Telemetry/Connection), Features (Connection, Terminal,
-SFTP, Monitoring, System Administration, LAN Share, Playbook, RAG, MCP, AI,
-WebView, Developer), and App-scoped SSH infrastructure. Legacy Full App paths
+SFTP, Monitoring, System Administration, LAN Share, Screen Share, Playbook, RAG,
+MCP, AI, WebView, Developer), App-scoped SSH infrastructure, and the realtime
+media adapters. Legacy Full App paths
 remain only for consumers listed in the [compatibility inventory](../../docs/architecture/COMPATIBILITY_MIGRATION_INVENTORY.md);
 new code belongs in the owning package.
 

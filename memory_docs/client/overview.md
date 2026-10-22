@@ -1,4 +1,4 @@
-> Last updated: 2026-10-09
+> Last updated: 2026-10-22
 
 # Client Overview
 
@@ -15,6 +15,9 @@ infrastructure:
   (`app_core/lib/src/telemetry/`), and Connection ownership;
 - `packages/features/`: Feature implementations, including Developer telemetry;
 - `packages/infrastructure/ssh_core/`: SSH contracts/runtime boundary.
+- `packages/infrastructure/realtime_media/`, `realtime_media_android/`, and
+  `realtime_media_windows/`: opaque screen-media lifecycle and platform
+  adapters. Screen-share business state stays in `feature_screen_share`.
 
 Client Telemetry follows [telemetry design](../../docs/数据埋点架构.md) and
 [ADR-033](../../docs/adr/ADR-033-telemetry-data-tracking-architecture.md): the

@@ -1,4 +1,4 @@
-最新更新时间：2026-10-09
+最新更新时间：2026-10-22
 
 # 模块依赖审计
 
@@ -52,10 +52,10 @@ Feature。Feature 之间默认禁止直接依赖，当前唯一登记的例外�
 | Core | `app_ui` | 无 | 共享主题、响应式指标和通用 UI |
 | Core | `connection_core` | `app_core` | Connection 模型、Repository、数据库和凭据契约 |
 | Feature | `feature_ai` | `app_core`, `app_ui`, `connection_core`, `feature_playbook`, `ssh_core` | AI 通过公开 Playbook Automation Capability 调用 Playbook |
-| Feature | `feature_connection` | `app_core`, `connection_core` | Connection 编辑器和路由状态 |
+| Feature | `feature_connection` | `app_core`, `app_ui`, `connection_core` | Connection 编辑器和路由状态 |
 | Feature | `feature_developer` | `app_core`, `app_ui` | Developer Log、诊断和浮动面板 |
 | Feature | `feature_lan_share` | `app_core`, `app_ui`, `network_sdk`, `network_transport` | LAN Control V2 只消费公共 Network SDK/Capability；App Shell 注入共享 NetworkFacade、NetworkIdentity 和 Runtime，Feature 不创建 native socket/FFI/runtime |
-| Feature | `feature_screen_share` | `app_ui`, `network_sdk` | 只拥有 consent/business state、source metadata 和 opaque media port；Realtime session、provisional binding、native media、route 和 presenter 由 App/platform owner 管理 |
+| Feature | `feature_screen_share` | `network_sdk` | 只拥有 consent/business state、source metadata 和 opaque media port；Realtime session、provisional binding、native media、route 和 presenter 由 App/platform owner 管理 |
 | Feature | `feature_mcp` | `app_core`, `app_ui` | MCP 服务、审批和活动记录 |
 | Feature | `feature_monitoring` | `app_core`, `connection_core`, `ssh_core` | 监控业务代码不依赖共享 UI；展示由调用方组合 |
 | Feature | `feature_playbook` | `app_core`, `app_ui`, `connection_core`, `ssh_core` | Playbook 执行、审批和运行记录 |
@@ -67,6 +67,7 @@ Feature。Feature 之间默认禁止直接依赖，当前唯一登记的例外�
 | Infrastructure | `network_transport` | `app_core`, `ssh_mobile_network_native` | App Scope 网络门面和 Native handle 适配器 |
 | Infrastructure | `network_sdk` | 无 | Flutter 层 Bootstrap、鉴权 API、Session、事件流客户端及注入式 JSON 适配 |
 | Infrastructure | `realtime_media` | 无 | 不透明屏幕媒体端点的 Dart 生命周期契约；不拥有 Runtime、采集、编解码或渲染实现 |
+| Infrastructure | `realtime_media_android` | `realtime_media` | Android MediaProjection、MediaCodec 和 SurfaceTexture 的平台适配；Dart 只看见 `realtime_media` 契约 |
 | Infrastructure | `realtime_media_windows` | `realtime_media` | Windows 采集/编解码/渲染的平台适配边界；native owner 实现仍由平台插件负责 |
 | Infrastructure | `ssh_core` | `app_core`, `connection_core` | SSH Session、Pool、Client 和 Host Key 契约 |
 | Infrastructure | `ssh_mobile_network_native` | 无 | Dart/FFI Native 网络绑定 |

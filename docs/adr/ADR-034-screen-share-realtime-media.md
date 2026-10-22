@@ -1,4 +1,4 @@
-最新更新时间：2026-10-15
+最新更新时间：2026-10-22
 
 # ADR-034：WebRTC 实时屏幕共享媒体边界与生命周期
 
@@ -14,10 +14,9 @@ Accepted（Phase 0～Phase 7 架构冻结；本 ADR 批准约束，不表示产�
 Accepted 决策。凡本文标为“计划”的内容，必须在对应 Phase 实现并通过该 Phase 的
 契约与验收门禁后，才能称为当前行为。
 
-本 ADR 只冻结 `docs/NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md` 中 M8（RTC）的
-Screen Share slice；M8 中 Voice、Camera/一般 Video 或其他 RTC 工作不在本文范围，
-也不因本文 Accepted 而视为已经交付。它们如需改变既有边界，必须分别提交 ADR 与
-验收门禁。
+本 ADR 只冻结屏幕共享这一段 Realtime 媒体范围。Voice、Camera/一般 Video 或其他
+RTC 工作不在本文范围，也不因本文 Accepted 而视为已经交付。它们如需改变既有边界，
+必须分别提交 ADR 与验收门禁。实施计划里的 M8 章节已删除，不再作为范围来源。
 
 ## 背景与当前事实
 

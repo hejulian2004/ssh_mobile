@@ -571,7 +571,7 @@ flowchart LR
 - `packages/infrastructure/ssh_mobile_network_native/`: native network package staged under the Infrastructure boundary.
 - `apps/ssh_mobile_full/lib/core/services/`: lower-level shared security and protocol factories,
   including host-key policy and data protection.
-- `apps/ssh_mobile_full/lib/theme/`, migrated shared widget paths, and `lib/utils/responsive.dart`: compatibility exports for `packages/core/app_ui/`; Feature-specific widgets remain under their owning Feature.
+- `apps/ssh_mobile_full/lib/theme/`, migrated shared widget paths, and `apps/ssh_mobile_full/lib/utils/responsive.dart`: compatibility exports for `packages/core/app_ui/`; Feature-specific widgets remain under their owning Feature.
 - New product Feature models, ViewModels, services, and views belong to the
   owning `packages/features/feature_*` member, not a new App-local Feature tree.
 - `apps/ssh_mobile_full/test/`: unit and widget tests.
@@ -741,7 +741,7 @@ Never store passwords, private keys, API keys, tokens, or server credentials in 
 
 - [Mobile UI QA Matrix](docs/MOBILE_UI_QA.md)
 - [Release Checklist](docs/RELEASE_CHECKLIST.md)
-- [Validation Report](docs/VALIDATION_REPORT.md)
+- [Historical Network V2 validation snapshot](docs/VALIDATION_REPORT.md)
 - [Engineering Baseline ADR](docs/ADR_ENGINEERING_BASELINE.md)
 - [Performance Acceptance](docs/PERFORMANCE_ACCEPTANCE.md)
 - [Security Manual Regression](docs/security_manual_regression.md)

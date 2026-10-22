@@ -1,4 +1,4 @@
-> Last updated: 2026-10-09
+> Last updated: 2026-10-22
 
 # Memory Map
 
@@ -114,7 +114,8 @@ and [ADR-033 telemetry](../../../../docs/adr/ADR-033-telemetry-data-tracking-arc
 - Backend API → Backend default + Relay README; add Front for admin consumers, SDK for wire/device changes.
 - Front Admin → Front overview/README/AGENTS; add Front UI Architecture for design system/shared UI/forms; add Backend for API/auth/session changes.
 - Client↔SDK → both defaults + architecture, both contracts, dependency/resource docs, exact ADRs.
-- Screen Share / Realtime Media (`feature_screen_share`, `realtime_media`, or
+- Screen Share / Realtime Media (`feature_screen_share`, `realtime_media`,
+  `realtime_media_android`, `realtime_media_windows`, or
   `network-webrtc`) → Client + SDK defaults and architecture, Transport and
   Routing, Module Dependency, Resource Ownership, Compatibility Inventory,
   `ADR-BUSINESS-RECOVERY-V2`, ADR-016/020/021/024/026 and ADR-034. Read the

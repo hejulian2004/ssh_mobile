@@ -1,4 +1,4 @@
-Last updated: 2026-10-12
+Last updated: 2026-10-22
 
 # WebRTC Screen Sharing Architecture
 
@@ -28,11 +28,10 @@ is shipped. The native plugin remains fail-closed when platform workers are
 unavailable; native implementation or compilation evidence is not evidence of
 a working capture-to-render pipeline.
 
-This is only the Screen Share slice of M8 (RTC) in
-[`NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md`](../NETWORK_PLATFORM_IMPLEMENTATION_PLAN.md).
-Voice, camera/general video, and other M8 work remain outside this document and
-need their own contract and acceptance gates; an Accepted architecture is not a
-claim that M8 or screen sharing is shipped.
+This document covers screen sharing only. Voice, camera/general video, and other
+realtime work remain outside it and need their own contract and acceptance
+gates. An Accepted architecture is not a claim that screen sharing is shipped.
+The old M8 chapter in the platform implementation plan has been removed.
 
 This document accompanies [ADR-034](../adr/ADR-034-screen-share-realtime-media.md).
 It extends, rather than changes, the accepted ownership and lifecycle decisions
