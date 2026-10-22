@@ -37,6 +37,11 @@ android {
         versionName = flutter.versionName
     }
 
+    sourceSets.getByName("androidTest") {
+        java.srcDir("../../test/android/public_capture_fixture")
+        manifest.srcFile("../../test/android/public_capture_fixture/AndroidManifest.xml")
+    }
+
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {

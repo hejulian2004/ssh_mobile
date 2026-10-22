@@ -1,0 +1,7 @@
+<resources>
+    <string name="realtime_media_share_active">Screen sharing active</string>
+    <string name="realtime_media_capture_active">SSH Mobile is capturing the selected display</string>
+    <string name="realtime_media_receive_active">Receiving screen video</string>
+    <string name="realtime_media_capture_channel">Screen sharing</string>
+    <string name="realtime_media_receive_channel">Screen video playback</string>
+</resources>

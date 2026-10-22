@@ -50,10 +50,12 @@ final class AppScreenShareMediaCoordinator {
   RealtimeMediaEndpoint? _endpoint;
   RemoteVideoSurface? _remoteSurface;
   String? _operationId;
+  String? _pendingOperationId;
   Future<void>? _activeMediaOperation;
   AppScreenShareMediaMonitor? _mediaMonitor;
   final ValueNotifier<Size?> _remoteVideoSize = ValueNotifier(null);
   bool _prepared = false;
+  RealtimeSessionToken? _preparedToken;
   bool _disposed = false;
   int _operationEpoch = 0;
 
@@ -86,6 +88,21 @@ final class AppScreenShareMediaCoordinator {
       );
     }
     _prepared = true;
+    _preparedToken ??= token;
+  }
+
+  void reportTransportLost(ScreenShareOperationSnapshot operation) {
+    if (_disposed || operation.isTerminal || operation.operationId == null) {
+      return;
+    }
+    _events.add(
+      ScreenShareMediaEvent(
+        operationId: operation.operationId!,
+        realtimeId: operation.realtimeId,
+        generation: operation.generation,
+        kind: ScreenShareMediaEventKind.transportLost,
+      ),
+    );
   }
 
   Future<void> dispose() async {
@@ -94,18 +111,18 @@ final class AppScreenShareMediaCoordinator {
     _disposed = true;
     _mediaMonitor?.dispose();
     final activeOperation = _activeMediaOperation;
+    try {
+      // Native release cancels a pending foreground-service readiness request.
+      await _releaseCurrentEndpoint();
+    } catch (_) {
+      // The controller retains failed cleanup for the disposal retry below.
+    }
     if (activeOperation != null) {
       try {
         await activeOperation;
       } catch (_) {
         // The stale operation has already attempted compensating cleanup.
       }
-    }
-    try {
-      await _releaseCurrentEndpoint();
-    } catch (_) {
-      // The session controller keeps a retryable lease when native cleanup
-      // fails; route disposal must still cancel its subscriptions.
     }
     try {
       await _mediaSession?.dispose();
@@ -128,6 +145,7 @@ final class AppScreenShareMediaCoordinator {
       generation: generation,
     );
     _admitOperation(operationId);
+    _pendingOperationId = operationId;
     final epoch = ++_operationEpoch;
     await _trackMediaOperation(
       () => _startCapture(
@@ -150,6 +168,7 @@ final class AppScreenShareMediaCoordinator {
       generation: generation,
     );
     _admitOperation(operationId);
+    _pendingOperationId = operationId;
     final epoch = ++_operationEpoch;
     await _trackMediaOperation(
       () => _startViewer(
@@ -173,30 +192,18 @@ final class AppScreenShareMediaCoordinator {
   Future<void> _trackMediaOperation(Future<void> Function() operation) {
     final predecessor = _activeMediaOperation;
     late final Future<void> tracked;
-    tracked = _runTrackedMediaOperation(
-      () async {
-        if (predecessor != null) await predecessor;
-        await operation();
-      },
-      () {
-        if (identical(_activeMediaOperation, tracked)) {
-          _activeMediaOperation = null;
-        }
-      },
-    );
+    Future<void> run() async {
+      if (predecessor != null) await predecessor;
+      await operation();
+    }
+
+    tracked = run().whenComplete(() {
+      if (identical(_activeMediaOperation, tracked)) {
+        _activeMediaOperation = null;
+      }
+    });
     _activeMediaOperation = tracked;
     return tracked;
-  }
-
-  Future<void> _runTrackedMediaOperation(
-    Future<void> Function() operation,
-    void Function() onComplete,
-  ) async {
-    try {
-      await operation();
-    } finally {
-      onComplete();
-    }
   }
 
   Future<void> _startCapture({
@@ -330,26 +337,19 @@ final class AppScreenShareMediaCoordinator {
       operationId: operationId,
       realtimeId: realtimeId,
       generation: generation,
+      cleanup: true,
     );
-    if (_operationId != null && _operationId != operationId) {
-      throw const RealtimeMediaException(
-        RealtimeMediaErrorCode.staleEndpoint,
-        'Screen-share operation does not own this media endpoint.',
-      );
-    }
     ++_operationEpoch;
     _mediaMonitor?.dispose();
     final activeOperation = _activeMediaOperation;
-    if (activeOperation != null) {
-      try {
-        await activeOperation;
-      } catch (_) {
-        // Preserve the original stop operation while the stale start cleans
-        // up its own endpoint lease.
-      }
-    }
-    await _releaseCurrentEndpoint();
+    // Release first: waiting for an attach that itself needs cancellation
+    // would hold the operation until its platform readiness timeout.
+    await Future.wait<void>([
+      _releaseCurrentEndpoint(),
+      if (activeOperation != null) activeOperation.catchError((_) {}),
+    ]);
     _operationId = null;
+    _pendingOperationId = null;
   }
 
   Future<void> _releaseCurrentEndpoint() async {
@@ -456,9 +456,10 @@ final class AppScreenShareMediaCoordinator {
     required String operationId,
     required String realtimeId,
     required int generation,
+    bool cleanup = false,
   }) {
     _ensureUsable();
-    final token = session.mediaToken;
+    final token = cleanup ? _preparedToken : session.mediaToken;
     if (token == null ||
         token.realtimeId != realtimeId ||
         token.generation != generation) {
@@ -467,7 +468,9 @@ final class AppScreenShareMediaCoordinator {
         'Screen-share operation belongs to a stale Realtime generation.',
       );
     }
-    if (_operationId != null && _operationId != operationId) {
+    final boundOperation =
+        _operationId ?? (cleanup ? _pendingOperationId : null);
+    if (boundOperation != null && boundOperation != operationId) {
       throw const RealtimeMediaException(
         RealtimeMediaErrorCode.staleEndpoint,
         'Screen-share operation identity does not match the active lease.',

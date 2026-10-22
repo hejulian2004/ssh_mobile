@@ -61,8 +61,21 @@ one, preventing a paused texture consumer from filling the Surface queue.
 Returning to the foreground can display the retained frame without new input.
 Flush/stop return pending codec indices before invalidating the codec. The
 engine-scoped visibility observer follows only its attached Activity and does
-not hold an Activity lock while calling MediaCodec. Receiver service/power
-retention and actual background device behavior remain acceptance gaps.
+not hold an Activity lock while calling MediaCodec.
+
+Remote video playback uses a separate native `mediaPlayback` foreground service
+and service-local partial wake/Wi-Fi locks. It borrows the existing native
+endpoint/runtime and does not create a Flutter background engine or release
+SSH-owned locks. Readiness must complete before decoder attachment; cancellation,
+startup refusal, or its deadline fail the pending request exactly once. Decoder
+creation re-enters the owner's frozen CPU/hardware mode after this async boundary.
+Service-instance epochs isolate delayed destruction callbacks. Stop/release
+cancels pending readiness and retains the service only while receive resources
+still need acknowledged cleanup. The service owns lock renewal and releases its
+locks on destruction; it is not restarted automatically after process death.
+Device policy still controls foreground-service availability and system privacy
+revocation. The service type follows Android's
+[background media playback contract](https://developer.android.com/develop/background-work/services/fgs/service-types#media).
 
 Decoded size statistics use the current output format's validated crop rectangle,
 so portrait/landscape transitions can reduce either dimension. They do not retain
@@ -74,8 +87,9 @@ token; they do not create another resource owner. MediaCodec/JNI/thread teardown
 wrappers require device acceptance rather than JVM line-coverage claims. The
 pure pump, H.264 gates, pending-frame buffer, and projection lease are covered
 by host unit tests, as are presentation backpressure, capture-input replacement
-ordering/cancellation, timestamp continuity, and output crop validation. The new
-Activity observer and MediaCodec/VirtualDisplay resize wrapper require Android
+ordering/cancellation, timestamp continuity, output crop validation, and foreground
+readiness cancellation/deadline races. The Activity observer, codec/display resize,
+playback service, ResultReceiver adapter and power-lock wrappers require Android
 device acceptance; their platform calls are excluded from JVM line-coverage
 claims rather than simulated with Android stub methods.
 

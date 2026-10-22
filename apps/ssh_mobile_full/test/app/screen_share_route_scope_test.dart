@@ -583,6 +583,204 @@ void main() {
     await coordinator.dispose();
   });
 
+  test('owned endpoint can stop after native token is cleared', () async {
+    final coordinator = _coordinator(backend, capabilities, session);
+    await coordinator.prepare(capture: false);
+    await coordinator.port.startViewer(
+      operationId: 'operation-a',
+      realtimeId: realtimeId,
+      generation: 7,
+    );
+    session.mediaToken = null;
+    await coordinator.port.stop(
+      operationId: 'operation-a',
+      realtimeId: realtimeId,
+      generation: 7,
+    );
+    expect(coordinator.remoteSurface, isNull);
+    expect(
+      backend.operations.where((operation) => operation == 'release:1'),
+      hasLength(1),
+    );
+    await coordinator.dispose();
+  });
+
+  testWidgets(
+    'accepted invitation fails when transport ends before media is ready',
+    (tester) async {
+      session.state = RealtimeSessionState.negotiating;
+      await tester.pumpWidget(_routeApp(backend, session, capabilities));
+      await tester.pumpAndSettle();
+      session.emitConsent(_incomingConsent());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Accept screen share'));
+      await tester.pumpAndSettle();
+      expect(find.text('Screen share accepted'), findsOneWidget);
+      session.mediaToken = null;
+      session.publishState(RealtimeSessionState.failed, generation: 7);
+      await tester.pumpAndSettle();
+      expect(find.text('Screen sharing failed'), findsOneWidget);
+      expect(backend.operations, isEmpty);
+      expect(
+        session.sentConsents.last.decision,
+        RealtimeConsentDecision.cancel,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
+
+  testWidgets('transport loss releases active media and busy admission', (
+    tester,
+  ) async {
+    final arbitration = AppScreenSharePeerArbitrationRegistry();
+    addTearDown(arbitration.dispose);
+    arbitration.acquire(
+      remotePeerId: session.peerId,
+      initiatorPeerId: session.peerId,
+      operationId: 'operation-a',
+    );
+    await tester.pumpWidget(
+      _routeApp(
+        backend,
+        session,
+        capabilities,
+        arguments: AppScreenShareRouteArguments(
+          session: session,
+          localPeerId: 'peer-local',
+          arbitration: arbitration,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    session.emitConsent(_incomingConsent());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Accept screen share'));
+    await tester.pumpAndSettle();
+    expect(arbitration.isBusy, isTrue);
+    session.mediaToken = null;
+    session.publishState(RealtimeSessionState.stopped, generation: 7);
+    await tester.pumpAndSettle();
+    expect(find.text('Screen sharing failed'), findsOneWidget);
+    expect(arbitration.isBusy, isFalse);
+    expect(
+      backend.operations.where((operation) => operation == 'release:1'),
+      hasLength(1),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  for (final disposing in [false, true]) {
+    test(
+      '${disposing ? 'dispose' : 'stop'} cancels native viewer readiness before waiting for attachment',
+      () async {
+        final gate = Completer<void>();
+        backend.surfaceGate = gate;
+        backend.afterRelease = () {
+          if (!gate.isCompleted) {
+            gate.completeError(
+              const RealtimeMediaException(
+                RealtimeMediaErrorCode.staleEndpoint,
+                'Pending viewer cancelled.',
+              ),
+            );
+          }
+        };
+        final coordinator = _coordinator(backend, capabilities, session);
+        await coordinator.prepare(capture: false);
+        final starting = coordinator.port.startViewer(
+          operationId: 'operation-a',
+          realtimeId: realtimeId,
+          generation: 7,
+        );
+        final observed = expectLater(
+          starting,
+          throwsA(isA<RealtimeMediaException>()),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(backend.operations, contains('attach-surface:1'));
+        session.mediaToken = null;
+        try {
+          final stopped = disposing
+              ? coordinator.dispose()
+              : coordinator.port.stop(
+                  operationId: 'operation-a',
+                  realtimeId: realtimeId,
+                  generation: 7,
+                );
+          await stopped.timeout(const Duration(seconds: 1));
+          expect(
+            backend.operations.where((operation) => operation == 'release:1'),
+            hasLength(1),
+          );
+          expect(coordinator.remoteSurface, isNull);
+        } finally {
+          if (!gate.isCompleted) {
+            gate.completeError(
+              const RealtimeMediaException(
+                RealtimeMediaErrorCode.staleEndpoint,
+                'Fixture ended.',
+              ),
+            );
+          }
+          await observed;
+          await coordinator.dispose();
+        }
+      },
+    );
+  }
+
+  test(
+    'foreign cancellation cannot invalidate capture still in preflight',
+    () async {
+      final gate = Completer<void>();
+      capabilities.prepareGate = gate;
+      final coordinator = _coordinator(
+        backend,
+        capabilities,
+        session,
+        source: source,
+      );
+      await coordinator.prepare(capture: true);
+      Object? startFailure;
+      final starting = coordinator.port
+          .startCapture(
+            operationId: 'operation-a',
+            realtimeId: realtimeId,
+            generation: 7,
+          )
+          .catchError((Object error) {
+            startFailure = error;
+          });
+      await Future<void>.delayed(Duration.zero);
+      final rejecting = expectLater(
+        coordinator.port.stop(
+          operationId: 'operation-b',
+          realtimeId: realtimeId,
+          generation: 7,
+        ),
+        throwsA(
+          isA<RealtimeMediaException>().having(
+            (error) => error.code,
+            'code',
+            RealtimeMediaErrorCode.staleEndpoint,
+          ),
+        ),
+      );
+      gate.complete();
+      try {
+        await rejecting;
+        await starting;
+        expect(startFailure, isNull);
+        expect(backend.operations, contains('attach-capture:1'));
+      } finally {
+        await starting;
+        await coordinator.dispose();
+      }
+    },
+  );
+
   test('stop rejects a different operation identity', () async {
     final coordinator = _coordinator(
       backend,
@@ -663,6 +861,95 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
     expect(backend.operations, isEmpty);
+  });
+
+  testWidgets(
+    'route teardown awaits peer cancellation before session release',
+    (tester) async {
+      final client = _LeaseClient();
+      await tester.pumpWidget(
+        _routeApp(
+          backend,
+          session,
+          capabilities,
+          arguments: AppScreenShareRouteArguments(
+            session: session,
+            localPeerId: 'peer-local',
+            sessionLease: AppScreenShareSessionLease(
+              client: client,
+              session: session,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      session.emitConsent(_incomingConsent());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Accept screen share'));
+      await tester.pumpAndSettle();
+      final cancellation = Completer<void>();
+      session.cancelGate = cancellation;
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      expect(
+        session.sentConsents.last.decision,
+        RealtimeConsentDecision.cancel,
+      );
+      expect(session.stopCalls, 0);
+      expect(client.releases, 0);
+      cancellation.complete();
+      for (var turn = 0; turn < 3; turn++) {
+        await tester.pump();
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      }
+      await tester.pumpAndSettle();
+      expect(session.stopCalls, 1);
+      expect(client.releases, 1);
+    },
+  );
+
+  testWidgets('route teardown bounds an unresponsive peer cancellation', (
+    tester,
+  ) async {
+    final client = _LeaseClient();
+    await tester.pumpWidget(
+      _routeApp(
+        backend,
+        session,
+        capabilities,
+        arguments: AppScreenShareRouteArguments(
+          session: session,
+          localPeerId: 'peer-local',
+          sessionLease: AppScreenShareSessionLease(
+            client: client,
+            session: session,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    session.emitConsent(_incomingConsent());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Accept screen share'));
+    await tester.pumpAndSettle();
+    final cancellation = Completer<void>();
+    session.cancelGate = cancellation;
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 4));
+    expect(session.stopCalls, 0);
+    expect(client.releases, 0);
+    await tester.pump(const Duration(seconds: 1));
+    for (var turn = 0; turn < 3; turn++) {
+      await tester.pump();
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    }
+    await tester.pumpAndSettle();
+    expect(session.stopCalls, 1);
+    expect(client.releases, 1);
+    cancellation.complete();
+    await tester.pumpAndSettle();
+    expect(session.stopCalls, 1);
+    expect(client.releases, 1);
   });
 
   testWidgets('send route can start an outgoing consent operation', (
@@ -1140,6 +1427,8 @@ class _RecordingMediaBackend implements RealtimeMediaBackend {
   final List<RealtimeMediaEndpointIdentity> identities = [];
   int _nextEndpoint = 0;
   Completer<void>? startGate;
+  Completer<void>? surfaceGate;
+  void Function()? afterRelease;
   void Function()? afterAttach;
   Object? statsFailure;
   int statsReads = 0;
@@ -1173,6 +1462,8 @@ class _RecordingMediaBackend implements RealtimeMediaBackend {
     required RealtimeMediaEndpointIdentity identity,
   }) async {
     operations.add('attach-surface:${endpointId.value}');
+    final pending = surfaceGate;
+    if (pending != null) await pending.future;
     return RemoteVideoSurface(
       id: RemoteVideoSurfaceId('surface:${endpointId.value}'),
       endpointId: endpointId,
@@ -1194,6 +1485,7 @@ class _RecordingMediaBackend implements RealtimeMediaBackend {
     required RealtimeMediaEndpointIdentity identity,
   }) async {
     operations.add('release:${endpointId.value}');
+    afterRelease?.call();
   }
 
   @override
@@ -1260,11 +1552,12 @@ final class _FakeRealtimeSession implements RealtimeSession {
   RealtimeAudioState audioState = RealtimeAudioState.unavailable;
 
   @override
-  RealtimeSnapshot? get currentSnapshot => null;
+  RealtimeSnapshot? get currentSnapshot => _snapshot;
+  RealtimeSnapshot? _snapshot;
+  final _snapshots = StreamController<RealtimeSnapshot>.broadcast();
 
   @override
-  Stream<RealtimeSnapshot> get snapshots =>
-      const Stream<RealtimeSnapshot>.empty();
+  Stream<RealtimeSnapshot> get snapshots => _snapshots.stream;
 
   final StreamController<RealtimeConsent> _consents;
 
@@ -1272,10 +1565,15 @@ final class _FakeRealtimeSession implements RealtimeSession {
   Stream<RealtimeConsent> get consentEvents => _consents.stream;
 
   final List<RealtimeConsent> sentConsents = <RealtimeConsent>[];
+  Completer<void>? cancelGate;
+  int stopCalls = 0;
 
   @override
   Future<SdkResult<void>> sendConsent(RealtimeConsent consent) async {
     sentConsents.add(consent);
+    if (consent.decision == RealtimeConsentDecision.cancel) {
+      await cancelGate?.future;
+    }
     return const SdkSuccess<void>(null);
   }
 
@@ -1283,7 +1581,11 @@ final class _FakeRealtimeSession implements RealtimeSession {
   Future<SdkResult<void>> start() async => const SdkSuccess<void>(null);
 
   @override
-  Future<SdkResult<void>> stop() async => const SdkSuccess<void>(null);
+  Future<SdkResult<void>> stop() async {
+    stopCalls++;
+    state = RealtimeSessionState.stopped;
+    return const SdkSuccess<void>(null);
+  }
 
   void replaceGeneration(int generation) {
     mediaToken = RealtimeSessionToken(
@@ -1295,7 +1597,39 @@ final class _FakeRealtimeSession implements RealtimeSession {
 
   void emitConsent(RealtimeConsent consent) => _consents.add(consent);
 
-  Future<void> close() => _consents.close();
+  void publishState(RealtimeSessionState next, {int? generation}) {
+    state = next;
+    final snapshot = RealtimeSnapshot(
+      realtimeId: realtimeId,
+      peerId: peerId,
+      state: next,
+      revision: ++revision,
+      generation: generation ?? this.generation,
+      sharedSessionInstanceId: sharedSessionInstanceId,
+    );
+    _snapshot = snapshot;
+    _snapshots.add(snapshot);
+  }
+
+  Future<void> close() async {
+    await _consents.close();
+    await _snapshots.close();
+  }
+}
+
+final class _LeaseClient implements RealtimeClient {
+  int releases = 0;
+  final released = Completer<void>();
+  @override
+  Future<void> releaseSession(RealtimeSession session) async {
+    releases++;
+    released.complete();
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnsupportedError(
+    'Unexpected client call: ${invocation.memberName}',
+  );
 }
 
 RealtimeConsent _incomingConsent() {

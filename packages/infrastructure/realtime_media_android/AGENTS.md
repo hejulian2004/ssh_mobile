@@ -73,8 +73,19 @@ texture frame awaiting Flutter's consumed callback. Drop older pending output
 without rendering; resume the latest buffer without requiring another input.
 Discard pending indices before codec flush and before worker stop acknowledgement.
 Activity/configuration detach unregisters only the visibility observer, and no
-Activity lock may be held across a codec operation. Receiver foreground-service
-and power retention still require their own owner and device acceptance.
+Activity lock may be held across a codec operation.
+
+Remote playback first waits for its `mediaPlayback` foreground service and
+service-local partial wake/Wi-Fi locks. These resources belong to native video,
+never to the SSH service or another Flutter isolate/NetworkRuntime. Pending
+readiness lives in the existing endpoint owner, has a bounded deadline, and is
+cancelled before owner detach/release. A late READY cannot attach a decoder or
+complete the method result twice. Asynchronous readiness must re-enter the
+owner's frozen codec mode. Service destruction signals only owners bound to
+that service instance epoch; an older service cannot fail a newer attachment.
+Keep the service while any pending/active/deferred receive resources remain,
+and stop it when none remain. Startup refusal fails closed; never claim
+background retention when the platform refused the foreground service.
 
 The encoder's bounded CSD cache accepts both MediaCodec codec-config output and
 output-format `csd-0`/`csd-1`. The sender's recovery gate stays closed until a

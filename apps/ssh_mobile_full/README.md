@@ -68,6 +68,11 @@ App Scope 保留待接受邀请的按设备仲裁，并为已认领/启动媒体
 释放精确操作的占用，结果页无需先关闭。初始化失败同样清理占用。邀请宿主销毁后，
 迟到的认领结果只补偿停止对应会话，不再导航；宿主和发起入口释放时也会取消身份等待。
 
+传输终止或会话身份变化会结束尚未就绪的已接受共享；媒体清理使用原先准备的代际
+身份，即使当前令牌已被清除，也能释放旧端点。取消或关闭路由会先释放已取得的
+端点，主动取消原生接收就绪等待，再等待迟到绑定收尾。准备阶段同样区分当前请求
+与其他操作的取消；显式排队的新请求仍遵循既有替换和停止规则。
+
 接收端从 H.264 SPS 读取有效尺寸（含编码块裁剪），后续帧保留该尺寸，避免把
 手机竖屏或不同分辨率显示器误当作默认横屏尺寸。
 
@@ -75,10 +80,18 @@ App Scope 保留待接受邀请的按设备仲裁，并为已认领/启动媒体
 `flutter run -t test/device/screen_share_device_probe.dart` 在 Windows 和 Android
 模拟器分别启动。测试使用隔离临时目录与固定测试身份，自动邀请和接受，检查
 发送、解码和渲染计数；模拟器运行前设置 `adb forward tcp:47831 tcp:47831`。
+Windows 发送默认只匹配公共测试记事本窗口，未找到唯一窗口时停止测试；不自动
+选择整个桌面。可用 `SCREEN_PROBE_WINDOW_TITLE` 指定公共测试窗口；探针自身窗口
+可在 Windows 使用 `--dart-entrypoint-args=self-window`。接收视图提供实际旋转和全屏
+控件，`SCREEN_PROBE_HOLD_SECONDS` 控制有限的持续采样时长。
 两端使用 `--dart-define=SCREEN_PROBE_REVERSE=true` 可验证 Android → Windows；
 模拟器通过 `10.0.2.2` 访问主机，仍需完成 Android 系统录屏授权。
 两端增加 `--dart-define=SCREEN_PROBE_CPU=true` 可强制验证 CPU 编解码路径；
 未开启时保留硬件模式，缺少所选编解码器会报告能力失败，不能计作视频验收通过。
+同一已构建探针也可通过 SDK 启动参数 `reverse` 切换方向；Windows 使用
+`--dart-entrypoint-args=reverse`，Android 使用标准 `dart_entrypoint_args` Intent 参数。
+Windows 接收端参数 `verify-window` 会检查原生全屏尺寸、恢复尺寸与 surface 连续性。
+探针结束发送正式 CANCEL，再释放原生会话，区别于突然终止传输。
 此入口只用于设备测试，不进入正式应用；模拟器验证不能替代真机硬件能力验收。
 
 正式共享可在屏幕选择或来访邀请卡片中开启 CPU 模式，两端独立选择。选择在

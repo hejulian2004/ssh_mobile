@@ -28,7 +28,7 @@ internal data class AndroidMediaStatsSnapshot(
 )
 
 internal class AndroidMediaOwner(
-    private val context: Context,
+    internal val context: Context,
     private val textureRegistry: TextureRegistry,
     val token: Long,
     val identity: AndroidOwnerIdentity,
@@ -50,6 +50,8 @@ internal class AndroidMediaOwner(
     internal var decoderStopAck: CountDownLatch? = null
     internal var decoderRunning = AtomicBoolean(false)
     internal var decoderResetRequested = AtomicBoolean(false)
+    internal var pendingViewerStart: ForegroundReadinessRequest? = null
+    internal var playbackServiceEpoch: Long? = null
     internal var textureEntry: TextureRegistry.SurfaceTextureEntry? = null
     internal var width = 0
     internal var height = 0
@@ -219,6 +221,7 @@ internal class AndroidMediaOwner(
     fun surfaceId(): String? = synchronized(lock) { textureEntry?.id()?.toString() }
 
     fun detach(): String? {
+        pendingViewerStart?.cancel()
         val captureFailure = stopCapture()
         if (captureFailure != null) return captureFailure
         val decoderFailure = stopDecoder()

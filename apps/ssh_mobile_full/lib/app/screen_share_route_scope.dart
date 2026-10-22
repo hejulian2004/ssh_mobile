@@ -111,6 +111,7 @@ final class _AppScreenShareRouteScopeState
   bool? _appliedMediaReadiness;
   bool _routeDisposed = false;
   Future<void>? _terminalCleanup;
+  Future<void>? _routeCancellation;
 
   @override
   void initState() {
@@ -225,7 +226,10 @@ final class _AppScreenShareRouteScopeState
       // media coordinator and session lease still finish the owned cleanup in
       // [_disposeRoute].
       try {
-        unawaited(controller.cancel().catchError((_) {}));
+        _routeCancellation = controller
+            .cancel()
+            .timeout(const Duration(seconds: 5))
+            .catchError((_) {});
       } catch (_) {}
       controller.dispose();
     }
@@ -235,6 +239,9 @@ final class _AppScreenShareRouteScopeState
 
   Future<void> _disposeRoute() async {
     try {
+      // Keep the signaling session alive for the final CANCEL, bounded so a
+      // nonresponsive peer cannot retain native resources after navigation.
+      await _routeCancellation;
       try {
         await _terminalCleanup;
       } catch (_) {}
@@ -346,6 +353,15 @@ final class _AppScreenShareRouteScopeState
       final sharedSessionInstanceId =
           snapshot?.sharedSessionInstanceId ??
           widget.arguments.session.sharedSessionInstanceId;
+      final controller = _controller!;
+      if (state == RealtimeSessionState.stopped ||
+          state == RealtimeSessionState.failed ||
+          (generation != null && generation != controller.generation) ||
+          (sharedSessionInstanceId != null &&
+              sharedSessionInstanceId != controller.sharedSessionInstanceId)) {
+        _mediaCoordinator!.reportTransportLost(controller.snapshot);
+        return;
+      }
       final ready =
           state == RealtimeSessionState.connected &&
           token != null &&

@@ -1,0 +1,7 @@
+<resources>
+    <string name="realtime_media_share_active">屏幕共享进行中</string>
+    <string name="realtime_media_capture_active">SSH Mobile 正在共享所选画面</string>
+    <string name="realtime_media_receive_active">正在接收屏幕画面</string>
+    <string name="realtime_media_capture_channel">屏幕共享</string>
+    <string name="realtime_media_receive_channel">屏幕画面接收</string>
+</resources>
