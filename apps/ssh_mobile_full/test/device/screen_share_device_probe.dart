@@ -369,7 +369,6 @@ Future<void> _probe({
   } catch (_) {
     _report('FAIL lifecycle');
   } finally {
-    await cancellation?.cancel();
     final activeSession = session;
     final activeOperation = operation;
     if (activeSession != null &&
@@ -379,18 +378,21 @@ Future<void> _probe({
         activeSession.state != RealtimeSessionState.failed) {
       final now = DateTime.now().toUtc();
       try {
-        final cancelled = await activeSession.sendConsent(
-          RealtimeConsent(
-            operationId: activeOperation.operationId,
-            realtimeId: _realtimeId,
-            sharedSessionInstanceId: activeOperation.sharedSessionInstanceId,
-            issuedAt: now,
-            expiresAt: now.add(const Duration(minutes: 1)),
-            decision: RealtimeConsentDecision.cancel,
-            senderPeerId: local,
-            actionRevision: 2,
-          ),
-        );
+        final cancelled = await activeSession
+            .sendConsent(
+              RealtimeConsent(
+                operationId: activeOperation.operationId,
+                realtimeId: _realtimeId,
+                sharedSessionInstanceId:
+                    activeOperation.sharedSessionInstanceId,
+                issuedAt: now,
+                expiresAt: now.add(const Duration(minutes: 1)),
+                decision: RealtimeConsentDecision.cancel,
+                senderPeerId: local,
+                actionRevision: 2,
+              ),
+            )
+            .timeout(const Duration(seconds: 5));
         if (cancelled is SdkSuccess<void>) {
           debugPrint('SCREEN_DEVICE_PROBE cancel_sent');
         } else {
@@ -400,6 +402,7 @@ Future<void> _probe({
         _report('FAIL cancel_unconfirmed');
       }
     }
+    await cancellation?.cancel();
     _surface.value = null;
     if (refreshVideoSize != null && coordinator != null) {
       coordinator.remoteVideoSize.removeListener(refreshVideoSize);
@@ -410,6 +413,7 @@ Future<void> _probe({
     await service?.dispose();
     await runtime.dispose();
     await root.delete(recursive: true);
+    debugPrint('SCREEN_DEVICE_PROBE cleanup_finished');
   }
 }
 
