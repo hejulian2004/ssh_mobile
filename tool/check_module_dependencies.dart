@@ -5,6 +5,49 @@ import 'module_dependency_models.dart';
 
 export 'module_dependency_models.dart';
 
+/// Workspace modules each business package may depend on directly.
+///
+/// A feature may fan out to several modules on this adjacent layer. A
+/// workspace dependency outside the set is a skip, even when the layer DAG
+/// would still allow Feature → Infrastructure.
+const businessDomainForwardDependencies = <String, Set<String>>{
+  'feature_ai': <String>{
+    'app_core',
+    'app_ui',
+    'connection_core',
+    'feature_playbook',
+    'ssh_core',
+  },
+  'feature_connection': <String>{'app_core', 'app_ui', 'connection_core'},
+  'feature_developer': <String>{'app_core', 'app_ui'},
+  'feature_lan_share': <String>{'app_core', 'app_ui', 'network_sdk'},
+  'feature_mcp': <String>{'app_core', 'app_ui'},
+  'feature_monitoring': <String>{'app_core', 'connection_core', 'ssh_core'},
+  'feature_playbook': <String>{
+    'app_core',
+    'app_ui',
+    'connection_core',
+    'ssh_core',
+  },
+  'feature_rag': <String>{'app_core', 'app_ui'},
+  'feature_screen_share': <String>{'app_ui', 'network_sdk'},
+  'feature_sftp': <String>{'app_core', 'app_ui', 'ssh_core'},
+  'feature_system_admin': <String>{
+    'app_core',
+    'app_ui',
+    'connection_core',
+    'ssh_core',
+  },
+  'feature_terminal': <String>{'app_core', 'app_ui', 'ssh_core'},
+  'feature_webview': <String>{'app_core', 'app_ui'},
+};
+
+/// External packages that skip the adjacent SSH or native contract.
+const forbiddenFeatureDependencies = <String>{
+  'dartssh2',
+  'ssh_mobile_network_native',
+};
+
 /// 审计 workspace 的直接生产依赖，不解析第三方依赖的传递闭包。
 ///
 /// 生产依赖是 Package 边界真正声明的契约；Dart 源码中的 `/src/` 导入由
@@ -78,6 +121,7 @@ final class ModuleDependencyAuditor {
       }
     }
 
+    _checkBusinessForwardDependencies(packages, byName, violations);
     _checkCycles(packages, edges, violations);
     violations.sort((a, b) {
       final source = a.source.compareTo(b.source);
@@ -121,6 +165,44 @@ final class ModuleDependencyAuditor {
           message: 'Core/Infrastructure 不得反向依赖 Feature。',
         ),
       );
+    }
+  }
+
+  void _checkBusinessForwardDependencies(
+    List<WorkspacePackage> packages,
+    Map<String, WorkspacePackage> byName,
+    List<ModuleDependencyViolation> violations,
+  ) {
+    for (final source in packages) {
+      if (source.layer != ModuleLayer.feature) continue;
+      final allowed = businessDomainForwardDependencies[source.name];
+      if (allowed == null) {
+        violations.add(
+          ModuleDependencyViolation(
+            rule: 'business-forward-dependency',
+            source: source.name,
+            target: '',
+            message: '业务领域缺少前向依赖登记。',
+          ),
+        );
+      }
+      for (final dependency in source.productionDependencies) {
+        final skipsWorkspaceLayer =
+            byName.containsKey(dependency) &&
+            (allowed == null || !allowed.contains(dependency));
+        final skipsExternalContract = forbiddenFeatureDependencies.contains(
+          dependency,
+        );
+        if (!skipsWorkspaceLayer && !skipsExternalContract) continue;
+        violations.add(
+          ModuleDependencyViolation(
+            rule: 'business-forward-dependency',
+            source: source.name,
+            target: dependency,
+            message: '业务领域只能前向依赖已登记的相邻模块。',
+          ),
+        );
+      }
     }
   }
 

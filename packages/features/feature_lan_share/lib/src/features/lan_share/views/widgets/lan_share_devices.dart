@@ -116,8 +116,10 @@ extension _LanShareDevices on _LanShareScreenState {
                         !context.mounted) {
                       return;
                     }
-                    final result = await vm.forgetDevice(state.peerId);
-                    if (result is NetworkFailure<void> && context.mounted) {
+                    final result = await lanUiIgnored(
+                      vm.forgetDevice(state.peerId),
+                    );
+                    if (result.failure != null && context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text(strings.lanDeviceUnpairFailed)),
                       );

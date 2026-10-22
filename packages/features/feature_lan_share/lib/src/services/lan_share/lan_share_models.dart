@@ -221,6 +221,27 @@ class LanMessage {
   double get progress =>
       fileSize > 0 ? (bytesTransferred / fileSize).clamp(0.0, 1.0) : 0.0;
 
+  /// 页面是否展示这条消息的传输路径。
+  bool get showsTransportRoute =>
+      routeType == NetworkRouteType.quicDirect ||
+      routeType == NetworkRouteType.relay;
+
+  /// 这条消息是否走中继。
+  bool get usesRelayRoute => routeType == NetworkRouteType.relay;
+
+  /// 历史列表使用的路径后缀；没有可展示路径时为空。
+  String transportRouteSuffix({
+    required String directLabel,
+    required String relayLabel,
+  }) {
+    final label = switch (routeType) {
+      NetworkRouteType.quicDirect => directLabel,
+      NetworkRouteType.relay => relayLabel,
+      _ => null,
+    };
+    return label == null ? '' : ' · $label';
+  }
+
   LanMessage copyWith({
     String? id,
     String? senderId,

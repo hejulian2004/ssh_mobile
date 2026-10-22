@@ -4,7 +4,7 @@ extension _TerminalWindowsContent on _TerminalWindowsPageState {
   Widget _buildWindowList(
     BuildContext context,
     TerminalWindowsViewModel viewModel,
-    List<SshTerminalSession> sessions,
+    List<TerminalWindowSnapshot> sessions,
     TerminalStrings strings,
   ) {
     if (page.embedded) {
@@ -128,7 +128,9 @@ extension _TerminalWindowsContent on _TerminalWindowsPageState {
     );
   }
 
-  List<_TerminalServerGroup> _groupSessions(List<SshTerminalSession> sessions) {
+  List<_TerminalServerGroup> _groupSessions(
+    List<TerminalWindowSnapshot> sessions,
+  ) {
     final groups = <String, _TerminalServerGroup>{};
     for (final session in sessions) {
       groups.putIfAbsent(
@@ -193,7 +195,7 @@ extension _TerminalWindowsContent on _TerminalWindowsPageState {
   Widget _buildHeader(
     BuildContext context,
     TerminalWindowsViewModel viewModel,
-    List<SshTerminalSession> sessions,
+    List<TerminalWindowSnapshot> sessions,
     TerminalStrings strings,
   ) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -381,7 +383,7 @@ extension _TerminalWindowsContent on _TerminalWindowsPageState {
   Widget _buildWindowItem(
     BuildContext context,
     TerminalWindowsViewModel viewModel,
-    SshTerminalSession session,
+    TerminalWindowSnapshot session,
     TerminalStrings strings,
   ) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -641,7 +643,7 @@ extension _TerminalWindowsContent on _TerminalWindowsPageState {
 
   Widget _buildSessionMeta(
     BuildContext context,
-    SshTerminalSession session,
+    TerminalWindowSnapshot session,
     TerminalStrings strings,
   ) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -705,7 +707,7 @@ extension _TerminalWindowsContent on _TerminalWindowsPageState {
   }
 
   String _formatAutoDestroy(
-    SshTerminalSession session,
+    TerminalWindowSnapshot session,
     TerminalStrings strings,
   ) {
     final seconds = session.tmuxAutoDeleteSeconds;
@@ -714,7 +716,7 @@ extension _TerminalWindowsContent on _TerminalWindowsPageState {
     }
 
     final duration = _formatDuration(seconds, strings);
-    if (session.isConnected || session.state == SshConnectionState.connecting) {
+    if (session.isConnected || session.state == TerminalLinkState.connecting) {
       return strings.autoDestroyAfter(duration);
     }
 
@@ -747,7 +749,7 @@ extension _TerminalWindowsContent on _TerminalWindowsPageState {
   Widget _buildLeadingIcon(
     BuildContext context,
     TerminalWindowsViewModel viewModel,
-    SshTerminalSession session,
+    TerminalWindowSnapshot session,
     bool selected,
     Color statusColor,
   ) {
@@ -769,36 +771,36 @@ extension _TerminalWindowsContent on _TerminalWindowsPageState {
     );
   }
 
-  Color _statusColor(BuildContext context, SshTerminalSession session) {
+  Color _statusColor(BuildContext context, TerminalWindowSnapshot session) {
     final status = AppStatusColors.of(context);
     switch (session.state) {
-      case SshConnectionState.connected:
+      case TerminalLinkState.connected:
         return status.success;
-      case SshConnectionState.connecting:
+      case TerminalLinkState.connecting:
         return status.warning;
-      case SshConnectionState.error:
+      case TerminalLinkState.error:
         return status.error;
-      case SshConnectionState.disconnected:
+      case TerminalLinkState.disconnected:
         return status.neutral;
     }
   }
 
-  String _statusLabel(SshTerminalSession session, TerminalStrings strings) {
+  String _statusLabel(TerminalWindowSnapshot session, TerminalStrings strings) {
     switch (session.state) {
-      case SshConnectionState.connected:
+      case TerminalLinkState.connected:
         return strings.connected;
-      case SshConnectionState.connecting:
+      case TerminalLinkState.connecting:
         return strings.connecting;
-      case SshConnectionState.error:
+      case TerminalLinkState.error:
         return strings.connectionError;
-      case SshConnectionState.disconnected:
+      case TerminalLinkState.disconnected:
         return strings.disconnected;
     }
   }
 
-  String? _statusDetail(SshTerminalSession session) {
-    if (session.state != SshConnectionState.error &&
-        session.state != SshConnectionState.disconnected) {
+  String? _statusDetail(TerminalWindowSnapshot session) {
+    if (session.state != TerminalLinkState.error &&
+        session.state != TerminalLinkState.disconnected) {
       return null;
     }
     final message = session.errorMessage?.trim();

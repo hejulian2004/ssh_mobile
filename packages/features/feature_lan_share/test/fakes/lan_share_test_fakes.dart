@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:feature_lan_share/feature_lan_share.dart';
 import 'package:network_sdk/network_sdk.dart';
-import 'package:network_transport/network_transport.dart';
 
 final class FakeLanShareStrings extends Fake implements LanShareStrings {
   FakeLanShareStrings({this.english = true});
@@ -174,7 +173,10 @@ final class FakeLanShareNetworkAccessPort implements LanShareNetworkAccessPort {
   }
 }
 
-final class FakeLanShareNetworkRuntime implements NetworkRuntime {
+/// Requests recorded by [FakeLanShareNetworkRuntime].
+enum LanShareRuntimeRequest { runtime, webSocketRelay }
+
+final class FakeLanShareNetworkRuntime implements LanShareNetworkRuntimePort {
   FakeLanShareNetworkRuntime({
     this.refuseWebSocketRelay = false,
     this.boundLocalPort = 43123,
@@ -182,53 +184,31 @@ final class FakeLanShareNetworkRuntime implements NetworkRuntime {
 
   int ensureCalls = 0;
 
-  /// 按请求顺序记录已请求的 Capability。
-  final List<NetworkCapability> requestedCapabilities = <NetworkCapability>[];
+  /// 按请求顺序记录已请求的运行时能力。
+  final List<LanShareRuntimeRequest> requestedCapabilities =
+      <LanShareRuntimeRequest>[];
 
-  /// 为 true 时，`webSocketRelay` 请求抛出 `UnsupportedError`。
+  /// 为 true 时，WebSocket Relay 请求抛出 `UnsupportedError`。
   final bool refuseWebSocketRelay;
+
+  @override
   final int? boundLocalPort;
-  bool disposed = false;
 
   @override
-  NetworkRuntimeState get state =>
-      disposed ? NetworkRuntimeState.disposed : NetworkRuntimeState.idle;
-
-  @override
-  NetworkRuntimeDiagnostics get diagnostics => NetworkRuntimeDiagnostics(
-    state: state,
-    activeConnections: 0,
-    nativeHandles: 0,
-    readyCapabilities: const <NetworkCapability>[],
-    boundLocalPort: boundLocalPort,
-  );
-
-  @override
-  Future<void> ensureCapability(NetworkCapability capability) async {
+  Future<void> ensureRuntime() async {
     ensureCalls++;
-    requestedCapabilities.add(capability);
-    if (refuseWebSocketRelay &&
-        capability == NetworkCapability.webSocketRelay) {
-      throw UnsupportedError(
-        'Network capability is unavailable: ${capability.label}',
-      );
-    }
+    requestedCapabilities.add(LanShareRuntimeRequest.runtime);
   }
 
   @override
-  Future<NetworkCommandGateway> openCommandGateway() async =>
-      throw UnsupportedError('fake runtime has no command gateway');
-
-  @override
-  Future<NetworkRealtimeGateway> openRealtimeGateway() async =>
-      throw UnsupportedError('fake runtime has no realtime gateway');
-
-  @override
-  bool isCapabilityReady(NetworkCapability capability) => false;
-
-  @override
-  Future<void> dispose() async {
-    disposed = true;
+  Future<void> ensureWebSocketRelay() async {
+    ensureCalls++;
+    requestedCapabilities.add(LanShareRuntimeRequest.webSocketRelay);
+    if (refuseWebSocketRelay) {
+      throw UnsupportedError(
+        'Network capability is unavailable: webSocketRelay',
+      );
+    }
   }
 }
 

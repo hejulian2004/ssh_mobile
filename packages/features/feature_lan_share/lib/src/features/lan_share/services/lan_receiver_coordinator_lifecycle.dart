@@ -141,8 +141,7 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
             securityService: security,
             storageService: lanStorage,
             networkIdentityPublicKeyProvider: () async => identity.publicKey,
-            nativeTransferPortProvider: () =>
-                networkRuntime.diagnostics.boundLocalPort,
+            nativeTransferPortProvider: () => networkRuntime.boundLocalPort,
             onPairingCommitted: _registerNewlyPairedPeer,
             discoveryBridge: discoveryBridge,
           );
@@ -199,7 +198,7 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
       final storage = _lanStorageService;
       if (storage != null) {
         try {
-          await networkRuntime.ensureCapability(NetworkCapability.runtime);
+          await networkRuntime.ensureRuntime();
           final facade = await networkAccess.borrowFacade();
           if (facade != null) {
             _networkFacade = facade;
@@ -216,7 +215,7 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
             if (discoveredPeers.isNotEmpty) {
               await peerRegistry.syncDiscoveredEndpoints(discoveredPeers);
             }
-            nativePort = networkRuntime.diagnostics.boundLocalPort;
+            nativePort = networkRuntime.boundLocalPort;
             await _relayCoordinator?.attachFacade(facade);
             _relayCoordinator?.connectConfiguredInBackground();
           }
@@ -229,7 +228,7 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
         }
       }
     } else {
-      nativePort = networkRuntime.diagnostics.boundLocalPort;
+      nativePort = networkRuntime.boundLocalPort;
     }
 
     int? boundPort;
@@ -332,13 +331,12 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
   }
 }
 
-/// 将 App Scope Runtime 收窄为 Relay Owner 可借用的单一能力。
+/// 将 App Scope Runtime 端口收窄为 Relay Owner 可借用的单一能力。
 final class _LanRelayCapabilityAdapter implements LanRelayCapabilityPort {
   const _LanRelayCapabilityAdapter(this._runtime);
 
-  final NetworkRuntime _runtime;
+  final LanShareNetworkRuntimePort _runtime;
 
   @override
-  Future<void> ensureWebSocketRelay() =>
-      _runtime.ensureCapability(NetworkCapability.webSocketRelay);
+  Future<void> ensureWebSocketRelay() => _runtime.ensureWebSocketRelay();
 }

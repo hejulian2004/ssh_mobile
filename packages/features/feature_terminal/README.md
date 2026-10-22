@@ -1,4 +1,4 @@
-最新更新时间：2026-08-24
+最新更新时间：2026-10-22
 
 # feature_terminal
 
@@ -9,7 +9,8 @@ Terminal Pilot 的独立 Feature Package。
 - `lib/src/domain`：终端模型、Repository 和 App/Infrastructure Port；
 - `lib/src/data`：只属于 Terminal 的 Drift `terminal.db`；
 - `lib/src/application`：Module 与路由级 ViewModel；
-- `lib/src/presentation`：终端页面和专属 Widget。
+- `lib/src/presentation`：终端页面和专属 Widget。页面只读本包 ViewModel 和
+  `app_ui`，不导入 `ssh_core`。
 
 `TerminalFeatureScope` 是 Feature 自己拥有的 Provider 组合边界。App Shell
 只注入 App Scope 的 `SshSessionManager`、Terminal Port 和历史 Repository；

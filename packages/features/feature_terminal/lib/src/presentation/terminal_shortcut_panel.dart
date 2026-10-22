@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:ssh_core/ssh_core.dart';
 
 import 'package:app_ui/app_ui.dart';
 
@@ -28,10 +27,10 @@ const _builtinTerminalShortcutCommands = <TerminalShortcutCommand>[
 ];
 
 class TerminalShortcutPanel extends StatelessWidget {
-  final String sessionId;
   final TerminalStrings strings;
   final Color toolbarColor;
   final TextEditingController complexInputController;
+  final ValueChanged<String> onSendData;
   final ValueChanged<String> onSendComplexInput;
   final ValueChanged<TerminalKeyboardStroke> onTerminalStroke;
   final FocusNode terminalFocusNode;
@@ -42,10 +41,10 @@ class TerminalShortcutPanel extends StatelessWidget {
 
   const TerminalShortcutPanel({
     super.key,
-    required this.sessionId,
     required this.strings,
     required this.toolbarColor,
     required this.complexInputController,
+    required this.onSendData,
     required this.onSendComplexInput,
     required this.onTerminalStroke,
     required this.terminalFocusNode,
@@ -432,10 +431,7 @@ class TerminalShortcutPanel extends StatelessWidget {
               : null,
           onPressed: () {
             context.read<TerminalShortcutPort>().recordUse(command.id);
-            context.read<SshSessionManager>().terminalCapability?.sendData(
-              sessionId,
-              command.code,
-            );
+            onSendData(command.code);
             terminalFocusNode.requestFocus();
           },
         ),
@@ -487,10 +483,7 @@ class TerminalShortcutPanel extends StatelessWidget {
                           context.read<TerminalShortcutPort>().recordUse(
                             cmd.id,
                           );
-                          context
-                              .read<SshSessionManager>()
-                              .terminalCapability
-                              ?.sendData(sessionId, cmd.code);
+                          onSendData(cmd.code);
                           terminalFocusNode.requestFocus();
                         },
                       ),

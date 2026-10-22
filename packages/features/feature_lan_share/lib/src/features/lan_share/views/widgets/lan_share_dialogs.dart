@@ -32,20 +32,28 @@ extension _LanShareDialogActions on _LanShareScreenState {
                 Navigator.pop(ctx);
                 if (!mounted) return;
                 if (!state.isTrusted) {
-                  final pairingResult = await vm.requestPairing(dev);
+                  final pairingResult = await lanUiIgnored(
+                    vm.requestPairing(dev),
+                  );
                   if (!mounted) return;
-                  if (pairingResult is NetworkFailure<void>) {
-                    _showRequestFailure(context, pairingResult, strings);
+                  if (pairingResult.failure != null) {
+                    _showRequestFailure(
+                      context,
+                      pairingResult.failure!,
+                      strings,
+                    );
                   }
                   return;
                 }
                 for (final path in filePaths) {
-                  final sendResult = await vm.sendFile(
-                    peerId: dev.deviceId,
-                    filePath: path,
-                    discovery: dev,
+                  final sendResult = await lanUiIgnored(
+                    vm.sendFile(
+                      peerId: dev.deviceId,
+                      filePath: path,
+                      discovery: dev,
+                    ),
                   );
-                  if (sendResult is NetworkFailure && mounted) {
+                  if (sendResult.failure != null && mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text(strings.lanShareOffline)),
                     );
@@ -67,8 +75,8 @@ extension _LanShareDialogActions on _LanShareScreenState {
     LanShareViewModel vm,
   ) async {
     if (!vm.isWebShareActive) {
-      final result = await vm.toggleWebShare();
-      if (result is NetworkFailure<void> && context.mounted) {
+      final result = await lanUiIgnored(vm.toggleWebShare());
+      if (result.failure != null && context.mounted) {
         final message = vm.webShareAddressSelectionMessage;
         if (message != null) {
           ScaffoldMessenger.of(
@@ -174,17 +182,18 @@ extension _LanShareDialogActions on _LanShareScreenState {
   }
 
   /// 请求设备配对，并把网络失败转换成界面提示。
-  Future<NetworkResult<void>> _requestPairingWithFeedback(
+  Future<LanUiOutcome<void>> _requestPairingWithFeedback(
     BuildContext context,
     LanShareViewModel vm,
     LanDiscoveredPeer device,
     LanShareStrings strings,
   ) async {
-    final result = await vm.requestPairing(device);
-    if (result is NetworkFailure<void> &&
-        result.error.code != NetworkErrorCode.cancelled &&
+    final result = await lanUiIgnored(vm.requestPairing(device));
+    final failure = result.failure;
+    if (failure != null &&
+        failure.kind != LanUiFailureKind.cancelled &&
         context.mounted) {
-      _showRequestFailure(context, result, strings);
+      _showRequestFailure(context, failure, strings);
     }
     return result;
   }
@@ -192,10 +201,10 @@ extension _LanShareDialogActions on _LanShareScreenState {
   /// 展示配对或连接请求返回的具体失败原因。
   void _showRequestFailure(
     BuildContext context,
-    NetworkFailure<void> failure,
+    LanUiFailure failure,
     LanShareStrings strings,
   ) {
-    final message = failure.error.message.trim();
+    final message = failure.message.trim();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message.isEmpty ? strings.lanShareOffline : message),
@@ -243,8 +252,8 @@ extension _LanShareDialogActions on _LanShareScreenState {
     bool isRefreshing = false;
 
     Future<void> applyOverride(BuildContext dialogContext, String? ip) async {
-      final result = await vm.updateWebShareAddressOverride(ip);
-      if (result is NetworkFailure<void>) {
+      final result = await lanUiIgnored(vm.updateWebShareAddressOverride(ip));
+      if (result.failure != null) {
         final message = vm.webShareAddressSelectionMessage;
         if (message != null && context.mounted) {
           ScaffoldMessenger.of(
@@ -366,8 +375,8 @@ extension _LanShareDialogActions on _LanShareScreenState {
                                   : () async {
                                       setDialogState(() => isRefreshing = true);
                                       try {
-                                        final updated =
-                                            await LanDiscoveryService.getLocalIpInterfaces();
+                                        final updated = await vm
+                                            .localIpInterfaces();
                                         if (ctx.mounted) {
                                           setDialogState(() {
                                             currentIpMap = updated;
@@ -488,8 +497,8 @@ extension _LanShareDialogActions on _LanShareScreenState {
                                 : () async {
                                     setDialogState(() => isRefreshing = true);
                                     try {
-                                      final updated =
-                                          await LanDiscoveryService.getLocalIpInterfaces();
+                                      final updated = await vm
+                                          .localIpInterfaces();
                                       if (ctx.mounted) {
                                         setDialogState(() {
                                           currentIpMap = updated;

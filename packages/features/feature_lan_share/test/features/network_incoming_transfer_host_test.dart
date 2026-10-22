@@ -1,10 +1,10 @@
 import 'dart:async';
 
+import 'package:feature_lan_share/src/domain/lan_page_outcome.dart';
 import 'package:feature_lan_share/src/domain/lan_share_ports.dart';
 import 'package:feature_lan_share/src/features/lan_share/views/network_incoming_transfer_host.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:network_sdk/network_sdk.dart';
 import 'package:provider/provider.dart';
 
 import '../fakes/lan_share_test_fakes.dart';
@@ -38,11 +38,12 @@ void main() {
       final settings = FakeLanShareSettings();
       final logger = FakeLanShareLogger();
       int acceptCalls = 0;
-      NetworkResult<void> nextResult = const NetworkFailure<void>(
-        NetworkError(
-          code: NetworkErrorCode.ioError,
+      LanUiOutcome<void> nextResult = const LanUiOutcome<void>.failure(
+        LanUiFailure(
+          kind: LanUiFailureKind.other,
           message: 'Socket write failed',
-          operation: NetworkOperation.respondToIncoming,
+          retryable: true,
+          detail: 'Socket write failed',
         ),
       );
 
@@ -56,7 +57,7 @@ void main() {
           acceptCalls++;
           return nextResult;
         },
-        reject: () async => const NetworkSuccess<void>(null),
+        reject: () async => const LanUiOutcome<void>.success(),
       );
 
       await tester.pumpWidget(
@@ -82,7 +83,7 @@ void main() {
       expect(find.text('Retry'), findsOneWidget);
 
       // Setup success for second attempt
-      nextResult = const NetworkSuccess<void>(null);
+      nextResult = const LanUiOutcome<void>.success();
 
       // Tap Retry -> succeeds
       await tester.tap(find.text('Retry'));
@@ -107,15 +108,16 @@ void main() {
         expiresAt: DateTime.now().add(const Duration(minutes: 5)),
         accept: () async {
           acceptCalls++;
-          return const NetworkFailure<void>(
-            NetworkError(
-              code: NetworkErrorCode.resourceLimit,
+          return const LanUiOutcome<void>.failure(
+            LanUiFailure(
+              kind: LanUiFailureKind.resourceLimit,
               message: 'Insufficient storage space',
-              operation: NetworkOperation.respondToIncoming,
+              retryable: false,
+              detail: 'Insufficient storage space',
             ),
           );
         },
-        reject: () async => const NetworkSuccess<void>(null),
+        reject: () async => const LanUiOutcome<void>.success(),
       );
 
       await tester.pumpWidget(
@@ -148,7 +150,7 @@ void main() {
       final settings = FakeLanShareSettings();
       final logger = FakeLanShareLogger();
       int acceptCalls = 0;
-      final completer = Completer<NetworkResult<void>>();
+      final completer = Completer<LanUiOutcome<void>>();
 
       final request = IncomingApprovalRequest(
         sessionId: 'tx-3',
@@ -160,7 +162,7 @@ void main() {
           acceptCalls++;
           return completer.future;
         },
-        reject: () async => const NetworkSuccess<void>(null),
+        reject: () async => const LanUiOutcome<void>.success(),
       );
 
       await tester.pumpWidget(
@@ -180,7 +182,7 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
 
       // Completing the future finishes the accept
-      completer.complete(const NetworkSuccess<void>(null));
+      completer.complete(const LanUiOutcome<void>.success());
       await tester.pump();
       expect(acceptCalls, 1);
     },
@@ -193,7 +195,7 @@ void main() {
       final logger = FakeLanShareLogger();
       int acceptCalls = 0;
       int rejectCalls = 0;
-      final acceptCompleter = Completer<NetworkResult<void>>();
+      final acceptCompleter = Completer<LanUiOutcome<void>>();
 
       final request = IncomingApprovalRequest(
         sessionId: 'tx-4',
@@ -207,7 +209,7 @@ void main() {
         },
         reject: () async {
           rejectCalls++;
-          return const NetworkSuccess<void>(null);
+          return const LanUiOutcome<void>.success();
         },
       );
 
@@ -229,11 +231,12 @@ void main() {
 
       // Fail the accept with retryable error
       acceptCompleter.complete(
-        const NetworkFailure<void>(
-          NetworkError(
-            code: NetworkErrorCode.ioError,
+        const LanUiOutcome<void>.failure(
+          LanUiFailure(
+            kind: LanUiFailureKind.other,
             message: 'Socket timeout',
-            operation: NetworkOperation.respondToIncoming,
+            retryable: true,
+            detail: 'Socket timeout',
           ),
         ),
       );
@@ -252,7 +255,7 @@ void main() {
       final logger = FakeLanShareLogger();
       int acceptCalls = 0;
       int rejectCalls = 0;
-      final acceptCompleter = Completer<NetworkResult<void>>();
+      final acceptCompleter = Completer<LanUiOutcome<void>>();
 
       final request = IncomingApprovalRequest(
         sessionId: 'tx-5',
@@ -266,7 +269,7 @@ void main() {
         },
         reject: () async {
           rejectCalls++;
-          return const NetworkSuccess<void>(null);
+          return const LanUiOutcome<void>.success();
         },
       );
 
@@ -287,7 +290,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
 
       // Sockets succeed despite clock
-      acceptCompleter.complete(const NetworkSuccess<void>(null));
+      acceptCompleter.complete(const LanUiOutcome<void>.success());
       await tester.pumpAndSettle();
 
       // Succeeded, reject was NOT invoked
@@ -302,11 +305,12 @@ void main() {
       final settings = FakeLanShareSettings();
       final logger = FakeLanShareLogger();
       int rejectCalls = 0;
-      NetworkResult<void> nextResult = const NetworkFailure<void>(
-        NetworkError(
-          code: NetworkErrorCode.ioError,
+      LanUiOutcome<void> nextResult = const LanUiOutcome<void>.failure(
+        LanUiFailure(
+          kind: LanUiFailureKind.other,
           message: 'Network unreachable on reject',
-          operation: NetworkOperation.respondToIncoming,
+          retryable: true,
+          detail: 'Network unreachable on reject',
         ),
       );
 
@@ -316,7 +320,7 @@ void main() {
         fileName: 'test.bin',
         totalBytes: 100,
         expiresAt: DateTime.now().add(const Duration(minutes: 5)),
-        accept: () async => const NetworkSuccess<void>(null),
+        accept: () async => const LanUiOutcome<void>.success(),
         reject: () async {
           rejectCalls++;
           return nextResult;
@@ -341,7 +345,7 @@ void main() {
       expect(find.text('Retry Reject'), findsOneWidget);
 
       // Second attempt succeeds
-      nextResult = const NetworkSuccess<void>(null);
+      nextResult = const LanUiOutcome<void>.success();
       await tester.tap(find.text('Retry Reject'));
       await tester.pumpAndSettle();
 

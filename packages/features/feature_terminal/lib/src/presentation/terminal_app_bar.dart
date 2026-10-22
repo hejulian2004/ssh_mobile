@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'package:app_ui/app_ui.dart';
-import 'package:ssh_core/ssh_core.dart';
 
+import '../domain/terminal_models.dart';
 import '../domain/terminal_strings.dart';
 
 class TerminalScreenAppBar extends StatelessWidget
@@ -11,7 +11,7 @@ class TerminalScreenAppBar extends StatelessWidget
   final String? displayName;
   final String? serverName;
   final String? serverEndpoint;
-  final SshConnectionState connectionState;
+  final TerminalLinkState connectionState;
   final bool isDarkMode;
   final bool reconnectInProgress;
   final VoidCallback onReconnect;
@@ -42,7 +42,7 @@ class TerminalScreenAppBar extends StatelessWidget
     required this.onLargerFont,
   });
 
-  bool get _isConnected => connectionState == SshConnectionState.connected;
+  bool get _isConnected => connectionState == TerminalLinkState.connected;
 
   @override
   Widget build(BuildContext context) {
@@ -207,22 +207,22 @@ class TerminalScreenAppBar extends StatelessWidget
       );
     }
     return switch (connectionState) {
-      SshConnectionState.connected => _TerminalStatusPresentation(
+      TerminalLinkState.connected => _TerminalStatusPresentation(
         label: strings.connected,
         icon: Icons.check_rounded,
         color: statusColors.success,
       ),
-      SshConnectionState.connecting => _TerminalStatusPresentation(
+      TerminalLinkState.connecting => _TerminalStatusPresentation(
         label: strings.connecting,
         icon: Icons.sync_rounded,
         color: statusColors.warning,
       ),
-      SshConnectionState.error => _TerminalStatusPresentation(
+      TerminalLinkState.error => _TerminalStatusPresentation(
         label: strings.terminalConnectionErrorStatus,
         icon: Icons.close_rounded,
         color: statusColors.error,
       ),
-      SshConnectionState.disconnected => _TerminalStatusPresentation(
+      TerminalLinkState.disconnected => _TerminalStatusPresentation(
         label: strings.disconnected,
         icon: Icons.close_rounded,
         color: statusColors.neutral,

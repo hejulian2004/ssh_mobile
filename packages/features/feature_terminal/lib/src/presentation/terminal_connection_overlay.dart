@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'package:app_ui/app_ui.dart';
-import 'package:ssh_core/ssh_core.dart';
 
+import '../domain/terminal_models.dart';
 import '../domain/terminal_strings.dart';
 
 class TerminalConnectionOverlay extends StatelessWidget {
@@ -20,7 +20,7 @@ class TerminalConnectionOverlay extends StatelessWidget {
   });
 
   final TerminalStrings strings;
-  final SshConnectionState connectionState;
+  final TerminalLinkState connectionState;
   final bool reconnectInProgress;
   final Color terminalBackground;
   final String? endpoint;
@@ -31,7 +31,7 @@ class TerminalConnectionOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (connectionState == SshConnectionState.connected &&
+    if (connectionState == TerminalLinkState.connected &&
         !reconnectInProgress) {
       return const SizedBox.shrink();
     }
@@ -39,7 +39,7 @@ class TerminalConnectionOverlay extends StatelessWidget {
     final presentation = _presentation(context);
     final colors = Theme.of(context).colorScheme;
     final isWaiting =
-        reconnectInProgress || connectionState == SshConnectionState.connecting;
+        reconnectInProgress || connectionState == TerminalLinkState.connecting;
 
     return Semantics(
       key: const ValueKey('terminal-connection-overlay'),
@@ -256,25 +256,25 @@ class TerminalConnectionOverlay extends StatelessWidget {
       );
     }
     return switch (connectionState) {
-      SshConnectionState.connecting => _TerminalConnectionPresentation(
+      TerminalLinkState.connecting => _TerminalConnectionPresentation(
         title: strings.connectingSession,
         message: strings.connectingSessionHint,
         icon: Icons.sync_rounded,
         color: extended?.warning ?? AppTheme.terminalAmber,
       ),
-      SshConnectionState.error => _TerminalConnectionPresentation(
+      TerminalLinkState.error => _TerminalConnectionPresentation(
         title: strings.terminalConnectionError,
         message: strings.terminalConnectionErrorHint,
         icon: Icons.error_outline_rounded,
         color: colors.error,
       ),
-      SshConnectionState.disconnected => _TerminalConnectionPresentation(
+      TerminalLinkState.disconnected => _TerminalConnectionPresentation(
         title: strings.connectionInterrupted,
         message: strings.connectionInterruptedHint,
         icon: Icons.link_off_rounded,
         color: colors.error,
       ),
-      SshConnectionState.connected => _TerminalConnectionPresentation(
+      TerminalLinkState.connected => _TerminalConnectionPresentation(
         title: strings.connected,
         message: strings.connectingSessionHint,
         icon: Icons.check_circle_outline_rounded,

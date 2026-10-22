@@ -109,7 +109,7 @@ extension _LanShareHistory on _LanShareScreenState {
             child: AppSectionCard(
               title: session.alias,
               subtitle:
-                  '${_formatDateTime(session.lastMessage.createdAt)}${_routeSuffix(strings, session.lastMessage.routeType)}',
+                  '${_formatDateTime(session.lastMessage.createdAt)}${session.lastMessage.transportRouteSuffix(directLabel: strings.lanRouteDirect, relayLabel: strings.lanRouteRelay)}',
               icon: session.isOnline
                   ? Icons.online_prediction_rounded
                   : Icons.devices_other_rounded,
@@ -208,14 +208,5 @@ extension _LanShareHistory on _LanShareScreenState {
     final hour = dateTime.hour.toString().padLeft(2, '0');
     final minute = dateTime.minute.toString().padLeft(2, '0');
     return '$year-$month-$day $hour:$minute';
-  }
-
-  String _routeSuffix(LanShareStrings strings, NetworkRouteType? routeType) {
-    final label = switch (routeType) {
-      NetworkRouteType.quicDirect => strings.lanRouteDirect,
-      NetworkRouteType.relay => strings.lanRouteRelay,
-      _ => null,
-    };
-    return label == null ? '' : ' · $label';
   }
 }

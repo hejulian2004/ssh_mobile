@@ -1,4 +1,4 @@
-最新更新时间：2026-10-12
+最新更新时间：2026-10-22
 
 # feature_lan_share 维护约束
 
@@ -17,7 +17,9 @@
   `lan_web_share.dart`). No SSH, other Feature/App `/src/`, or copied model bridge.
   Cross-boundary capabilities use `LanShare*Port` from
   `domain/lan_share_ports.dart` (including `LanShareNetworkAccessPort`); network
-  types come directly from `network_sdk` and Features consume only the
+  types come directly from `network_sdk` inside application services.
+  Presentation uses `LanUiOutcome` and does not import `network_sdk` or
+  `LanDiscoveryService`. Features consume only the
   AppRuntime-owned `NetworkFacade`.
 - Never create Socket, FFI, HTTP client, native handle, runtime configuration, or
   a second transport. `BootstrapClient` and `NetworkCommandGateway` are App
@@ -86,8 +88,9 @@
   guess HTTPS. URI construction
   is structured, connections direct/certificate-pinned/no-redirect. Advertising
   restart releases the prior mDNS/UDP generation; delayed callbacks retain their
-  creation socket identity. Runtime startup ensures only `NetworkCapability.runtime`,
-  not QUIC; Wave 1 `ConfigureRuntime` still initializes direct QUIC/TCP, while
+  creation socket identity. Receiver startup calls only
+  `LanShareNetworkRuntimePort.ensureRuntime`, not a QUIC capability; Wave 1
+  `ConfigureRuntime` still initializes direct QUIC/TCP inside the App runtime, while
   QUIC-free WSS-only is deferred to Wave 2 and absent today.
 - Relay settings are changed only through `LanRelaySettingsViewModel` and the
   injected Coordinator; form Token is call-local. Endpoint change closes old

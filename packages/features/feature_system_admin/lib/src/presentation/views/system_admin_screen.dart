@@ -12,7 +12,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
 import 'package:connection_core/connection_core.dart';
-import 'package:ssh_core/ssh_core.dart';
 
 import 'package:app_ui/app_ui.dart';
 
@@ -47,13 +46,6 @@ typedef PerformanceMonitorService = SystemAdminMonitoringPort;
 typedef ConnectionCatalog = SystemAdminConnectionCatalogPort;
 typedef SftpService = SystemAdminFileBrowserPort;
 typedef SftpEntry = SystemAdminFileEntry;
-
-Future<bool> showSshHostKeyTrustDialog(
-  BuildContext context,
-  SshHostKeyPromptRequest request,
-) {
-  return context.read<SystemAdminHostKeyConfirmationPort>().confirm(request);
-}
 
 class SystemAdminScreen extends StatefulWidget {
   const SystemAdminScreen({super.key});

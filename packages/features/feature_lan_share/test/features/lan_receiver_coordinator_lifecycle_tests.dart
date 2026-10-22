@@ -40,7 +40,7 @@ void _registerReceiverLifecycleTests() {
         ]);
         expect(coordinator.receiverActive, isTrue);
         expect(identity.loadCalls, 1);
-        expect(native.requestedCapabilities, [NetworkCapability.runtime]);
+        expect(native.requestedCapabilities, [LanShareRuntimeRequest.runtime]);
         expect(discovery.advertisedEndpoints, isNotEmpty);
         await coordinator.deactivateReceiver();
         expect(coordinator.receiverActive, isFalse);
@@ -137,11 +137,16 @@ void _registerReceiverLifecycleTests() {
 
       expect(
         networkRuntime.requestedCapabilities,
-        contains(NetworkCapability.runtime),
+        contains(LanShareRuntimeRequest.runtime),
       );
       expect(
         networkRuntime.requestedCapabilities,
-        isNot(contains(NetworkCapability.quic)),
+        everyElement(
+          isIn(<LanShareRuntimeRequest>[
+            LanShareRuntimeRequest.runtime,
+            LanShareRuntimeRequest.webSocketRelay,
+          ]),
+        ),
       );
       // The App Scope owns facade startup; Feature activation only borrows it.
       expect(networkService.startCalls, 0);
@@ -226,7 +231,7 @@ void _registerReceiverLifecycleTests() {
 
     expect(
       networkRuntime.requestedCapabilities,
-      contains(NetworkCapability.runtime),
+      contains(LanShareRuntimeRequest.runtime),
     );
     expect(networkService.registerPeerCalls, 1);
 

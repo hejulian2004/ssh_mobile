@@ -7,12 +7,20 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:connection_core/connection_core.dart';
+import 'package:provider/provider.dart';
 import 'package:ssh_core/ssh_core.dart';
 
 import '../../application/system_admin_service.dart';
 import '../../domain/system_admin_models.dart';
 import '../../domain/system_admin_ports.dart';
 import '../system_power_confirm_flow.dart';
+
+Future<bool> showSshHostKeyTrustDialog(
+  BuildContext context,
+  SshHostKeyPromptRequest request,
+) {
+  return context.read<SystemAdminHostKeyConfirmationPort>().confirm(request);
+}
 
 class SystemAdminViewModel extends ChangeNotifier {
   final SystemAdminService _adminService;

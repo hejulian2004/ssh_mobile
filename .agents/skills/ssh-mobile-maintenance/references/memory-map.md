@@ -1,4 +1,4 @@
-> Last updated: 2026-10-09
+> Last updated: 2026-10-22
 
 # Memory Map
 
@@ -99,7 +99,11 @@ Read [Module Dependency](../../../../docs/architecture/MODULE_DEPENDENCY.md) for
 dependency boundaries, [Resource Ownership](../../../../docs/architecture/RESOURCE_OWNERSHIP.md)
 for owner/create/dispose changes, and [Compatibility Inventory](../../../../docs/architecture/COMPATIBILITY_MIGRATION_INVENTORY.md)
 for bridge changes. The broad [Modular Refactor Plan](../../../../docs/architecture/MODULAR_REFACTOR_PLAN.md)
-is conditional, not a default input.
+is conditional, not a default input. A named product capability, a "which files
+do I read" diagnosis, or a forward-dependency question loads only
+[Behavior Boundaries](../../../../docs/architecture/BEHAVIOR_BOUNDARIES.md).
+That catalog routes to one card and its next layer; it does not replace the
+three audits above or a package contract.
 
 For wire/API, Session/Connection/Route lifetime, path selection, recovery,
 Delivery ordering, crypto, Relay/direct, WebRTC, or native task ownership, read
@@ -109,6 +113,7 @@ and [ADR-033 telemetry](../../../../docs/adr/ADR-033-telemetry-data-tracking-arc
 
 ## Quick routes
 
+- One named capability or forward-dependency question → [Behavior Boundaries](../../../../docs/architecture/BEHAVIOR_BOUNDARIES.md) only, then that card's first path. Open the next layer only when the card says the symptom crosses it.
 - Flutter UI → Client default + local contract; add Client architecture only for shared ownership/API.
 - Rust/transport → SDK default + Transport and Routing + exact ADR; add Client only for public FFI/Dart changes.
 - Backend API → Backend default + Relay README; add Front for admin consumers, SDK for wire/device changes.

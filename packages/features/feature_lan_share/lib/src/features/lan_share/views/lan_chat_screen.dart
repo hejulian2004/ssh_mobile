@@ -5,8 +5,8 @@ import 'package:provider/provider.dart';
 
 import '../../../domain/lan_share_ports.dart';
 import '../../../services/lan_share/lan_share_models.dart';
-import 'package:network_sdk/network_sdk.dart';
 import 'package:app_ui/app_ui.dart';
+import '../viewmodels/lan_ui_outcome.dart';
 import '../viewmodels/lan_share_viewmodel.dart';
 import 'lan_preview_viewer_screen.dart';
 import 'lan_text_selection_screen.dart';
@@ -112,23 +112,24 @@ class _LanChatScreenState extends State<LanChatScreen> {
                 Navigator.pop(ctx);
                 final file = await FilePicker.pickFile(type: FileType.image);
                 if (file != null && file.path != null) {
-                  final result = await vm.sendFile(
-                    peerId: peerId,
-                    filePath: file.path!,
-                    discovery: device,
+                  final result = await lanUiIgnored(
+                    vm.sendFile(
+                      peerId: peerId,
+                      filePath: file.path!,
+                      discovery: device,
+                    ),
                   );
-                  if (result is NetworkFailure<TransferSession> &&
-                      context.mounted) {
-                    if (result.error.code ==
-                        NetworkErrorCode.authenticationFailed) {
+                  if (result.failure != null && context.mounted) {
+                    if (result.failure!.kind ==
+                        LanUiFailureKind.authenticationFailed) {
                       _showE2ENotSupportedError(context, strings);
                     } else {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(
                             strings.isEnglish
-                                ? 'Failed to send image: ${result.error.message}'
-                                : '发送图片失败：${result.error.message}',
+                                ? 'Failed to send image: ${result.failure!.message}'
+                                : '发送图片失败：${result.failure!.message}',
                           ),
                         ),
                       );
@@ -145,23 +146,24 @@ class _LanChatScreenState extends State<LanChatScreen> {
                 Navigator.pop(ctx);
                 final file = await FilePicker.pickFile(type: FileType.video);
                 if (file != null && file.path != null) {
-                  final result = await vm.sendFile(
-                    peerId: peerId,
-                    filePath: file.path!,
-                    discovery: device,
+                  final result = await lanUiIgnored(
+                    vm.sendFile(
+                      peerId: peerId,
+                      filePath: file.path!,
+                      discovery: device,
+                    ),
                   );
-                  if (result is NetworkFailure<TransferSession> &&
-                      context.mounted) {
-                    if (result.error.code ==
-                        NetworkErrorCode.authenticationFailed) {
+                  if (result.failure != null && context.mounted) {
+                    if (result.failure!.kind ==
+                        LanUiFailureKind.authenticationFailed) {
                       _showE2ENotSupportedError(context, strings);
                     } else {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(
                             strings.isEnglish
-                                ? 'Failed to send video: ${result.error.message}'
-                                : '发送视频失败：${result.error.message}',
+                                ? 'Failed to send video: ${result.failure!.message}'
+                                : '发送视频失败：${result.failure!.message}',
                           ),
                         ),
                       );
@@ -178,23 +180,24 @@ class _LanChatScreenState extends State<LanChatScreen> {
                 Navigator.pop(ctx);
                 final file = await FilePicker.pickFile();
                 if (file != null && file.path != null) {
-                  final result = await vm.sendFile(
-                    peerId: peerId,
-                    filePath: file.path!,
-                    discovery: device,
+                  final result = await lanUiIgnored(
+                    vm.sendFile(
+                      peerId: peerId,
+                      filePath: file.path!,
+                      discovery: device,
+                    ),
                   );
-                  if (result is NetworkFailure<TransferSession> &&
-                      context.mounted) {
-                    if (result.error.code ==
-                        NetworkErrorCode.authenticationFailed) {
+                  if (result.failure != null && context.mounted) {
+                    if (result.failure!.kind ==
+                        LanUiFailureKind.authenticationFailed) {
                       _showE2ENotSupportedError(context, strings);
                     } else {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(
                             strings.isEnglish
-                                ? 'Failed to send file: ${result.error.message}'
-                                : '发送文件失败：${result.error.message}',
+                                ? 'Failed to send file: ${result.failure!.message}'
+                                : '发送文件失败：${result.failure!.message}',
                           ),
                         ),
                       );
@@ -225,10 +228,11 @@ class _LanChatScreenState extends State<LanChatScreen> {
                 if (data != null &&
                     data.text != null &&
                     data.text!.isNotEmpty) {
-                  final result = await vm.sendClipboard(device, data.text!);
-                  if (result is NetworkFailure<void> &&
-                      result.error.code ==
-                          NetworkErrorCode.authenticationFailed &&
+                  final result = await lanUiIgnored(
+                    vm.sendClipboard(device, data.text!),
+                  );
+                  if (result.failure?.kind ==
+                          LanUiFailureKind.authenticationFailed &&
                       context.mounted) {
                     _showE2ENotSupportedError(context, strings);
                   }
@@ -401,18 +405,19 @@ class _LanChatScreenState extends State<LanChatScreen> {
                                 final isRelayAllowed =
                                     peerState?.trust?.authorization.relay ??
                                     false;
-                                final result = await vm.setRelayAuthorization(
-                                  widget.targetDeviceId,
-                                  !isRelayAllowed,
+                                final result = await lanUiIgnored(
+                                  vm.setRelayAuthorization(
+                                    widget.targetDeviceId,
+                                    !isRelayAllowed,
+                                  ),
                                 );
-                                if (context.mounted &&
-                                    result is NetworkFailure<void>) {
+                                if (context.mounted && result.failure != null) {
                                   messenger.showSnackBar(
                                     SnackBar(
                                       content: Text(
                                         strings.isEnglish
-                                            ? 'Failed to update Relay authorization: ${result.error.message}'
-                                            : '更新中继授权失败：${result.error.message}',
+                                            ? 'Failed to update Relay authorization: ${result.failure!.message}'
+                                            : '更新中继授权失败：${result.failure!.message}',
                                       ),
                                     ),
                                   );
@@ -442,17 +447,17 @@ class _LanChatScreenState extends State<LanChatScreen> {
                                   ),
                                 );
                                 if (confirm == true) {
-                                  final result = await vm.forgetDevice(
-                                    widget.targetDeviceId,
+                                  final result = await lanUiIgnored(
+                                    vm.forgetDevice(widget.targetDeviceId),
                                   );
                                   if (context.mounted) {
-                                    if (result is NetworkFailure<void>) {
+                                    if (result.failure != null) {
                                       messenger.showSnackBar(
                                         SnackBar(
                                           content: Text(
                                             strings.isEnglish
-                                                ? 'Failed to forget device: ${result.error.message}'
-                                                : '解除设备配对失败：${result.error.message}',
+                                                ? 'Failed to forget device: ${result.failure!.message}'
+                                                : '解除设备配对失败：${result.failure!.message}',
                                           ),
                                         ),
                                       );
@@ -752,13 +757,11 @@ class _LanChatScreenState extends State<LanChatScreen> {
                                         final val = _textController.text.trim();
                                         if (val.isNotEmpty) {
                                           _textController.clear();
-                                          final result = await vm.sendText(
-                                            onlineDevice,
-                                            val,
+                                          final result = await lanUiIgnored(
+                                            vm.sendText(onlineDevice, val),
                                           );
-                                          if (result is NetworkFailure<void> &&
-                                              result.error.code ==
-                                                  NetworkErrorCode
+                                          if (result.failure?.kind ==
+                                                  LanUiFailureKind
                                                       .authenticationFailed &&
                                               context.mounted) {
                                             _showE2ENotSupportedError(
@@ -901,11 +904,10 @@ class _LanChatScreenState extends State<LanChatScreen> {
                     color: colors.onSurfaceVariant,
                   ),
                 ),
-                if (msg.routeType == NetworkRouteType.quicDirect ||
-                    msg.routeType == NetworkRouteType.relay) ...[
+                if (msg.showsTransportRoute) ...[
                   const SizedBox(width: 6),
                   Icon(
-                    msg.routeType == NetworkRouteType.relay
+                    msg.usesRelayRoute
                         ? Icons.hub_outlined
                         : Icons.swap_calls_rounded,
                     size: 12,
@@ -913,7 +915,7 @@ class _LanChatScreenState extends State<LanChatScreen> {
                   ),
                   const SizedBox(width: 2),
                   Text(
-                    msg.routeType == NetworkRouteType.relay
+                    msg.usesRelayRoute
                         ? strings.lanRouteRelay
                         : strings.lanRouteDirect,
                     style: theme.textTheme.bodySmall?.copyWith(

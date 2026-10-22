@@ -1,7 +1,7 @@
 part of '../terminal_windows_screen.dart';
 
 extension _TerminalWindowsActions on _TerminalWindowsPageState {
-  void _openWindow(BuildContext context, SshTerminalSession session) {
+  void _openWindow(BuildContext context, TerminalWindowSnapshot session) {
     Navigator.pushNamedAndRemoveUntil(
       context,
       '/terminal',
@@ -17,7 +17,7 @@ extension _TerminalWindowsActions on _TerminalWindowsPageState {
     final connectionId = page.connectionId;
     if (connectionId == null) return;
     final connections = context.read<TerminalConnectionPort>();
-    final ssh = context.read<SshSessionManager>().terminalCapability;
+    final viewModel = context.read<TerminalWindowsViewModel>();
     final windowName = connections.defaultDisplayNameForConnection(
       connectionId,
     );
@@ -42,7 +42,7 @@ extension _TerminalWindowsActions on _TerminalWindowsPageState {
     Navigator.of(context).pop();
 
     if (sessionId == null) {
-      final message = ssh?.errorMessage ?? strings.unknown;
+      final message = viewModel.capabilityError ?? strings.unknown;
       final lower = message.toLowerCase();
       final displayMessage =
           lower.contains('tmux is not installed') ||
@@ -58,7 +58,7 @@ extension _TerminalWindowsActions on _TerminalWindowsPageState {
       return;
     }
 
-    final session = ssh?.getSession(sessionId);
+    final session = viewModel.windowById(sessionId);
     if (session != null && context.mounted) {
       _openWindow(context, session);
     }
@@ -67,7 +67,7 @@ extension _TerminalWindowsActions on _TerminalWindowsPageState {
   Future<void> _renameWindow(
     BuildContext context,
     TerminalWindowsViewModel viewModel,
-    SshTerminalSession session,
+    TerminalWindowSnapshot session,
     TerminalStrings strings,
   ) async {
     final name = await showDialog<String>(
@@ -92,7 +92,7 @@ extension _TerminalWindowsActions on _TerminalWindowsPageState {
   Future<void> _closeWindow(
     BuildContext context,
     TerminalWindowsViewModel viewModel,
-    SshTerminalSession session,
+    TerminalWindowSnapshot session,
     TerminalStrings strings,
   ) async {
     final cleanupCommand = session.tmuxKillCommand;

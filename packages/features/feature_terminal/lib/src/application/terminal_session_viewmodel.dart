@@ -8,12 +8,17 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:ssh_core/ssh_core.dart';
 import 'package:xterm/xterm.dart';
 
 import '../domain/terminal_keyboard_models.dart';
+import '../domain/terminal_models.dart';
 import '../domain/terminal_secret_policy.dart';
 import 'terminal_text_buffer.dart';
+import 'terminal_window_snapshot.dart';
+
+part 'terminal_session_windows.dart';
 
 /// 终端交互页面状态。
 final class TerminalSessionViewModel extends ChangeNotifier {
@@ -23,6 +28,23 @@ final class TerminalSessionViewModel extends ChangeNotifier {
     required this.sessionId,
     required this.connectionId,
   }) {
+    _bindSession();
+  }
+
+  /// 从 Scope 中已注入的 SSH Manager 创建会话 ViewModel。
+  factory TerminalSessionViewModel.fromContext(
+    BuildContext context, {
+    required String sessionId,
+    required String connectionId,
+  }) {
+    return TerminalSessionViewModel(
+      sshSessionManager: context.read<SshSessionManager>(),
+      sessionId: sessionId,
+      connectionId: connectionId,
+    );
+  }
+
+  void _bindSession() {
     _changesSubscription = _terminal.changes.listen(
       (_) => _onSshServiceChanged(),
     );
@@ -80,8 +102,11 @@ final class TerminalSessionViewModel extends ChangeNotifier {
   Timer? _throttleTimer;
   bool _disposed = false;
 
-  static const double _minTerminalFontSize = SshSession.minTerminalFontSize;
-  static const double _maxTerminalFontSize = SshSession.maxTerminalFontSize;
+  /// 页面字号下限，与 SSH 会话字号边界一致。
+  static const double minFontSize = SshSession.minTerminalFontSize;
+
+  /// 页面字号上限，与 SSH 会话字号边界一致。
+  static const double maxFontSize = SshSession.maxTerminalFontSize;
   static const int _baseTerminalFlushChars = 12000;
   static const int _highTerminalFlushChars = 40000;
   static const int _terminalScrollbackLines = 4000;
@@ -128,8 +153,8 @@ final class TerminalSessionViewModel extends ChangeNotifier {
   bool get loadingBufferedOutput => _loadingBufferedOutput;
   SshTerminalSession? get session => _terminal.getSession(sessionId);
   bool get isConnected => session?.isConnected ?? false;
-  SshConnectionState get connectionState =>
-      session?.state ?? SshConnectionState.disconnected;
+  TerminalLinkState get connectionState =>
+      terminalLinkStateOf(session?.state ?? SshConnectionState.disconnected);
   String? get connectionError =>
       session?.errorMessage ?? _terminal.errorMessage;
   String? get displayName => session?.displayName;
@@ -160,7 +185,7 @@ final class TerminalSessionViewModel extends ChangeNotifier {
   }
 
   void setFontSize(double size) {
-    final nextSize = size.clamp(_minTerminalFontSize, _maxTerminalFontSize);
+    final nextSize = size.clamp(minFontSize, maxFontSize);
     if ((nextSize - _fontSize).abs() < 0.05) return;
     _fontSize = nextSize;
     _terminal.setSessionFontSize(sessionId, nextSize);

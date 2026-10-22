@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:network_sdk/network_sdk.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
@@ -10,6 +9,7 @@ import 'package:app_ui/app_ui.dart';
 import '../services/lan_receiver_coordinator.dart';
 import '../utils/lan_platform_capabilities.dart';
 import '../viewmodels/lan_relay_settings_viewmodel.dart';
+import '../viewmodels/lan_ui_outcome.dart';
 import '../viewmodels/lan_share_viewmodel.dart';
 
 class LanShareSettingsScreen extends StatefulWidget {
@@ -234,11 +234,11 @@ class _LanShareSettingsScreenState extends State<LanShareSettingsScreen> {
         ? strings.unknown
         : '${settings.relayHost}:${settings.relayPort}';
     final status = relayViewModel.status;
-    final statusText = switch (status.state) {
-      RelayConnectionState.connected => strings.connected,
-      RelayConnectionState.connecting => strings.lanRelayConnecting,
-      RelayConnectionState.failed => strings.lanRelayFailed,
-      RelayConnectionState.disconnected || RelayConnectionState.unspecified =>
+    final statusText = switch (status.linkState) {
+      LanRelayLinkState.connected => strings.connected,
+      LanRelayLinkState.connecting => strings.lanRelayConnecting,
+      LanRelayLinkState.failed => strings.lanRelayFailed,
+      LanRelayLinkState.idle =>
         status.enrolled
             ? strings.disconnected
             : strings.lanRelayEnrollmentRequired,
@@ -566,22 +566,24 @@ class _RelayEditorDialogState extends State<_RelayEditorDialog> {
       _showError(widget.strings.invalidPort);
       return;
     }
-    final result = await widget.viewModel.save(
-      host: _hostController.text,
-      port: port,
-      enrollmentToken: _tokenController.text,
+    final result = await lanUiIgnored(
+      widget.viewModel.save(
+        host: _hostController.text,
+        port: port,
+        enrollmentToken: _tokenController.text,
+      ),
     );
     if (!mounted) return;
-    if (result is NetworkSuccess<void>) {
+    if (result.succeeded) {
       _tokenController.clear();
       Navigator.maybePop(context);
     }
   }
 
   Future<void> _connect() async {
-    final result = await widget.viewModel.connect();
+    final result = await lanUiIgnored(widget.viewModel.connect());
     if (!mounted) return;
-    if (result is NetworkSuccess<void>) Navigator.maybePop(context);
+    if (result.succeeded) Navigator.maybePop(context);
   }
 
   Future<void> _disconnect() async {
@@ -607,9 +609,9 @@ class _RelayEditorDialogState extends State<_RelayEditorDialog> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    final result = await widget.viewModel.clear();
+    final result = await lanUiIgnored(widget.viewModel.clear());
     if (!mounted) return;
-    if (result is NetworkSuccess<void>) Navigator.maybePop(context);
+    if (result.succeeded) Navigator.maybePop(context);
   }
 
   void _showError(String message) {
@@ -627,23 +629,23 @@ class _RelayStatusBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (label, color, icon) = switch (status.state) {
-      RelayConnectionState.connected => (
+    final (label, color, icon) = switch (status.linkState) {
+      LanRelayLinkState.connected => (
         strings.connected,
         Colors.green,
         Icons.cloud_done_outlined,
       ),
-      RelayConnectionState.connecting => (
+      LanRelayLinkState.connecting => (
         strings.lanRelayConnecting,
         Colors.orange,
         Icons.sync_rounded,
       ),
-      RelayConnectionState.failed => (
+      LanRelayLinkState.failed => (
         strings.lanRelayFailed,
         Theme.of(context).colorScheme.error,
         Icons.error_outline_rounded,
       ),
-      RelayConnectionState.disconnected || RelayConnectionState.unspecified => (
+      LanRelayLinkState.idle => (
         status.enrolled
             ? strings.disconnected
             : strings.lanRelayEnrollmentRequired,
