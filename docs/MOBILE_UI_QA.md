@@ -1,6 +1,6 @@
 # Mobile UI QA
 
-> 最新更新时间：2026-08-08
+> 最新更新时间：2026-10-22
 
 This document records the Android visual test matrix used for SSH Mobile. It
 keeps high-density phone checks reproducible without storing machine-local SDK
@@ -28,7 +28,7 @@ uses an app-specific 720 dp minimum before rendering the denser Servers grid.
 ## Visual baseline
 
 - Verify the light and dark palettes match the desktop design tokens in
-  `lib/theme/app_theme.dart`.
+  `packages/core/app_ui/lib/src/theme/app_theme.dart`.
 - Compare relative header, card, navigation, input, and action sizes between
   both devices. Small differences are expected from their logical dimensions,
   but neither device should look materially denser or more oversized.

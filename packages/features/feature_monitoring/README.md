@@ -1,4 +1,4 @@
-最新更新时间：2026-08-24
+最新更新时间：2026-10-22
 
 # feature_monitoring
 
@@ -17,9 +17,9 @@
 - 不创建 `monitoring.db`，实时采样只保存在服务内存窗口；
 - 不依赖统一存储门面、`SshService`、`AppSettings` 或其他 Feature 实现。
 
-App Shell 负责把现有 SSH、连接目录、日志和后台服务适配到公开 Port。旧根目录
-实现暂时保留委托桥，保证迁移期间既有 AI、Home、System Admin 和测试调用点的
-行为不变。
+App Shell 负责把现有 SSH、连接目录、日志和后台服务适配到公开 Port。旧
+`performance_monitor_service.dart` 与 `lib/features/performance/` 已删除；
+`apps/ssh_mobile_full/lib/services/server_status_probe.dart` 只保留对公开探针类型的兼容导出。
 
 ## Package contract
 

@@ -463,7 +463,7 @@ flowchart LR
 - `packages/infrastructure/ssh_core/`：App Scope SSH Session Manager、Lease/Pool 生命周期、桌面端与移动端 Runtime Adapter、SSH Client/Host Key/命令执行边界及非敏感目标绑定。该包不依赖 `StorageService`；`AppRuntime` 只持有一个 Manager，`feature_terminal` 通过注入使用它，旧 `SshService` 仅作为兼容实现保留。
 - `apps/ssh_mobile_full/lib/core/services/`：跨 Feature 的底层安全与协议工厂，包括 Host Key
   策略和数据保护。
-- `apps/ssh_mobile_full/lib/theme/`、已迁移的共享 Widget 路径以及 `lib/utils/responsive.dart`：`packages/core/app_ui/` 的兼容导出；Feature 专属 Widget 继续放在所属 Feature 内。
+- `apps/ssh_mobile_full/lib/theme/`、已迁移的共享 Widget 路径以及 `apps/ssh_mobile_full/lib/utils/responsive.dart`：`packages/core/app_ui/` 的兼容导出；Feature 专属 Widget 继续放在所属 Feature 内。
 - 新增产品 Feature 的 Model、ViewModel、Service 和 View 必须进入对应的
   `packages/features/feature_*` 成员，不再新建 App 本地 Feature 实现树。
 - `apps/ssh_mobile_full/test/`：单元测试和 Widget 测试。
@@ -601,7 +601,7 @@ canonical Skill 位于 `.agents/skills/`，由 Claude Code 直接加载，无镜
 
 - [移动端 UI QA Matrix](docs/MOBILE_UI_QA.md)
 - [发布检查清单](docs/RELEASE_CHECKLIST.md)
-- [验证报告](docs/VALIDATION_REPORT.md)
+- [Network V2 历史验证快照](docs/VALIDATION_REPORT.md)
 - [工程基线 ADR](docs/ADR_ENGINEERING_BASELINE.md)
 - [性能验收标准](docs/PERFORMANCE_ACCEPTANCE.md)
 - [安全人工回归](docs/security_manual_regression.md)

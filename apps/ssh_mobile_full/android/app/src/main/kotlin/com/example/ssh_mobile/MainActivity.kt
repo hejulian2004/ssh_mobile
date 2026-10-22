@@ -20,6 +20,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private var windowPresentation: WindowPresentation? = null
     private val channelName = "ssh_mobile/power"
     private val systemChannelName = "ssh_mobile/client_system"
     private val lanDiscoveryChannelName = "ssh_mobile/lan_discovery"
@@ -34,6 +35,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        windowPresentation?.dispose()
+        windowPresentation = null
         releaseMulticastLock()
         releaseLocks()
         super.onDestroy()
@@ -41,6 +44,8 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        windowPresentation?.dispose()
+        windowPresentation = WindowPresentation(window, flutterEngine.dartExecutor.binaryMessenger)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
             when (call.method) {
@@ -115,6 +120,16 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        windowPresentation?.refresh()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) windowPresentation?.refresh()
     }
 
     private fun getNativeMemoryStats(): Map<String, Any?> {

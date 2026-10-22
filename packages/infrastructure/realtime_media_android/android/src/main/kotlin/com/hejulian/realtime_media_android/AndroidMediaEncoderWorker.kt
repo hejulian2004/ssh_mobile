@@ -8,14 +8,21 @@ private const val MEDIA_FORMAT_CSD_0 = "csd-0"
 private const val MEDIA_FORMAT_CSD_1 = "csd-1"
 
 internal fun AndroidMediaOwner.drainEncoder() {
-    val codec = synchronized(lock) { encoder } ?: return
+    var codec = synchronized(lock) { encoder } ?: return
     val info = MediaCodec.BufferInfo()
+    val timeline = EncoderTimestampTimeline()
     try {
         while (captureRunning.get()) {
-            val dimensions = displaySize()
-            if (dimensions.first != width || dimensions.second != height) {
-                failFromWorker("capture_source_ended", "Display resolution changed; restart the owner.")
-                break
+            // API 34+ describes the selected app region, including rotation.
+            // Older releases capture the full display and use its live size.
+            val dimensions = projectionLease?.capturedSize ?: displaySize()
+            if (dimensions.first != captureWidth || dimensions.second != captureHeight) {
+                val failure = resizeCapture(dimensions)
+                if (failure != null) {
+                    failFromWorker(failure, "Capture dimensions could not be updated.")
+                    break
+                }
+                codec = synchronized(lock) { encoder } ?: break
             }
             when (val index = codec.dequeueOutputBuffer(info, 10_000)) {
                 MediaCodec.INFO_TRY_AGAIN_LATER -> Unit
@@ -79,10 +86,10 @@ internal fun AndroidMediaOwner.drainEncoder() {
                                         break
                                     }
                                 } else {
-                                    val timestamp = timestampUsTo90k(info.presentationTimeUs)
+                                    val timestamp = timeline.map(timestampUsTo90k(info.presentationTimeUs))
                                     val shouldSend = synchronized(lock) {
                                         val interval = 90_000L / targetFramerate.coerceIn(5, 30)
-                                        if (timestamp < nextEncodeTimestamp90k) {
+                                        if (timestamp < nextEncodeTimestamp90k && !keyframe) {
                                             framesDropped++
                                             false
                                         } else {

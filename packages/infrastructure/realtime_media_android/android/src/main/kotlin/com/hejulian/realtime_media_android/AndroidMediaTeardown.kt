@@ -4,8 +4,10 @@ import java.util.concurrent.TimeUnit
 
 internal fun AndroidMediaOwner.stopCapture(): String? {
     if (identity.direction != "send") return null
+    // A resize may hold the resource lock while configuring a codec. Publish
+    // cancellation first so it cannot attach a late replacement input.
+    captureRunning.set(false)
     val worker = synchronized(lock) {
-        captureRunning.set(false)
         encoderThread to encoderStopAck
     }
     val thread = worker.first
@@ -35,8 +37,8 @@ internal fun AndroidMediaOwner.stopCapture(): String? {
 
 internal fun AndroidMediaOwner.stopDecoder(): String? {
     if (identity.direction != "receive") return null
+    decoderRunning.set(false)
     val worker = synchronized(lock) {
-        decoderRunning.set(false)
         decoderResetRequested.set(false)
         decoderThread to decoderStopAck
     }
@@ -119,6 +121,7 @@ internal fun AndroidMediaOwner.releaseDecoderResources() {
             // Surface teardown is idempotent.
         }
         decoderSurface = null
+        textureEntry?.setOnFrameConsumedListener(null)
         textureEntry?.release()
         textureEntry = null
         pendingDecoderFrame.clear()

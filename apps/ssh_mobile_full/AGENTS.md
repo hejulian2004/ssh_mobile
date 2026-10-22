@@ -42,6 +42,14 @@ owner of Network, SSH, Logger, Modules, and adapters and exposes explicit
 `dispose/close/cancel/release`; Route Scope releases only its ViewModel resources.
 Debug assertions verify observable Timer/Subscription/Lease/native-handle release.
 
+The receiving route's window-presentation controller owns one native fullscreen
+snapshot lease, separate from media/session ownership. Serialize enter/restore;
+route disposal compensates a late enter with the same lease. Windows restores
+the original placement/styles, Android restores the prior system-bar visibility
+and behavior. Stale lease release cannot affect a newer owner. Retain a failed
+restore for retry, surface a bounded error, and never guess a default window
+state or create/restart a media endpoint to change presentation.
+
 `BackgroundServiceManager` owns UI-isolate notifications/permissions/power lock/
 platform service. Background entry points create `_BackgroundSshRuntime`, which
 alone owns background session registry, SSH/tmux, keepalive, and subscriptions.

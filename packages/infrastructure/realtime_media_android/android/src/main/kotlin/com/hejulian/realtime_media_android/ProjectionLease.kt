@@ -45,6 +45,19 @@ internal class ProjectionLeaseStateMachine {
     private val lock = Any()
     private var stateValue = ProjectionLeaseState.GRANTED
     private var ownerTokenValue: Long? = null
+    private var capturedSizeValue: Pair<Int, Int>? = null
+
+    val capturedSize: Pair<Int, Int>?
+        get() = synchronized(lock) { capturedSizeValue }
+
+    fun updateCapturedSize(width: Int, height: Int): Boolean = synchronized(lock) {
+        if (width <= 0 || height <= 0 ||
+            stateValue !in setOf(ProjectionLeaseState.GRANTED, ProjectionLeaseState.CONSUMED)) {
+            return@synchronized false
+        }
+        capturedSizeValue = width to height
+        true
+    }
 
     val state: ProjectionLeaseState
         get() = synchronized(lock) { stateValue }
@@ -66,12 +79,14 @@ internal class ProjectionLeaseStateMachine {
             return@synchronized ProjectionLeaseRevocation(false, null)
         }
         stateValue = ProjectionLeaseState.REVOKED
+        capturedSizeValue = null
         ProjectionLeaseRevocation(true, ownerTokenValue)
     }
 
     fun release(): Boolean = synchronized(lock) {
         if (stateValue == ProjectionLeaseState.RELEASED) return@synchronized false
         stateValue = ProjectionLeaseState.RELEASED
+        capturedSizeValue = null
         ownerTokenValue = null
         true
     }
@@ -79,6 +94,7 @@ internal class ProjectionLeaseStateMachine {
     fun releaseIfGranted(): Boolean = synchronized(lock) {
         if (stateValue != ProjectionLeaseState.GRANTED) return@synchronized false
         stateValue = ProjectionLeaseState.RELEASED
+        capturedSizeValue = null
         ownerTokenValue = null
         true
     }
@@ -107,6 +123,9 @@ internal class ProjectionLease(
             lateinit var lease: ProjectionLease
             val callback = object : MediaProjection.Callback() {
                 override fun onStop() { lease.revoke() }
+                override fun onCapturedContentResize(width: Int, height: Int) {
+                    lease.updateCapturedSize(width, height)
+                }
             }
             lease = ProjectionLease(projection, callback,
                 onRevoked = { onRevoked(lease, it) },
@@ -122,6 +141,12 @@ internal class ProjectionLease(
     }
 
     private val stateMachine = ProjectionLeaseStateMachine()
+    val capturedSize: Pair<Int, Int>?
+        get() = stateMachine.capturedSize
+
+    private fun updateCapturedSize(width: Int, height: Int) {
+        stateMachine.updateCapturedSize(width, height)
+    }
 
     val state: ProjectionLeaseState
         get() = stateMachine.state

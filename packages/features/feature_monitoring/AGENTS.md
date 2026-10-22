@@ -1,4 +1,4 @@
-最新更新时间：2026-08-30
+最新更新时间：2026-10-22
 
 # feature_monitoring 维护约束
 
@@ -16,7 +16,8 @@
   history. Do not add a second cache. Each `startMonitoring` captures an
   immutable target set and epoch; stale epochs cannot retry, record, clear a new
   marker, or restart a Timer. The old `lib/services/performance_monitor_service.dart`
-  path is compatibility only; new code uses
+  path has been removed. `apps/ssh_mobile_full/lib/services/server_status_probe.dart`
+  only re-exports public probe types; new code uses
   `package:feature_monitoring/feature_monitoring.dart`.
 - Contract: allowed models/parsers/Ports/Module/Service/ViewModel/tests; no other
   Feature/App `/src/`, global SSH/Settings, or unified storage. No DB or

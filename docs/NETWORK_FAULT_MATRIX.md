@@ -1,4 +1,4 @@
-最新更新时间：2026-08-31
+最新更新时间：2026-10-22
 
 # Network Fault Matrix
 
@@ -104,10 +104,12 @@ evidence: <screen recording or test log path>
 
 固定矩阵的代码断言位于：
 
-- `native/network_core/crates/network-core/src/tests.rs`：Delivery duplicate、
-  application ACK、RecoveryEpoch、SessionId 与 direct path metrics；
-- `native/network_core/crates/network-core/src/delivery.rs`：
+- `native/network_core/crates/network-core/src/tests/`：Delivery duplicate、
+  application ACK、RecoveryEpoch 与 SessionId；
+- `native/network_core/crates/network-core/src/delivery/`：
   `DuplicateInFlight`/`DuplicateProcessed` 和 ACK gate；
+- `native/network_core/crates/network-nat/src/tests/path_manager.rs`：
+  direct path metrics；
 - `native/network_core/crates/network-transfer/src/{manager,receiver}.rs`：
   checkpoint/offset、Manifest/File Hash 绑定和原子完成；
 - `scripts/bash/e2e/client_backend_e2e.sh`、`tests/client_backend_e2e/`：真实客户端—Caddy—Go

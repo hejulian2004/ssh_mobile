@@ -32,6 +32,8 @@ internal class AndroidMediaOwner(
     private val textureRegistry: TextureRegistry,
     val token: Long,
     val identity: AndroidOwnerIdentity,
+    internal val rendererVisibility: AndroidRendererVisibility,
+    val codecMode: AndroidCodecMode,
 ) {
     internal val lock = Any()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -51,6 +53,8 @@ internal class AndroidMediaOwner(
     internal var textureEntry: TextureRegistry.SurfaceTextureEntry? = null
     internal var width = 0
     internal var height = 0
+    internal var captureWidth = 0
+    internal var captureHeight = 0
     internal var sequence = 0L
     private var terminalCode: String? = null
     private var terminalMessage: String? = null
@@ -105,6 +109,8 @@ internal class AndroidMediaOwner(
             }
             width = dimensions.first
             height = dimensions.second
+            captureWidth = width
+            captureHeight = height
             targetBitrateKbps = AndroidCodecFactory.initialBitrateKbps(width, height)
             val codec = AndroidCodecFactory.createEncoder(width, height)
                 ?: return stopNativeAfterFailure("encoder_unavailable")
@@ -120,7 +126,7 @@ internal class AndroidMediaOwner(
                     "ssh-mobile-screen-share",
                     width,
                     height,
-                    context.resources.displayMetrics.densityDpi,
+                    captureDensityDpi(),
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                     input,
                     null,
@@ -168,6 +174,8 @@ internal class AndroidMediaOwner(
                 return statusCode(rendererStatus)
             }
             val entry = textureRegistry.createSurfaceTexture()
+            val frameAvailable = AtomicBoolean(true)
+            entry.setOnFrameConsumedListener { frameAvailable.set(true) }
             val surfaceTexture = entry.surfaceTexture()
             surfaceTexture.setDefaultBufferSize(16, 16)
             val surface = Surface(surfaceTexture)
@@ -186,7 +194,9 @@ internal class AndroidMediaOwner(
                 decoder = codec
                 decoderRunning.set(true)
                 decoderStopAck = CountDownLatch(1)
-                decoderThread = Thread({ drainDecoder() }, "realtime-media-android-decoder").also {
+                decoderThread = Thread(
+                    { drainDecoder(frameAvailable) }, "realtime-media-android-decoder",
+                ).also {
                     it.isDaemon = true
                     it.start()
                 }
@@ -427,7 +437,7 @@ internal class AndroidMediaOwner(
         return code
     }
 
-    private fun setEncoderBitrate(codec: MediaCodec, bitrateKbps: Int): String? = try {
+    internal fun setEncoderBitrate(codec: MediaCodec, bitrateKbps: Int): String? = try {
         codec.setParameters(Bundle().apply {
             putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bitrateKbps * 1_000)
         })
@@ -448,11 +458,13 @@ internal class AndroidMediaOwner(
         val metrics = context.resources.displayMetrics
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val manager = context.getSystemService(WindowManager::class.java)
-            val bounds = manager?.currentWindowMetrics?.bounds
+            val bounds = manager?.maximumWindowMetrics?.bounds
             if (bounds != null) return bounds.width() to bounds.height()
         }
         return metrics.widthPixels to metrics.heightPixels
     }
+
+    internal fun captureDensityDpi(): Int = context.resources.configuration.densityDpi
 
     internal fun statusCode(status: Int): String = when (status) {
         -1 -> "invalid_argument"

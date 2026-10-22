@@ -10,6 +10,8 @@ import 'realtime_media_feature_adapters.dart';
 import 'screen_share_media_coordinator.dart';
 import 'screen_share_feature_adapters.dart';
 import 'screen_share_session_lease.dart';
+import 'screen_share_video_page.dart';
+import 'screen_share_peer_arbitration.dart';
 
 export 'screen_share_media_coordinator.dart';
 
@@ -34,6 +36,7 @@ final class AppScreenShareRouteArguments {
     this.startOutgoing = false,
     this.acceptIncomingOnOpen = false,
     this.codecMode = RealtimeMediaCodecMode.hardware,
+    this.arbitration,
   });
 
   final RealtimeSession session;
@@ -47,6 +50,7 @@ final class AppScreenShareRouteArguments {
   final bool startOutgoing;
   final bool acceptIncomingOnOpen;
   final RealtimeMediaCodecMode codecMode;
+  final AppScreenSharePeerArbitrationRegistry? arbitration;
 }
 
 /// Route scope for the App Shell's explicit screen-share route.
@@ -106,6 +110,7 @@ final class _AppScreenShareRouteScopeState
   Future<void> _readinessUpdate = Future<void>.value();
   bool? _appliedMediaReadiness;
   bool _routeDisposed = false;
+  Future<void>? _terminalCleanup;
 
   @override
   void initState() {
@@ -119,11 +124,28 @@ final class _AppScreenShareRouteScopeState
             appScreenSharePlatformCapabilitiesFor(widget.resources.backend),
         source: widget.arguments.source,
         codecMode: widget.arguments.codecMode,
+        admitOperation: (operationId) =>
+            widget.arguments.arbitration?.activate(
+              remotePeerId: widget.arguments.session.peerId,
+              initiatorPeerId:
+                  _controller?.snapshot.role == ScreenShareRole.sender
+                  ? widget.arguments.localPeerId
+                  : widget.arguments.session.peerId,
+              operationId: operationId,
+            ) ??
+            true,
       );
-      _initialization = _initialize();
+      _initialization = _initialize().catchError(_failInitialization);
     } catch (error, stackTrace) {
-      _initialization = Future<void>.error(error, stackTrace);
+      _initialization = _failInitialization(error, stackTrace);
     }
+  }
+
+  Future<Never> _failInitialization(Object error, StackTrace stackTrace) async {
+    try {
+      await _disposeRoute();
+    } catch (_) {}
+    Error.throwWithStackTrace(error, stackTrace);
   }
 
   Future<void> _initialize() async {
@@ -158,6 +180,7 @@ final class _AppScreenShareRouteScopeState
       localPeerId: widget.arguments.localPeerId,
       remotePeerId: widget.arguments.session.peerId,
     );
+    _controller!.addListener(_onOperationChanged);
     final initialRequest = widget.arguments.initialIncomingRequest;
     if (initialRequest != null) {
       _controller!.seedIncomingRequest(initialRequest);
@@ -196,6 +219,7 @@ final class _AppScreenShareRouteScopeState
     _routeDisposed = true;
     final controller = _controller;
     if (controller != null) {
+      controller.removeListener(_onOperationChanged);
       // Start the business cancellation before the first async teardown
       // await, then synchronously cancel its expiry timer/subscriptions. The
       // media coordinator and session lease still finish the owned cleanup in
@@ -210,6 +234,57 @@ final class _AppScreenShareRouteScopeState
   }
 
   Future<void> _disposeRoute() async {
+    try {
+      try {
+        await _terminalCleanup;
+      } catch (_) {}
+      await _disposeOwnedRoute();
+    } finally {
+      _releaseArbitration();
+    }
+  }
+
+  void _onOperationChanged() {
+    final operation = _controller!.snapshot;
+    if (_routeDisposed ||
+        !operation.isTerminal ||
+        operation.operationId == null ||
+        _terminalCleanup != null) {
+      return;
+    }
+    final cleanup = _finishOperation(operation);
+    _terminalCleanup = cleanup;
+    unawaited(cleanup.catchError((_) {}));
+  }
+
+  Future<void> _finishOperation(ScreenShareOperationSnapshot operation) async {
+    await _mediaCoordinator!.port.stop(
+      operationId: operation.operationId!,
+      realtimeId: operation.realtimeId,
+      generation: operation.generation,
+    );
+    await widget.arguments.sessionLease?.stopAndRelease();
+    _releaseArbitration();
+  }
+
+  void _releaseArbitration() {
+    final operation = _controller?.snapshot;
+    final id = operation?.operationId ?? widget.arguments.operationId;
+    if (id == null) return;
+    final sender =
+        operation?.role == ScreenShareRole.sender ||
+        (operation?.role == null &&
+            widget.arguments.mode == AppScreenShareRouteMode.send);
+    widget.arguments.arbitration?.release(
+      remotePeerId: widget.arguments.session.peerId,
+      initiatorPeerId: sender
+          ? widget.arguments.localPeerId
+          : widget.arguments.session.peerId,
+      operationId: id,
+    );
+  }
+
+  Future<void> _disposeOwnedRoute() async {
     await _readinessSubscription?.cancel();
     _readinessSubscription = null;
     try {
@@ -285,106 +360,75 @@ final class _AppScreenShareRouteScopeState
 
   @override
   Widget build(BuildContext context) => AppPageSurface(
-    child: Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: AppBar(title: const Text('Screen sharing')),
-      body: FutureBuilder<void>(
-        future: _initialization,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError || _controller == null) {
-            return Center(
+    child: FutureBuilder<void>(
+      future: _initialization,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Screen sharing')),
+            body: const Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasError || _controller == null) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Screen sharing')),
+            body: Center(
               child: Text(
                 'Screen sharing unavailable (${_errorCode(snapshot.error)}).',
               ),
-            );
-          }
-          final controller = _controller!;
-          return AnimatedBuilder(
-            animation: controller,
-            builder: (context, _) {
-              final operation = controller.snapshot;
-              final remoteSurface = _mediaCoordinator?.remoteSurface;
-              final presenter =
-                  widget.presenter ?? const AppTextureRemoteVideoPresenter();
-              return SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: <Widget>[
-                      Expanded(
-                        child: remoteSurface == null
-                            ? Container(
-                                width: double.infinity,
-                                decoration: BoxDecoration(
-                                  color: Colors.black12,
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: const Center(
-                                  child: Icon(
-                                    Icons.screen_share_outlined,
-                                    size: 48,
-                                  ),
-                                ),
-                              )
-                            : ValueListenableBuilder<Size?>(
-                                valueListenable:
-                                    _mediaCoordinator!.remoteVideoSize,
-                                builder: (context, size, _) {
-                                  final video = presenter.build(
-                                    context,
-                                    remoteSurface,
-                                  );
-                                  if (size == null) return video;
-                                  return ColoredBox(
-                                    color: Colors.black,
-                                    child: Center(
-                                      child: AspectRatio(
-                                        aspectRatio: size.width / size.height,
-                                        child: video,
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                      ),
-                      const SizedBox(height: 12),
-                      if (operation.state == ScreenShareOperationState.idle &&
-                          widget.arguments.mode ==
-                              AppScreenShareRouteMode.send &&
-                          widget.arguments.source != null)
-                        FilledButton.icon(
-                          onPressed: () => controller.startOutgoing(
-                            operationId: widget.arguments.operationId,
-                          ),
-                          icon: const Icon(Icons.screen_share_outlined),
-                          label: const Text('Start sharing'),
-                        ),
-                      ScreenShareConsentView(
-                        controller: controller,
-                        showIncomingActions:
-                            !widget.arguments.acceptIncomingOnOpen,
-                      ),
-                      if (!operation.isTerminal &&
-                          operation.state !=
-                              ScreenShareOperationState.idle) ...<Widget>[
-                        const SizedBox(height: 12),
-                        OutlinedButton.icon(
-                          onPressed: controller.cancel,
-                          icon: const Icon(Icons.stop_circle_outlined),
-                          label: const Text('Stop screen share'),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              );
-            },
+            ),
           );
-        },
-      ),
+        }
+        final controller = _controller!;
+        return AnimatedBuilder(
+          animation: controller,
+          builder: (context, _) {
+            final operation = controller.snapshot;
+            final remoteSurface = _mediaCoordinator?.remoteSurface;
+            final presenter =
+                widget.presenter ?? const AppTextureRemoteVideoPresenter();
+            return AppScreenShareVideoPage(
+              videoSize: _mediaCoordinator!.remoteVideoSize,
+              enableViewerControls:
+                  remoteSurface != null && !operation.isTerminal,
+              onStop: !operation.isTerminal ? controller.cancel : null,
+              video: remoteSurface == null
+                  ? const Center(
+                      child: Icon(Icons.screen_share_outlined, size: 48),
+                    )
+                  : presenter.build(context, remoteSurface),
+              controls: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (operation.state == ScreenShareOperationState.idle &&
+                      widget.arguments.mode == AppScreenShareRouteMode.send &&
+                      widget.arguments.source != null)
+                    FilledButton.icon(
+                      onPressed: () => controller.startOutgoing(
+                        operationId: widget.arguments.operationId,
+                      ),
+                      icon: const Icon(Icons.screen_share_outlined),
+                      label: const Text('Start sharing'),
+                    ),
+                  ScreenShareConsentView(
+                    controller: controller,
+                    showIncomingActions: !widget.arguments.acceptIncomingOnOpen,
+                  ),
+                  if (!operation.isTerminal &&
+                      operation.state != ScreenShareOperationState.idle) ...[
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: controller.cancel,
+                      icon: const Icon(Icons.stop_circle_outlined),
+                      label: const Text('Stop screen share'),
+                    ),
+                  ],
+                ],
+              ),
+            );
+          },
+        );
+      },
     ),
   );
 }

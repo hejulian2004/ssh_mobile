@@ -1,4 +1,4 @@
-最新更新时间：2026-08-27
+最新更新时间：2026-10-22
 
 # Transport Network V2 文档与验证审计（历史记录）
 
@@ -22,7 +22,7 @@
 - **CI/验证入口已存在**：`.github/workflows/flutter.yml` 的
   `protocol-v2-contract`、`native-network-quality`、`relay-quality` 和
   `sdk-dart-quality` 覆盖协议 fixtures、Rust、Go Relay 与 Dart SDK。现有
-  `scripts/relay_v2_contract.sh` 负责 fixtures/proto/buf 合同检查，不应被误读为
+  `scripts/bash/contracts/relay_v2_contract.sh` 负责 fixtures/proto/buf 合同检查，不应被误读为
   Rust/Go 单元测试替代品；`acceptance_matrix.json` 当前 60/60 为
   `covered`，后者由对应 CI job 执行。
 - **Memory 已补齐当前高成本事实**：SDK Memory 记录 command-result 去重、peer
@@ -62,8 +62,7 @@
 
 - `docs/baseline_records.md` 保留为 `network-v1-final` 的历史冻结记录，不代表
   当前 v2 实现状态。
-- `docs/architecture/RELAY_CONTROL_PLANE.md` 明确标注为 v1 控制面基线，并在
-  “transport-network v2 部分取代”章节维护边界；其 v1 内容不能作为 v2 行为依据。
+- `docs/architecture/RELAY_CONTROL_PLANE.md` 只保留当前 v2 边界。v1 控制面流程已移除，不能再从该文检索。
 - `ADR-010` 仍保留 Delivery 的基础不变量，但其中关于 Session/Connection 连续
   性的 v1 语句由 `ADR-BUSINESS-RECOVERY-V2` 与
   `ADR-CONNECTION-LIFECYCLE-V2` 取代。

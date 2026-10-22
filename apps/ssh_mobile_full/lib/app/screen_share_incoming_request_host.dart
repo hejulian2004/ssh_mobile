@@ -48,6 +48,7 @@ final class _AppScreenShareIncomingRequestHostState
   _IncomingOfferState _offerState = _IncomingOfferState.terminal;
   int _hostEpoch = 0;
   int? _activeOfferEpoch;
+  final Completer<void> _disposedSignal = Completer<void>();
   bool _busy = false;
   RealtimeMediaCodecMode _codecMode = RealtimeMediaCodecMode.hardware;
 
@@ -57,6 +58,19 @@ final class _AppScreenShareIncomingRequestHostState
     _subscription = widget.runtime.realtimeClient.incomingOffers.listen(
       _onOffer,
     );
+    widget.arbitration.addListener(_onBusyChanged);
+  }
+
+  void _onBusyChanged() {
+    final pending = _offer;
+    if (mounted &&
+        widget.arbitration.isBusy &&
+        pending != null &&
+        _offerState == _IncomingOfferState.pending) {
+      unawaited(
+        _reject(pending).catchError((_) => _discardBestEffort(pending)),
+      );
+    }
   }
 
   void _onOffer(RealtimeIncomingSessionOffer offer) {
@@ -79,6 +93,11 @@ final class _AppScreenShareIncomingRequestHostState
       _discardBestEffort(offer);
       return;
     }
+    if (widget.arbitration.isBusy) {
+      _rememberOffer(key, effectiveExpiry, now);
+      _rejectBusyBestEffort(offer);
+      return;
+    }
     if (_offer != null && _offerState != _IncomingOfferState.pending) {
       // A claim/reject resolution already owns the current offer. Do not let
       // a later notification replace it or discard its provisional binding.
@@ -96,8 +115,6 @@ final class _AppScreenShareIncomingRequestHostState
       onReplaced: () async {
         if (_isExactPending(offer, candidateEpoch)) {
           await _expirePending(offer, candidateEpoch);
-        } else if (_isExactActive(offer, candidateEpoch)) {
-          unawaited(widget.navigatorKey.currentState?.maybePop());
         }
       },
     );
@@ -124,15 +141,16 @@ final class _AppScreenShareIncomingRequestHostState
 
   @override
   void dispose() {
+    _disposedSignal.complete();
+    widget.arbitration.removeListener(_onBusyChanged);
     _offerExpiryTimer?.cancel();
     _offerExpiryTimer = null;
     unawaited(_subscription?.cancel());
     final pending = _offer;
-    final active = _activeOffer;
     if (pending != null && _offerState == _IncomingOfferState.pending) {
       _discardBestEffort(pending);
     }
-    for (final offer in <RealtimeIncomingSessionOffer>{?pending, ?active}) {
+    for (final offer in <RealtimeIncomingSessionOffer>{?pending}) {
       widget.arbitration.release(
         remotePeerId: offer.authenticatedPeerId,
         initiatorPeerId: offer.request.senderPeerId,
@@ -216,6 +234,14 @@ final class _AppScreenShareIncomingRequestHostState
     RealtimeSession? session;
     var handedOff = false;
     try {
+      if (!widget.arbitration.activate(
+        remotePeerId: offer.authenticatedPeerId,
+        initiatorPeerId: offer.request.senderPeerId,
+        operationId: offer.request.operationId,
+      )) {
+        await widget.runtime.realtimeClient.rejectIncomingOffer(offer);
+        return;
+      }
       final result = await widget.runtime.realtimeClient.claimIncomingSession(
         offer,
       );
@@ -223,7 +249,12 @@ final class _AppScreenShareIncomingRequestHostState
         throw StateError(result.error.message);
       }
       session = (result as SdkSuccess<RealtimeSession>).data;
-      await _waitForIdentity(session);
+      if (!_isExactPendingOwner(offer, ownerEpoch)) return;
+      await waitForScreenShareSessionIdentity(
+        session,
+        cancelled: _disposedSignal.future,
+      );
+      if (!_isExactPendingOwner(offer, ownerEpoch)) return;
       lease = AppScreenShareSessionLease(
         client: widget.runtime.realtimeClient,
         session: session,
@@ -239,6 +270,7 @@ final class _AppScreenShareIncomingRequestHostState
           mode: AppScreenShareRouteMode.receive,
           acceptIncomingOnOpen: true,
           codecMode: codecMode,
+          arbitration: widget.arbitration,
         ),
       );
       // Transfer ownership as soon as Navigator installs the route. The
@@ -361,11 +393,7 @@ final class _AppScreenShareIncomingRequestHostState
     if (!_isExactActive(offer, ownerEpoch)) return;
     _activeOffer = null;
     _activeOfferEpoch = null;
-    widget.arbitration.release(
-      remotePeerId: offer.authenticatedPeerId,
-      initiatorPeerId: offer.request.senderPeerId,
-      operationId: offer.request.operationId,
-    );
+    // The route owns admission after handoff and releases it after cleanup.
     // A pending replacement owns the global state and timer. An old active
     // route completion must never overwrite it.
     if (_offer == null && _offerState == _IncomingOfferState.handedOff) {
@@ -382,6 +410,19 @@ final class _AppScreenShareIncomingRequestHostState
       } catch (_) {
         // Native expiry/terminal cleanup is authoritative; this callback only
         // releases the Host's best-effort UI owner.
+      }
+    }());
+  }
+
+  void _rejectBusyBestEffort(RealtimeIncomingSessionOffer offer) {
+    unawaited(() async {
+      try {
+        final result = await widget.runtime.realtimeClient.rejectIncomingOffer(
+          offer,
+        );
+        if (result is SdkFailure<void>) _discardBestEffort(offer);
+      } catch (_) {
+        _discardBestEffort(offer);
       }
     }());
   }
@@ -421,31 +462,6 @@ final class _AppScreenShareIncomingRequestHostState
 
   void _pruneSeenOffers(DateTime now) {
     _seenOffers.removeWhere((_, expiry) => !expiry.isAfter(now));
-  }
-
-  Future<void> _waitForIdentity(RealtimeSession session) async {
-    bool ready(RealtimeSnapshot? snapshot) {
-      final state = snapshot?.state ?? session.state;
-      return (state == RealtimeSessionState.negotiating ||
-              state == RealtimeSessionState.connected) &&
-          (snapshot?.generation ?? session.generation) != null &&
-          (snapshot?.sharedSessionInstanceId ??
-                  session.sharedSessionInstanceId) !=
-              null;
-    }
-
-    if (ready(session.currentSnapshot)) return;
-    final completer = Completer<void>();
-    late final StreamSubscription<RealtimeSnapshot> subscription;
-    subscription = session.snapshots.listen((snapshot) {
-      if (!completer.isCompleted && ready(snapshot)) completer.complete();
-    });
-    try {
-      if (ready(session.currentSnapshot)) return;
-      await completer.future.timeout(const Duration(seconds: 30));
-    } finally {
-      await subscription.cancel();
-    }
   }
 
   String _offerKey(RealtimeIncomingSessionOffer offer) =>

@@ -26,6 +26,7 @@ final class AppScreenShareMediaCoordinator {
     required this.capabilities,
     this.source,
     this.codecMode = RealtimeMediaCodecMode.hardware,
+    this.admitOperation,
   }) {
     _port = AppScreenShareMediaPort(
       logger: resources.logger,
@@ -38,6 +39,7 @@ final class AppScreenShareMediaCoordinator {
 
   final RealtimeSession session;
   final RealtimeMediaCodecMode codecMode;
+  final bool Function(String operationId)? admitOperation;
   final AppRealtimeMediaResources resources;
   final AppScreenSharePlatformCapabilities capabilities;
   final ScreenCaptureSource? source;
@@ -125,6 +127,7 @@ final class AppScreenShareMediaCoordinator {
       realtimeId: realtimeId,
       generation: generation,
     );
+    _admitOperation(operationId);
     final epoch = ++_operationEpoch;
     await _trackMediaOperation(
       () => _startCapture(
@@ -146,6 +149,7 @@ final class AppScreenShareMediaCoordinator {
       realtimeId: realtimeId,
       generation: generation,
     );
+    _admitOperation(operationId);
     final epoch = ++_operationEpoch;
     await _trackMediaOperation(
       () => _startViewer(
@@ -155,6 +159,15 @@ final class AppScreenShareMediaCoordinator {
         epoch: epoch,
       ),
     );
+  }
+
+  void _admitOperation(String operationId) {
+    if (admitOperation?.call(operationId) == false) {
+      throw const RealtimeMediaException(
+        RealtimeMediaErrorCode.duplicateAttach,
+        'Another screen-share operation is already active.',
+      );
+    }
   }
 
   Future<void> _trackMediaOperation(Future<void> Function() operation) {
