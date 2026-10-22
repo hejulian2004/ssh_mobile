@@ -18,7 +18,7 @@ export 'realtime_media_feature_adapters.dart'
         AppScreenSharePlatformCapabilities,
         appScreenSharePlatformCapabilitiesFor;
 
-/// Route-scoped owner that connects Feature consent to opaque media leases.
+/// Operation-owned bridge from Feature consent to opaque media leases.
 final class AppScreenShareMediaCoordinator {
   AppScreenShareMediaCoordinator({
     required this.session,
@@ -58,6 +58,8 @@ final class AppScreenShareMediaCoordinator {
   RealtimeSessionToken? _preparedToken;
   bool _disposed = false;
   int _operationEpoch = 0;
+  RealtimeMediaErrorCode? _failureCode;
+  RealtimeMediaErrorCode? get failureCode => _failureCode;
 
   AppScreenShareMediaPort get port => _port;
 
@@ -127,7 +129,7 @@ final class AppScreenShareMediaCoordinator {
     try {
       await _mediaSession?.dispose();
     } catch (_) {
-      // Keep route disposal deterministic. The session controller retains a
+      // Keep operation disposal deterministic. The session controller retains a
       // retryable lease internally; no stale operation is allowed to proceed.
     }
     await _events.close();
@@ -194,7 +196,12 @@ final class AppScreenShareMediaCoordinator {
     late final Future<void> tracked;
     Future<void> run() async {
       if (predecessor != null) await predecessor;
-      await operation();
+      try {
+        await operation();
+      } on RealtimeMediaException catch (error) {
+        _failureCode = error.code;
+        rethrow;
+      }
     }
 
     tracked = run().whenComplete(() {
@@ -359,14 +366,13 @@ final class AppScreenShareMediaCoordinator {
     if (endpoint == null) return;
     try {
       await _mediaSession!.release(endpoint);
-      _endpoint = null;
-      _remoteSurface = null;
-      _remoteVideoSize.value = null;
     } catch (_) {
-      // Keep the endpoint reference so the controller can retry the native
-      // cleanup. RealtimeMediaSessionController retains retryable leases.
-      rethrow;
+      // Detach may fail after peer stop, while final release confirms cleanup.
+      if (endpoint.state != RealtimeMediaEndpointState.released) rethrow;
     }
+    _endpoint = null;
+    _remoteSurface = null;
+    _remoteVideoSize.value = null;
   }
 
   Future<void> _releaseEndpointIfNeeded(

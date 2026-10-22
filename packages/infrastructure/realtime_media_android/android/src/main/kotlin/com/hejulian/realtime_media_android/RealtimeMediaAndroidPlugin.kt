@@ -241,7 +241,9 @@ class RealtimeMediaAndroidPlugin :
         pendingProjectionResult = result
         try {
             currentActivity.startActivityForResult(
-                manager.createScreenCaptureIntent(),
+                if (android.os.Build.VERSION.SDK_INT >= 34) manager.createScreenCaptureIntent(
+                    android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay())
+                else manager.createScreenCaptureIntent(),
                 PROJECTION_REQUEST_CODE,
             )
         } catch (_: Exception) {

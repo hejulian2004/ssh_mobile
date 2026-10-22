@@ -1,4 +1,4 @@
-Last updated: 2026-10-13
+Last updated: 2026-10-23
 
 # realtime_media_windows maintenance contract
 
@@ -26,6 +26,11 @@ Last updated: 2026-10-13
   policy here; those belong to their later owners.
 
 ## Native implementation gate
+
+Decoder stop joins its worker before unregistering its Flutter texture. Keep
+the registered texture callback alive until the asynchronous unregister
+completion, even after the decoder owner is removed. Outstanding frame leases
+retain their own pixels or GPU reference independently of that callback.
 
 The Windows plugin now owns Graphics Capture, native Media Foundation H.264
 send ingress, and the receive decoder/GPU texture lifecycle. Platform methods

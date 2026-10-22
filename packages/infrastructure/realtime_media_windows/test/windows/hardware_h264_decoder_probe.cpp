@@ -30,6 +30,7 @@ uint32_t fixture_width = 640, fixture_height = 480;
 bool cpu_mode = false;
 bool defer_render = false;
 bool retain_frame = false;
+bool defer_unregister = false;
 bool MatchesFixtureColor(const uint8_t* rgba) {
   return rgba[0] >= 20 && rgba[0] <= 44 && rgba[1] >= 100 && rgba[1] <= 124 &&
          rgba[2] >= 148 && rgba[2] <= 172 && rgba[3] == 255;
@@ -78,6 +79,7 @@ class FixtureRegistrar final : public flutter::TextureRegistrar {
   std::atomic<bool> valid_surface{false};
   flutter::TextureVariant* texture = nullptr;
   const FlutterDesktopPixelBuffer* retained_pixels = nullptr;
+  std::function<void()> unregister_complete;
   int64_t RegisterTexture(flutter::TextureVariant* value) override {
     texture = value;
     return 1;
@@ -117,7 +119,11 @@ class FixtureRegistrar final : public flutter::TextureRegistrar {
     return valid;
   }
   void UnregisterTexture(int64_t, std::function<void()> callback) override {
-    if (callback) callback();
+    if (defer_unregister) {
+      unregister_complete = std::move(callback);
+    } else if (callback) {
+      callback();
+    }
   }
   bool UnregisterTexture(int64_t) override { return true; }
 };
@@ -188,6 +194,7 @@ int main(int argc, char** argv) {
     if (std::string(argv[index]) == "--cpu") cpu_mode = true;
     if (std::string(argv[index]) == "--defer-render") defer_render = true;
     if (std::string(argv[index]) == "--retain-frame") retain_frame = true;
+    if (std::string(argv[index]) == "--defer-unregister") defer_unregister = true;
     if (std::string(argv[index]) == "--portrait") {
       fixture_width = 1080;
       fixture_height = 2424;
@@ -289,6 +296,25 @@ int main(int argc, char** argv) {
       return 1;
     }
     pixels->release_callback(pixels->release_context);
+  }
+  if (defer_unregister) {
+    if (!registrar.unregister_complete) {
+      std::cout << "FAIL texture_release_has_no_completion_lease\n";
+      return 1;
+    }
+    // Flutter may invoke the registered callback until unregister completes.
+    // The callback must still be callable after its decoder owner is released.
+    const bool stopped = cpu_mode
+        ? std::get<flutter::PixelBufferTexture>(*registrar.texture)
+                  .CopyPixelBuffer(fixture_width, fixture_height) == nullptr
+        : std::get<flutter::GpuSurfaceTexture>(*registrar.texture)
+                  .ObtainDescriptor(fixture_width, fixture_height) == nullptr;
+    if (!stopped) {
+      std::cout << "FAIL released_owner_still_produces_frames\n";
+      return 1;
+    }
+    registrar.unregister_complete();
+    registrar.unregister_complete = nullptr;
   }
   std::cout << "PASS " << (cpu_mode ? "cpu" : "hardware")
             << "_fixture_decoded_and_rendered_in_existing_apartment\n";

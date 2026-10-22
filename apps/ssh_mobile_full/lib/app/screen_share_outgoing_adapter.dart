@@ -22,13 +22,19 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
     required this.runtime,
     required this.navigatorKey,
     AppScreenSharePeerArbitrationRegistry? arbitration,
+    AppScreenShareSessions? sessions,
   }) : _ownsArbitration = arbitration == null,
+       _ownsSessions = sessions == null,
+       sessions = sessions ?? AppScreenShareSessions(),
        arbitration = arbitration ?? AppScreenSharePeerArbitrationRegistry();
 
   final AppRuntime runtime;
   final GlobalKey<NavigatorState> navigatorKey;
   final AppScreenSharePeerArbitrationRegistry arbitration;
   final bool _ownsArbitration;
+  final AppScreenShareSessions sessions;
+  final bool _ownsSessions;
+  Future<void>? _closing;
   bool _disposed = false;
   final Completer<void> _disposedSignal = Completer<void>();
   final Set<String> _startsInFlight = <String>{};
@@ -86,8 +92,10 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
         onReplaced: () async {
           superseded = true;
           if (handedOff) {
-            // The route owns the lease after handoff. It will stop and release
-            // the exact session when the replacement arbitration pops it.
+            final replaced = sessions.current;
+            if (replaced?.arguments.operationId == operationId) {
+              await replaced!.stop();
+            }
             if (routeActive) {
               unawaited(navigatorKey.currentState?.maybePop());
             }
@@ -168,29 +176,28 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
         startOutgoing: true,
         arbitration: arbitration,
       );
+      final operation = sessions.open(
+        arguments,
+        runtime.realtimeMediaResources,
+      );
+      handedOff = true;
+      lease = null;
       try {
         routeActive = true;
         final navigation = navigatorKey.currentState!.pushNamed(
           AppShellRouteNames.screenShare,
           arguments: arguments,
         );
-        handedOff = true;
-        lease = null;
         await navigation;
       } catch (_) {
-        if (!handedOff && lease != null) {
-          await lease.stopAndRelease();
-          lease = null;
-        }
+        await operation.stop();
         rethrow;
       }
-      // Ownership was transferred to the route arguments synchronously when
-      // pushNamed succeeded. The route now performs teardown on pop.
+      // The App session owner keeps sharing when its presentation route pops.
       lease = null;
     } finally {
       if (session != null && !handedOff && acquired) {
-        // A successful push transfers the lease; failures before transfer are
-        // cleaned here. The route-owned lease is intentionally untouched.
+        // Only failures before App-owner adoption are cleaned by the entry.
         if (lease != null) {
           try {
             await lease.stopAndRelease();
@@ -266,10 +273,17 @@ final class ScreenShareEntryCoordinator implements lan.LanShareScreenSharePort {
     );
   }
 
-  void dispose() {
+  void dispose() => unawaited(close());
+
+  Future<void> close() => _closing ??= _close();
+  Future<void> _close() async {
     if (_disposed) return;
     _disposed = true;
     _disposedSignal.complete();
+    if (_ownsSessions) {
+      await sessions.close();
+      sessions.dispose();
+    }
     if (_ownsArbitration) arbitration.dispose();
   }
 

@@ -1,4 +1,4 @@
-Last updated: 2026-10-15
+Last updated: 2026-10-23
 
 # realtime_media_android
 
@@ -15,6 +15,10 @@ is exposed. Hardware mode is the default. Explicit CPU mode selects software
 H.264 using a scoped factory choice; it preserves system recording consent,
 owner cleanup, and the native frame path. Unknown modes and unavailable selected
 codecs fail with typed errors; there is no silent or alternate-codec fallback.
+Screen-share permission requests select the default display on API 34+ using
+`MediaProjectionConfig.createConfigForDefaultDisplay()`, retaining Android's
+consent dialog; earlier APIs use their display-capture intent. Navigating away
+from the Flutter sharing page does not release the grant or native service.
 Configuration tries H.264 candidates only within the explicitly selected
 hardware or CPU mode. Each failed attempt is released before trying the next;
 unconfirmed cleanup aborts acquisition. A configured codec transfers to the
@@ -167,3 +171,9 @@ the Windows encoder probe. It compares sparse input, repeated synthetic input,
 and end-of-stream flushing using bounded byte-buffer output polling. This
 checks codec buffering, not Flutter surface rendering; end-of-stream is only
 a diagnostic control and is never injected into a live sharing session.
+
+`test/android/EncoderCapabilityProbe.java` checks only AVC encoder capability
+metadata through `MediaCodecList`. Compile with `android.jar`, package with D8
+and run with `app_process`; it reports hardware/software availability without
+capturing a screen or reading application data. Capability absence is an
+actionable selected-mode failure, not permission to silently fall back.

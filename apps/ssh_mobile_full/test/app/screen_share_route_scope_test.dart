@@ -15,6 +15,10 @@ import 'package:ssh_mobile/app/realtime_media_feature_adapters.dart';
 import 'package:ssh_mobile/app/screen_share_route_scope.dart';
 import 'package:ssh_mobile/app/screen_share_peer_arbitration.dart';
 import 'package:ssh_mobile/app/screen_share_session_lease.dart';
+import 'package:ssh_mobile/app/screen_share_background_host.dart';
+import 'package:ssh_mobile/app/navigation/app_route_contributions.dart';
+
+late AppScreenShareSessions _testSessions;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -33,6 +37,7 @@ void main() {
   late _FakeRealtimeSession session;
 
   setUp(() {
+    _testSessions = AppScreenShareSessions();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(windowChannel, (_) async => true);
     addTearDown(
@@ -49,6 +54,7 @@ void main() {
       generation: 7,
     );
     addTearDown(session.close);
+    addTearDown(_testSessions.dispose);
   });
 
   test('identity wait ends immediately when its caller is disposed', () async {
@@ -605,7 +611,7 @@ void main() {
     await coordinator.dispose();
   });
 
-  testWidgets(
+  _testSharedWidgets(
     'accepted invitation fails when transport ends before media is ready',
     (tester) async {
       session.state = RealtimeSessionState.negotiating;
@@ -630,46 +636,47 @@ void main() {
     },
   );
 
-  testWidgets('transport loss releases active media and busy admission', (
-    tester,
-  ) async {
-    final arbitration = AppScreenSharePeerArbitrationRegistry();
-    addTearDown(arbitration.dispose);
-    arbitration.acquire(
-      remotePeerId: session.peerId,
-      initiatorPeerId: session.peerId,
-      operationId: 'operation-a',
-    );
-    await tester.pumpWidget(
-      _routeApp(
-        backend,
-        session,
-        capabilities,
-        arguments: AppScreenShareRouteArguments(
-          session: session,
-          localPeerId: 'peer-local',
-          arbitration: arbitration,
+  _testSharedWidgets(
+    'transport loss releases active media and busy admission',
+    (tester) async {
+      final arbitration = AppScreenSharePeerArbitrationRegistry();
+      addTearDown(arbitration.dispose);
+      arbitration.acquire(
+        remotePeerId: session.peerId,
+        initiatorPeerId: session.peerId,
+        operationId: 'operation-a',
+      );
+      await tester.pumpWidget(
+        _routeApp(
+          backend,
+          session,
+          capabilities,
+          arguments: AppScreenShareRouteArguments(
+            session: session,
+            localPeerId: 'peer-local',
+            arbitration: arbitration,
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    session.emitConsent(_incomingConsent());
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Accept screen share'));
-    await tester.pumpAndSettle();
-    expect(arbitration.isBusy, isTrue);
-    session.mediaToken = null;
-    session.publishState(RealtimeSessionState.stopped, generation: 7);
-    await tester.pumpAndSettle();
-    expect(find.text('Screen sharing failed'), findsOneWidget);
-    expect(arbitration.isBusy, isFalse);
-    expect(
-      backend.operations.where((operation) => operation == 'release:1'),
-      hasLength(1),
-    );
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
-  });
+      );
+      await tester.pumpAndSettle();
+      session.emitConsent(_incomingConsent());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Accept screen share'));
+      await tester.pumpAndSettle();
+      expect(arbitration.isBusy, isTrue);
+      session.mediaToken = null;
+      session.publishState(RealtimeSessionState.stopped, generation: 7);
+      await tester.pumpAndSettle();
+      expect(find.text('Screen sharing failed'), findsOneWidget);
+      expect(arbitration.isBusy, isFalse);
+      expect(
+        backend.operations.where((operation) => operation == 'release:1'),
+        hasLength(1),
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
 
   for (final disposing in [false, true]) {
     test(
@@ -849,22 +856,267 @@ void main() {
     },
   );
 
-  testWidgets('receive route initializes and disposes its borrowed scope', (
+  _testSharedWidgets(
+    'reopening a hidden page borrows the same active endpoint',
+    (tester) async {
+      await tester.pumpWidget(_routeApp(backend, session, capabilities));
+      await tester.pumpAndSettle();
+      session.emitConsent(_incomingConsent());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Accept screen share'));
+      await tester.pumpAndSettle();
+      final operation = _testSessions.current!;
+      final surface = operation.media!.remoteSurface;
+      final started = List<String>.of(backend.operations);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      expect(_testSessions.pageVisible, isFalse);
+      await tester.pumpWidget(_routeApp(backend, session, capabilities));
+      await tester.pumpAndSettle();
+      expect(_testSessions.current, same(operation));
+      expect(operation.media!.remoteSurface, same(surface));
+      expect(backend.operations, started);
+      expect(find.text('Screen sharing active'), findsOneWidget);
+      expect(_testSessions.pageVisible, isTrue);
+    },
+  );
+
+  _testSharedWidgets('remote stop ends sharing after the page has closed', (
     tester,
   ) async {
     await tester.pumpWidget(_routeApp(backend, session, capabilities));
     await tester.pumpAndSettle();
-
-    expect(find.text('Screen sharing'), findsOneWidget);
-    expect(find.text('Screen sharing idle'), findsOneWidget);
-
+    final request = _incomingConsent();
+    session.emitConsent(request);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Accept screen share'));
+    await tester.pumpAndSettle();
     await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
-    expect(backend.operations, isEmpty);
+    final now = DateTime.now().toUtc();
+    session.emitConsent(
+      RealtimeConsent(
+        operationId: request.operationId,
+        realtimeId: request.realtimeId,
+        sharedSessionInstanceId: request.sharedSessionInstanceId,
+        issuedAt: now,
+        expiresAt: now.add(const Duration(minutes: 1)),
+        decision: RealtimeConsentDecision.cancel,
+        senderPeerId: session.peerId,
+        actionRevision: 2,
+      ),
+    );
+    for (var turn = 0; turn < 8; turn++) {
+      await tester.pump();
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    }
+    expect(
+      backend.operations.where((entry) => entry == 'release:1'),
+      hasLength(1),
+    );
+    expect(_testSessions.isBusy, isFalse);
+    expect(_testSessions.current, isNull);
   });
 
-  testWidgets(
-    'route teardown awaits peer cancellation before session release',
+  _testSharedWidgets('hidden session provides open and explicit stop actions', (
+    tester,
+  ) async {
+    final navigator = GlobalKey<NavigatorState>();
+    final resources = AppRealtimeMediaResources(
+      backend: backend,
+      sessionFactory: AppRealtimeMediaSessionFactory(backend: backend),
+    );
+    final arguments = AppScreenShareRouteArguments(
+      session: session,
+      localPeerId: 'peer-local',
+      initialIncomingRequest: _incomingConsent(),
+      acceptIncomingOnOpen: true,
+    );
+    _testSessions.open(arguments, resources, capabilities: capabilities);
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigator,
+        builder: (_, child) => AppScreenShareBackgroundHost(
+          sessions: _testSessions,
+          navigatorKey: navigator,
+          child: child!,
+        ),
+        routes: {
+          AppShellRouteNames.screenShare: (_) => AppScreenShareRouteScope(
+            arguments: arguments,
+            resources: resources,
+            sessions: _testSessions,
+            capabilities: capabilities,
+          ),
+        },
+        home: const Scaffold(body: Text('Public fixture home')),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Screen sharing is running'), findsOneWidget);
+    final started = List<String>.of(backend.operations);
+    await tester.tap(find.text('Open screen share'));
+    await tester.pumpAndSettle();
+    expect(find.text('Screen sharing active'), findsOneWidget);
+    expect(find.text('Screen sharing is running'), findsNothing);
+    navigator.currentState!.pop();
+    await tester.pumpAndSettle();
+    expect(find.text('Screen sharing is running'), findsOneWidget);
+    expect(backend.operations, started);
+    await tester.tap(find.text('Stop screen share'));
+    for (var turn = 0; turn < 8; turn++) {
+      await tester.pump();
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    }
+    await tester.pumpAndSettle();
+    expect(find.text('Screen sharing is running'), findsNothing);
+    expect(_testSessions.isBusy, isFalse);
+    expect(session.sentConsents.last.decision, RealtimeConsentDecision.cancel);
+  });
+
+  _testSharedWidgets(
+    'unconfirmed media cleanup stays busy until explicit retry',
+    (tester) async {
+      await tester.pumpWidget(_routeApp(backend, session, capabilities));
+      await tester.pumpAndSettle();
+      session.emitConsent(_incomingConsent());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Accept screen share'));
+      await tester.pumpAndSettle();
+      final operation = _testSessions.current!;
+      backend.releaseFailures = 100;
+      final stopping = operation.stop();
+      for (var turn = 0; turn < 12; turn++) {
+        await tester.pump();
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      }
+      await stopping;
+      expect(_testSessions.isBusy, isTrue);
+      expect(operation.finished, isFalse);
+      backend.releaseFailures = 0;
+      final retrying = operation.stop();
+      for (var turn = 0; turn < 12; turn++) {
+        await tester.pump();
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      }
+      await retrying;
+      expect(_testSessions.isBusy, isFalse);
+      expect(operation.finished, isTrue);
+    },
+  );
+
+  _testSharedWidgets('confirmed release finishes despite detach failure', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_routeApp(backend, session, capabilities));
+    await tester.pumpAndSettle();
+    session.emitConsent(_incomingConsent());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Accept screen share'));
+    await tester.pumpAndSettle();
+    final operation = _testSessions.current!;
+    backend.detachFails = true;
+    final request = _incomingConsent();
+    final now = DateTime.now().toUtc();
+    session.emitConsent(
+      RealtimeConsent(
+        operationId: request.operationId,
+        realtimeId: request.realtimeId,
+        sharedSessionInstanceId: request.sharedSessionInstanceId,
+        issuedAt: now,
+        expiresAt: now.add(const Duration(minutes: 1)),
+        decision: RealtimeConsentDecision.cancel,
+        senderPeerId: session.peerId,
+        actionRevision: 2,
+      ),
+    );
+    for (var turn = 0; turn < 12; turn++) {
+      await tester.pump();
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    }
+    expect(operation.finished, isTrue);
+    expect(_testSessions.isBusy, isFalse);
+  });
+
+  _testSharedWidgets('encoder capability failure explains CPU mode', (
+    tester,
+  ) async {
+    backend.captureFailure = const RealtimeMediaException(
+      RealtimeMediaErrorCode.encoderUnavailable,
+      'Selected encoder unavailable.',
+    );
+    await tester.pumpWidget(
+      _routeApp(
+        backend,
+        session,
+        capabilities,
+        arguments: AppScreenShareRouteArguments(
+          session: session,
+          localPeerId: 'peer-local',
+          source: source,
+          mode: AppScreenShareRouteMode.send,
+          startOutgoing: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final request = session.sentConsents.single;
+    final now = DateTime.now().toUtc();
+    session.emitConsent(
+      RealtimeConsent(
+        operationId: request.operationId,
+        realtimeId: request.realtimeId,
+        sharedSessionInstanceId: request.sharedSessionInstanceId,
+        issuedAt: now,
+        expiresAt: now.add(const Duration(minutes: 1)),
+        decision: RealtimeConsentDecision.accept,
+        senderPeerId: session.peerId,
+        actionRevision: 1,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Screen sharing failed'), findsOneWidget);
+    expect(find.textContaining('encoderUnavailable'), findsOneWidget);
+    expect(find.textContaining('CPU mode'), findsOneWidget);
+  });
+
+  _testSharedWidgets(
+    'closing an active page leaves media and consent running',
+    (tester) async {
+      await tester.pumpWidget(_routeApp(backend, session, capabilities));
+      await tester.pumpAndSettle();
+      session.emitConsent(_incomingConsent());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Accept screen share'));
+      await tester.pumpAndSettle();
+      final mediaBeforeClose = List<String>.of(backend.operations);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      expect(
+        session.sentConsents.map((event) => event.decision),
+        isNot(contains(RealtimeConsentDecision.cancel)),
+      );
+      expect(backend.operations, mediaBeforeClose);
+      expect(session.stopCalls, 0);
+    },
+  );
+
+  _testSharedWidgets(
+    'receive route initializes and disposes its borrowed scope',
+    (tester) async {
+      await tester.pumpWidget(_routeApp(backend, session, capabilities));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Screen sharing'), findsOneWidget);
+      expect(find.text('Screen sharing idle'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      expect(backend.operations, isEmpty);
+    },
+  );
+
+  _testSharedWidgets(
+    'explicit stop awaits peer cancellation before session release',
     (tester) async {
       final client = _LeaseClient();
       await tester.pumpWidget(
@@ -889,7 +1141,7 @@ void main() {
       await tester.pumpAndSettle();
       final cancellation = Completer<void>();
       session.cancelGate = cancellation;
-      await tester.pumpWidget(const SizedBox.shrink());
+      final stopping = _testSessions.current!.stop();
       await tester.pump();
       expect(
         session.sentConsents.last.decision,
@@ -903,12 +1155,14 @@ void main() {
         await tester.runAsync(() => Future<void>.delayed(Duration.zero));
       }
       await tester.pumpAndSettle();
+      await stopping;
       expect(session.stopCalls, 1);
       expect(client.releases, 1);
+      await tester.pumpWidget(const SizedBox.shrink());
     },
   );
 
-  testWidgets('route teardown bounds an unresponsive peer cancellation', (
+  _testSharedWidgets('explicit stop bounds an unresponsive peer cancellation', (
     tester,
   ) async {
     final client = _LeaseClient();
@@ -934,7 +1188,7 @@ void main() {
     await tester.pumpAndSettle();
     final cancellation = Completer<void>();
     session.cancelGate = cancellation;
-    await tester.pumpWidget(const SizedBox.shrink());
+    final stopping = _testSessions.current!.stop();
     await tester.pump(const Duration(seconds: 4));
     expect(session.stopCalls, 0);
     expect(client.releases, 0);
@@ -944,15 +1198,17 @@ void main() {
       await tester.runAsync(() => Future<void>.delayed(Duration.zero));
     }
     await tester.pumpAndSettle();
+    await stopping;
     expect(session.stopCalls, 1);
     expect(client.releases, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
     cancellation.complete();
     await tester.pumpAndSettle();
     expect(session.stopCalls, 1);
     expect(client.releases, 1);
   });
 
-  testWidgets('send route can start an outgoing consent operation', (
+  _testSharedWidgets('send route can start an outgoing consent operation', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -981,7 +1237,9 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('route renders typed initialization failures', (tester) async {
+  _testSharedWidgets('route renders typed initialization failures', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       _routeApp(
         backend,
@@ -1002,93 +1260,100 @@ void main() {
     );
   });
 
-  testWidgets('route renders a missing native token as a typed failure', (
-    tester,
-  ) async {
-    final noTokenSession = _FakeRealtimeSession(
-      realtimeId: realtimeId,
-      peerId: 'peer-remote',
-      generation: 7,
-    )..mediaToken = null;
-    addTearDown(noTokenSession.close);
+  _testSharedWidgets(
+    'route renders a missing native token as a typed failure',
+    (tester) async {
+      final noTokenSession = _FakeRealtimeSession(
+        realtimeId: realtimeId,
+        peerId: 'peer-remote',
+        generation: 7,
+      )..mediaToken = null;
+      addTearDown(noTokenSession.close);
 
-    await tester.pumpWidget(_routeApp(backend, noTokenSession, capabilities));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('backendFailure'), findsOneWidget);
-  });
+      await tester.pumpWidget(_routeApp(backend, noTokenSession, capabilities));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('backendFailure'), findsOneWidget);
+    },
+  );
 
-  testWidgets('route fails closed when platform ownership is unsupported', (
-    tester,
-  ) async {
-    await tester.pumpWidget(_routeApp(backend, session, null));
-    await tester.pumpAndSettle();
+  _testSharedWidgets(
+    'route fails closed when platform ownership is unsupported',
+    (tester) async {
+      await tester.pumpWidget(_routeApp(backend, session, null));
+      await tester.pumpAndSettle();
 
-    expect(find.textContaining('driverUnavailable'), findsOneWidget);
-  });
+      expect(find.textContaining('driverUnavailable'), findsOneWidget);
+    },
+  );
 
-  testWidgets('incoming route exposes explicit accept and reject actions', (
-    tester,
-  ) async {
-    await tester.pumpWidget(_routeApp(backend, session, capabilities));
-    await tester.pumpAndSettle();
+  _testSharedWidgets(
+    'incoming route exposes explicit accept and reject actions',
+    (tester) async {
+      await tester.pumpWidget(_routeApp(backend, session, capabilities));
+      await tester.pumpAndSettle();
 
-    session.emitConsent(_incomingConsent());
-    await tester.pumpAndSettle();
-    expect(find.text('Accept screen share'), findsOneWidget);
-    expect(find.text('Reject'), findsOneWidget);
+      session.emitConsent(_incomingConsent());
+      await tester.pumpAndSettle();
+      expect(find.text('Accept screen share'), findsOneWidget);
+      expect(find.text('Reject'), findsOneWidget);
 
-    await tester.tap(find.text('Accept screen share'));
-    await tester.pumpAndSettle();
-    expect(find.text('Screen sharing active'), findsOneWidget);
-    expect(session.sentConsents.last.decision, RealtimeConsentDecision.accept);
-    expect(backend.operations, contains('start:receive'));
+      await tester.tap(find.text('Accept screen share'));
+      await tester.pumpAndSettle();
+      expect(find.text('Screen sharing active'), findsOneWidget);
+      expect(
+        session.sentConsents.last.decision,
+        RealtimeConsentDecision.accept,
+      );
+      expect(backend.operations, contains('start:receive'));
 
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
-    expect(backend.operations, contains('release:1'));
-  });
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      expect(backend.operations, isNot(contains('release:1')));
+    },
+  );
 
-  testWidgets('received portrait video retains its native aspect ratio', (
-    tester,
-  ) async {
-    backend.statsSnapshot = RealtimeMediaStats(width: 1080, height: 2424);
-    await tester.pumpWidget(
-      _routeApp(
-        backend,
-        session,
-        capabilities,
-        presenter: const _FixtureVideoPresenter(),
-      ),
-    );
-    await tester.pumpAndSettle();
-    session.emitConsent(_incomingConsent());
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Accept screen share'));
-    await tester.pumpAndSettle();
-    await tester.pump(const Duration(seconds: 5));
-    final displayed = tester.getSize(
-      find.byKey(const ValueKey('fixture-video')),
-    );
-    expect(displayed.width / displayed.height, closeTo(1080 / 2424, 0.001));
-    final mediaOperations = List<String>.of(backend.operations);
-    await tester.tap(find.byTooltip('Rotate view'));
-    await tester.pump();
-    expect(
-      tester.widget<AspectRatio>(find.byType(AspectRatio)).aspectRatio,
-      2424 / 1080,
-    );
-    await tester.tap(find.byTooltip('Enter fullscreen'));
-    await tester.pumpAndSettle();
-    expect(find.byType(AppBar), findsNothing);
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-    expect(find.text('Screen sharing active'), findsOneWidget);
-    expect(backend.operations, mediaOperations);
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
-  });
+  _testSharedWidgets(
+    'received portrait video retains its native aspect ratio',
+    (tester) async {
+      backend.statsSnapshot = RealtimeMediaStats(width: 1080, height: 2424);
+      await tester.pumpWidget(
+        _routeApp(
+          backend,
+          session,
+          capabilities,
+          presenter: const _FixtureVideoPresenter(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      session.emitConsent(_incomingConsent());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Accept screen share'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 5));
+      final displayed = tester.getSize(
+        find.byKey(const ValueKey('fixture-video')),
+      );
+      expect(displayed.width / displayed.height, closeTo(1080 / 2424, 0.001));
+      final mediaOperations = List<String>.of(backend.operations);
+      await tester.tap(find.byTooltip('Rotate view'));
+      await tester.pump();
+      expect(
+        tester.widget<AspectRatio>(find.byType(AspectRatio)).aspectRatio,
+        2424 / 1080,
+      );
+      await tester.tap(find.byTooltip('Enter fullscreen'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppBar), findsNothing);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('Screen sharing active'), findsOneWidget);
+      expect(backend.operations, mediaOperations);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
 
-  testWidgets(
+  _testSharedWidgets(
     'busy admission prevents a second viewer before native allocation',
     (tester) async {
       final arbitration = AppScreenSharePeerArbitrationRegistry();
@@ -1133,7 +1398,7 @@ void main() {
     },
   );
 
-  testWidgets(
+  _testSharedWidgets(
     'stopping releases busy ownership while the result page remains open',
     (tester) async {
       final arbitration = AppScreenSharePeerArbitrationRegistry();
@@ -1183,71 +1448,73 @@ void main() {
     },
   );
 
-  testWidgets('initialization failure releases claimed invitation admission', (
-    tester,
-  ) async {
-    final arbitration = AppScreenSharePeerArbitrationRegistry();
-    addTearDown(arbitration.dispose);
-    arbitration.acquire(
-      remotePeerId: session.peerId,
-      initiatorPeerId: session.peerId,
-      operationId: 'operation-a',
-    );
-    arbitration.activate(
-      remotePeerId: session.peerId,
-      initiatorPeerId: session.peerId,
-      operationId: 'operation-a',
-    );
-    session.mediaToken = null;
-    await tester.pumpWidget(
-      _routeApp(
-        backend,
-        session,
-        capabilities,
-        arguments: AppScreenShareRouteArguments(
-          session: session,
-          localPeerId: 'peer-local',
-          operationId: 'operation-a',
-          arbitration: arbitration,
+  _testSharedWidgets(
+    'initialization failure releases claimed invitation admission',
+    (tester) async {
+      final arbitration = AppScreenSharePeerArbitrationRegistry();
+      addTearDown(arbitration.dispose);
+      arbitration.acquire(
+        remotePeerId: session.peerId,
+        initiatorPeerId: session.peerId,
+        operationId: 'operation-a',
+      );
+      arbitration.activate(
+        remotePeerId: session.peerId,
+        initiatorPeerId: session.peerId,
+        operationId: 'operation-a',
+      );
+      session.mediaToken = null;
+      await tester.pumpWidget(
+        _routeApp(
+          backend,
+          session,
+          capabilities,
+          arguments: AppScreenShareRouteArguments(
+            session: session,
+            localPeerId: 'peer-local',
+            operationId: 'operation-a',
+            arbitration: arbitration,
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Screen sharing unavailable'), findsOneWidget);
-    expect(arbitration.isBusy, isFalse);
-    expect(backend.operations, isEmpty);
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
-  });
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Screen sharing unavailable'), findsOneWidget);
+      expect(arbitration.isBusy, isFalse);
+      expect(backend.operations, isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
 
-  testWidgets('CPU route freezes the choice into native receive identity', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      _routeApp(
-        backend,
-        session,
-        capabilities,
-        arguments: AppScreenShareRouteArguments(
-          session: session,
-          localPeerId: 'peer-local',
-          codecMode: RealtimeMediaCodecMode.cpu,
+  _testSharedWidgets(
+    'CPU route freezes the choice into native receive identity',
+    (tester) async {
+      await tester.pumpWidget(
+        _routeApp(
+          backend,
+          session,
+          capabilities,
+          arguments: AppScreenShareRouteArguments(
+            session: session,
+            localPeerId: 'peer-local',
+            codecMode: RealtimeMediaCodecMode.cpu,
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    session.emitConsent(_incomingConsent());
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Accept screen share'));
-    await tester.pumpAndSettle();
-    expect(backend.identities.single.codecMode, RealtimeMediaCodecMode.cpu);
-    expect(find.text('Screen sharing active'), findsOneWidget);
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
-    expect(backend.operations, contains('release:1'));
-  });
+      );
+      await tester.pumpAndSettle();
+      session.emitConsent(_incomingConsent());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Accept screen share'));
+      await tester.pumpAndSettle();
+      expect(backend.identities.single.codecMode, RealtimeMediaCodecMode.cpu);
+      expect(find.text('Screen sharing active'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      expect(backend.operations, isNot(contains('release:1')));
+    },
+  );
 
-  testWidgets('incoming route can reject without creating media', (
+  _testSharedWidgets('incoming route can reject without creating media', (
     tester,
   ) async {
     await tester.pumpWidget(_routeApp(backend, session, capabilities));
@@ -1322,6 +1589,7 @@ Widget _routeApp(
   AppRemoteVideoPresenter? presenter,
 }) => MaterialApp(
   home: AppScreenShareRouteScope(
+    sessions: _testSessions,
     arguments:
         arguments ??
         AppScreenShareRouteArguments(
@@ -1431,6 +1699,9 @@ class _RecordingMediaBackend implements RealtimeMediaBackend {
   void Function()? afterRelease;
   void Function()? afterAttach;
   Object? statsFailure;
+  Object? captureFailure;
+  int releaseFailures = 0;
+  bool detachFails = false;
   int statsReads = 0;
   RealtimeMediaStats statsSnapshot = RealtimeMediaStats();
 
@@ -1453,6 +1724,7 @@ class _RecordingMediaBackend implements RealtimeMediaBackend {
     required ScreenCaptureSource source,
   }) async {
     operations.add('attach-capture:${endpointId.value}');
+    if (captureFailure != null) throw captureFailure!;
     afterAttach?.call();
   }
 
@@ -1477,6 +1749,12 @@ class _RecordingMediaBackend implements RealtimeMediaBackend {
     required RealtimeMediaEndpointIdentity identity,
   }) async {
     operations.add('detach:${endpointId.value}');
+    if (detachFails) {
+      throw const RealtimeMediaException(
+        RealtimeMediaErrorCode.staleEndpoint,
+        'Native endpoint was already detached.',
+      );
+    }
   }
 
   @override
@@ -1485,6 +1763,13 @@ class _RecordingMediaBackend implements RealtimeMediaBackend {
     required RealtimeMediaEndpointIdentity identity,
   }) async {
     operations.add('release:${endpointId.value}');
+    if (releaseFailures > 0) {
+      releaseFailures--;
+      throw const RealtimeMediaException(
+        RealtimeMediaErrorCode.backendFailure,
+        'Native cleanup not confirmed.',
+      );
+    }
     afterRelease?.call();
   }
 
@@ -1796,4 +2081,25 @@ final class _RecordingAndroidPlatform implements AndroidRealtimeMediaPlatform {
     required RealtimeMediaAdaptationDecision decision,
     RealtimeMediaNativeOwnerToken? ownerToken,
   }) async {}
+}
+
+// The App owner deliberately outlives the tested widget tree. Release it
+// inside WidgetTest's zone before its pending-timer invariant is checked.
+void _testSharedWidgets(String description, WidgetTesterCallback body) {
+  testWidgets(description, (tester) async {
+    try {
+      await body(tester);
+    } finally {
+      var closed = false;
+      final closing = _testSessions.close().whenComplete(() => closed = true);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 5));
+      for (var turn = 0; turn < 20 && !closed; turn++) {
+        await tester.pump();
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      }
+      expect(closed, isTrue, reason: 'App-owned sharing must finish shutdown');
+      await closing;
+    }
+  });
 }

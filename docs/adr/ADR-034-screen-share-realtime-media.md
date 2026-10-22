@@ -1,4 +1,4 @@
-最新更新时间：2026-10-22
+最新更新时间：2026-10-23
 
 # ADR-034：WebRTC 实时屏幕共享媒体边界与生命周期
 
@@ -19,6 +19,14 @@ RTC 工作不在本文范围，也不因本文 Accepted 而视为已经交付。
 必须分别提交 ADR 与验收门禁。实施计划里的 M8 章节已删除，不再作为范围来源。
 
 ## 背景与当前事实
+
+2026-10-22 产品决策：共享操作归 App 层持有，展示路由只借用操作。关闭或返回
+共享页不发送 CANCEL、不结束共享；隐藏页面期间仍只允许一个已认领/活动操作，
+额外可信邀请必须正式拒绝。后台入口可恢复同一视图或明确停止；只有明确停止、
+对端停止、系统撤销/源或传输故障及进程退出进入终态。原生清理未确认时不能允许
+第二个共享绕过占用。此决策替代下表原有的 route-dispose 停止语义。
+Android 默认请求共享整个屏幕，保留系统授权与撤销；API 34+ 使用
+`MediaProjectionConfig.createConfigForDefaultDisplay()`，不以 App 隐藏触发撤销。
 
 2026-10-15 补充产品约束：接收端手动旋转、全屏显示、Android 发送端横竖屏切换、
 后台持续传输和邀请冲突处理属于同一个屏幕共享操作。下列约束同时适用于实现
@@ -129,7 +137,7 @@ Feature 只负责业务状态、用户授权、用户交互、错误展示以及
 | `RealtimeSession` 注册/终态 | Rust `RealtimeManager` | Realtime Session | 先令 signaling/session terminal，再释放 driver 与 media endpoint |
 | `WebRtcPeer` / PeerConnection | `network-webrtc`；由该 session 的 `RealtimeIoDriver` 持有 | Realtime Session | `RealtimeManager` 请求 terminal close；driver 取消并 join 后释放 |
 | UDP socket / I/O task | `RealtimeIoDriver` | Realtime Session | 取消并 join driver，再释放 socket |
-| `ScreenShareOperation` / ViewModel | `feature_screen_share` / Route Scope（计划） | Business/Route | stop 或 route dispose |
+| `ScreenShareOperation` / ViewModel | App `AppScreenShareSessions` 持有 Feature controller | App/Business operation | 明确停止、对端停止、系统/源/传输终态或 App shutdown；页面只释放展示租约 |
 | Screen source / capture | `realtime_media` platform adapter（计划） | Screen Share Session | 停止产帧后关闭并释放 |
 | H.264 encoder / decoder | `realtime_media` platform adapter（计划） | Screen Share Session | detach 后关闭实例 |
 | Flutter Texture / GPU surface | `realtime_media` renderer（计划） | Viewer Session | 停止解码后释放 surface/texture |

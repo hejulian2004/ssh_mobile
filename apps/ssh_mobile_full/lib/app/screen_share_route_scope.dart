@@ -1,63 +1,22 @@
-import 'dart:async';
-
 import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:flutter/material.dart';
-import 'package:network_sdk/network_sdk.dart';
 import 'package:realtime_media/realtime_media.dart';
 import 'package:app_ui/app_ui.dart';
-
 import 'realtime_media_feature_adapters.dart';
-import 'screen_share_media_coordinator.dart';
-import 'screen_share_feature_adapters.dart';
-import 'screen_share_session_lease.dart';
+import 'screen_share_route_arguments.dart';
+import 'screen_share_operation.dart';
+import 'screen_share_sessions.dart';
 import 'screen_share_video_page.dart';
-import 'screen_share_peer_arbitration.dart';
-
 export 'screen_share_media_coordinator.dart';
-
-/// Media role selected by the App Shell screen-share route.
-enum AppScreenShareRouteMode { send, receive }
-
-/// Strongly typed arguments for the App Shell screen-share route.
-///
-/// The caller supplies the App-owned Realtime session and the local peer
-/// identity. A capture source is required only when the route is used to send
-/// a screen; incoming-only routes can omit it.
-final class AppScreenShareRouteArguments {
-  const AppScreenShareRouteArguments({
-    required this.session,
-    required this.localPeerId,
-    this.sessionLease,
-    this.operationId,
-    this.initialIncomingRequest,
-    this.source,
-    this.sourceOption,
-    this.mode = AppScreenShareRouteMode.receive,
-    this.startOutgoing = false,
-    this.acceptIncomingOnOpen = false,
-    this.codecMode = RealtimeMediaCodecMode.hardware,
-    this.arbitration,
-  });
-
-  final RealtimeSession session;
-  final AppScreenShareSessionLease? sessionLease;
-  final String localPeerId;
-  final String? operationId;
-  final RealtimeConsent? initialIncomingRequest;
-  final ScreenCaptureSource? source;
-  final ScreenShareSourceOption? sourceOption;
-  final AppScreenShareRouteMode mode;
-  final bool startOutgoing;
-  final bool acceptIncomingOnOpen;
-  final RealtimeMediaCodecMode codecMode;
-  final AppScreenSharePeerArbitrationRegistry? arbitration;
-}
+export 'screen_share_route_arguments.dart';
+export 'screen_share_sessions.dart';
 
 /// Route scope for the App Shell's explicit screen-share route.
 final class AppScreenShareRouteScope extends StatefulWidget {
   const AppScreenShareRouteScope({
     required this.arguments,
     required this.resources,
+    required this.sessions,
     this.capabilities,
     this.presenter,
     super.key,
@@ -65,6 +24,7 @@ final class AppScreenShareRouteScope extends StatefulWidget {
 
   final AppScreenShareRouteArguments arguments;
   final AppRealtimeMediaResources resources;
+  final AppScreenShareSessions sessions;
   final AppScreenSharePlatformCapabilities? capabilities;
   final AppRemoteVideoPresenter? presenter;
 
@@ -103,281 +63,27 @@ final class AppTextureRemoteVideoPresenter implements AppRemoteVideoPresenter {
 
 final class _AppScreenShareRouteScopeState
     extends State<AppScreenShareRouteScope> {
-  AppScreenShareMediaCoordinator? _mediaCoordinator;
-  late final Future<void> _initialization;
-  ScreenShareController? _controller;
-  StreamSubscription<RealtimeSnapshot>? _readinessSubscription;
-  Future<void> _readinessUpdate = Future<void>.value();
-  bool? _appliedMediaReadiness;
-  bool _routeDisposed = false;
-  Future<void>? _terminalCleanup;
-  Future<void>? _routeCancellation;
-
+  late final AppScreenShareOperation _operation;
   @override
   void initState() {
     super.initState();
-    try {
-      _mediaCoordinator = AppScreenShareMediaCoordinator(
-        session: widget.arguments.session,
-        resources: widget.resources,
-        capabilities:
-            widget.capabilities ??
-            appScreenSharePlatformCapabilitiesFor(widget.resources.backend),
-        source: widget.arguments.source,
-        codecMode: widget.arguments.codecMode,
-        admitOperation: (operationId) =>
-            widget.arguments.arbitration?.activate(
-              remotePeerId: widget.arguments.session.peerId,
-              initiatorPeerId:
-                  _controller?.snapshot.role == ScreenShareRole.sender
-                  ? widget.arguments.localPeerId
-                  : widget.arguments.session.peerId,
-              operationId: operationId,
-            ) ??
-            true,
-      );
-      _initialization = _initialize().catchError(_failInitialization);
-    } catch (error, stackTrace) {
-      _initialization = _failInitialization(error, stackTrace);
-    }
-  }
-
-  Future<Never> _failInitialization(Object error, StackTrace stackTrace) async {
-    try {
-      await _disposeRoute();
-    } catch (_) {}
-    Error.throwWithStackTrace(error, stackTrace);
-  }
-
-  Future<void> _initialize() async {
-    if (widget.arguments.startOutgoing &&
-        widget.arguments.mode != AppScreenShareRouteMode.send) {
-      throw const RealtimeMediaException(
-        RealtimeMediaErrorCode.invalidArgument,
-        'Only a sending screen-share route can start outgoing.',
-      );
-    }
-    final token = widget.arguments.session.mediaToken;
-    if (token == null) {
-      throw const RealtimeMediaException(
-        RealtimeMediaErrorCode.backendFailure,
-        'Native Realtime generation is not available.',
-      );
-    }
-    final sharedSessionInstanceId =
-        widget.arguments.session.sharedSessionInstanceId;
-    if (sharedSessionInstanceId == null) {
-      throw const RealtimeMediaException(
-        RealtimeMediaErrorCode.backendFailure,
-        'Shared Realtime session instance is not available.',
-      );
-    }
-    _controller = ScreenShareController(
-      consentPort: AppScreenShareConsentPort(widget.arguments.session),
-      mediaPort: _mediaCoordinator!.port,
-      realtimeId: token.realtimeId,
-      sharedSessionInstanceId: sharedSessionInstanceId,
-      generation: token.generation,
-      localPeerId: widget.arguments.localPeerId,
-      remotePeerId: widget.arguments.session.peerId,
+    _operation = widget.sessions.attach(
+      widget.arguments,
+      widget.resources,
+      capabilities: widget.capabilities,
     );
-    _controller!.addListener(_onOperationChanged);
-    final initialRequest = widget.arguments.initialIncomingRequest;
-    if (initialRequest != null) {
-      _controller!.seedIncomingRequest(initialRequest);
-    }
-    if (_routeDisposed) {
-      _controller!.dispose();
-      return;
-    }
-    await _mediaCoordinator!.prepare(
-      capture: widget.arguments.mode == AppScreenShareRouteMode.send,
-    );
-    if (_routeDisposed) {
-      _controller!.dispose();
-      return;
-    }
-    _startReadinessObservation();
-    if (_routeDisposed) {
-      _controller!.dispose();
-      return;
-    }
-    if (widget.arguments.startOutgoing) {
-      await _controller!.startOutgoing(
-        operationId: widget.arguments.operationId,
-      );
-    } else if (widget.arguments.acceptIncomingOnOpen &&
-        widget.arguments.initialIncomingRequest != null) {
-      // The global incoming host is the user decision point. Once it has
-      // claimed the native provisional binding, the route sends the typed
-      // ACCEPT immediately; transport Connected remains a separate media gate.
-      await _controller!.acceptIncoming();
-    }
   }
 
   @override
   void dispose() {
-    _routeDisposed = true;
-    final controller = _controller;
-    if (controller != null) {
-      controller.removeListener(_onOperationChanged);
-      // Start the business cancellation before the first async teardown
-      // await, then synchronously cancel its expiry timer/subscriptions. The
-      // media coordinator and session lease still finish the owned cleanup in
-      // [_disposeRoute].
-      try {
-        _routeCancellation = controller
-            .cancel()
-            .timeout(const Duration(seconds: 5))
-            .catchError((_) {});
-      } catch (_) {}
-      controller.dispose();
-    }
-    unawaited(_disposeRoute());
+    widget.sessions.detach(_operation);
     super.dispose();
-  }
-
-  Future<void> _disposeRoute() async {
-    try {
-      // Keep the signaling session alive for the final CANCEL, bounded so a
-      // nonresponsive peer cannot retain native resources after navigation.
-      await _routeCancellation;
-      try {
-        await _terminalCleanup;
-      } catch (_) {}
-      await _disposeOwnedRoute();
-    } finally {
-      _releaseArbitration();
-    }
-  }
-
-  void _onOperationChanged() {
-    final operation = _controller!.snapshot;
-    if (_routeDisposed ||
-        !operation.isTerminal ||
-        operation.operationId == null ||
-        _terminalCleanup != null) {
-      return;
-    }
-    final cleanup = _finishOperation(operation);
-    _terminalCleanup = cleanup;
-    unawaited(cleanup.catchError((_) {}));
-  }
-
-  Future<void> _finishOperation(ScreenShareOperationSnapshot operation) async {
-    await _mediaCoordinator!.port.stop(
-      operationId: operation.operationId!,
-      realtimeId: operation.realtimeId,
-      generation: operation.generation,
-    );
-    await widget.arguments.sessionLease?.stopAndRelease();
-    _releaseArbitration();
-  }
-
-  void _releaseArbitration() {
-    final operation = _controller?.snapshot;
-    final id = operation?.operationId ?? widget.arguments.operationId;
-    if (id == null) return;
-    final sender =
-        operation?.role == ScreenShareRole.sender ||
-        (operation?.role == null &&
-            widget.arguments.mode == AppScreenShareRouteMode.send);
-    widget.arguments.arbitration?.release(
-      remotePeerId: widget.arguments.session.peerId,
-      initiatorPeerId: sender
-          ? widget.arguments.localPeerId
-          : widget.arguments.session.peerId,
-      operationId: id,
-    );
-  }
-
-  Future<void> _disposeOwnedRoute() async {
-    await _readinessSubscription?.cancel();
-    _readinessSubscription = null;
-    try {
-      await _readinessUpdate;
-    } catch (_) {}
-    final controller = _controller;
-    final mediaCoordinator = _mediaCoordinator;
-    final lease = widget.arguments.sessionLease;
-    if (widget.arguments.mode == AppScreenShareRouteMode.send) {
-      if (controller != null) {
-        controller.dispose();
-      }
-      if (mediaCoordinator != null) {
-        try {
-          await mediaCoordinator.dispose();
-        } catch (_) {}
-      }
-      if (lease != null) {
-        try {
-          await lease.stopAndRelease();
-        } catch (_) {}
-      }
-      return;
-    }
-    if (controller != null) {
-      controller.dispose();
-    }
-    if (lease != null) {
-      try {
-        await lease.stopAndRelease();
-      } catch (_) {}
-    }
-    if (mediaCoordinator != null) {
-      try {
-        await mediaCoordinator.dispose();
-      } catch (_) {}
-    }
-  }
-
-  void _startReadinessObservation() {
-    final session = widget.arguments.session;
-    _readinessSubscription = session.snapshots.listen((_) {
-      _enqueueReadinessSync();
-    });
-    // Read, subscribe, then read again. The second check closes the window in
-    // which native can publish Connected between the first read and listen().
-    _enqueueReadinessSync();
-    _enqueueReadinessSync();
-  }
-
-  void _enqueueReadinessSync() {
-    _readinessUpdate = _readinessUpdate.then((_) async {
-      if (_routeDisposed || _controller == null) return;
-      final token = widget.arguments.session.mediaToken;
-      final snapshot = widget.arguments.session.currentSnapshot;
-      final state = snapshot?.state ?? widget.arguments.session.state;
-      final generation =
-          snapshot?.generation ?? widget.arguments.session.generation;
-      final sharedSessionInstanceId =
-          snapshot?.sharedSessionInstanceId ??
-          widget.arguments.session.sharedSessionInstanceId;
-      final controller = _controller!;
-      if (state == RealtimeSessionState.stopped ||
-          state == RealtimeSessionState.failed ||
-          (generation != null && generation != controller.generation) ||
-          (sharedSessionInstanceId != null &&
-              sharedSessionInstanceId != controller.sharedSessionInstanceId)) {
-        _mediaCoordinator!.reportTransportLost(controller.snapshot);
-        return;
-      }
-      final ready =
-          state == RealtimeSessionState.connected &&
-          token != null &&
-          generation == token.generation &&
-          sharedSessionInstanceId ==
-              widget.arguments.session.sharedSessionInstanceId;
-      if (_appliedMediaReadiness == ready) return;
-      await _controller!.setMediaReady(ready);
-      _appliedMediaReadiness = ready;
-    });
   }
 
   @override
   Widget build(BuildContext context) => AppPageSurface(
     child: FutureBuilder<void>(
-      future: _initialization,
+      future: _operation.initialization,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return Scaffold(
@@ -385,7 +91,7 @@ final class _AppScreenShareRouteScopeState
             body: const Center(child: CircularProgressIndicator()),
           );
         }
-        if (snapshot.hasError || _controller == null) {
+        if (snapshot.hasError || _operation.controller == null) {
           return Scaffold(
             appBar: AppBar(title: const Text('Screen sharing')),
             body: Center(
@@ -395,19 +101,26 @@ final class _AppScreenShareRouteScopeState
             ),
           );
         }
-        final controller = _controller!;
+        final controller = _operation.controller!;
         return AnimatedBuilder(
-          animation: controller,
+          animation: _operation,
           builder: (context, _) {
             final operation = controller.snapshot;
-            final remoteSurface = _mediaCoordinator?.remoteSurface;
+            final remoteSurface = _operation.media?.remoteSurface;
             final presenter =
                 widget.presenter ?? const AppTextureRemoteVideoPresenter();
             return AppScreenShareVideoPage(
-              videoSize: _mediaCoordinator!.remoteVideoSize,
+              videoSize: _operation.media!.remoteVideoSize,
               enableViewerControls:
-                  remoteSurface != null && !operation.isTerminal,
-              onStop: !operation.isTerminal ? controller.cancel : null,
+                  remoteSurface != null &&
+                  !operation.isTerminal &&
+                  !_operation.finished,
+              onStop:
+                  (!operation.isTerminal || _operation.cleanupFailed) &&
+                      !_operation.stopping &&
+                      !_operation.finished
+                  ? _operation.stop
+                  : null,
               video: remoteSurface == null
                   ? const Center(
                       child: Icon(Icons.screen_share_outlined, size: 48),
@@ -426,17 +139,35 @@ final class _AppScreenShareRouteScopeState
                       icon: const Icon(Icons.screen_share_outlined),
                       label: const Text('Start sharing'),
                     ),
-                  ScreenShareConsentView(
-                    controller: controller,
-                    showIncomingActions: !widget.arguments.acceptIncomingOnOpen,
-                  ),
-                  if (!operation.isTerminal &&
+                  if (_operation.finished && !operation.isTerminal)
+                    const Text('Screen sharing stopped')
+                  else
+                    ScreenShareConsentView(
+                      controller: controller,
+                      showIncomingActions:
+                          !widget.arguments.acceptIncomingOnOpen,
+                    ),
+                  if (operation.state == ScreenShareOperationState.failed &&
+                      _operation.media?.failureCode != null)
+                    Text(
+                      _failureDescription(
+                        context,
+                        _operation.media!.failureCode!,
+                        widget.arguments.codecMode,
+                      ),
+                    ),
+                  if ((!operation.isTerminal || _operation.cleanupFailed) &&
+                      !_operation.finished &&
                       operation.state != ScreenShareOperationState.idle) ...[
                     const SizedBox(height: 12),
                     OutlinedButton.icon(
-                      onPressed: controller.cancel,
+                      onPressed: _operation.stopping ? null : _operation.stop,
                       icon: const Icon(Icons.stop_circle_outlined),
-                      label: const Text('Stop screen share'),
+                      label: Text(
+                        _operation.cleanupFailed
+                            ? 'Retry stopping screen share'
+                            : 'Stop screen share',
+                      ),
                     ),
                   ],
                 ],
@@ -452,3 +183,18 @@ final class _AppScreenShareRouteScopeState
 String _errorCode(Object? error) => error is RealtimeMediaException
     ? error.code.name
     : RealtimeMediaErrorCode.backendFailure.name;
+
+String _failureDescription(
+  BuildContext context,
+  RealtimeMediaErrorCode code,
+  RealtimeMediaCodecMode mode,
+) {
+  final chinese = Localizations.localeOf(context).languageCode == 'zh';
+  if (code == RealtimeMediaErrorCode.encoderUnavailable &&
+      mode == RealtimeMediaCodecMode.hardware) {
+    return chinese
+        ? '硬件 H.264 编码器不可用（${code.name}），请开启 CPU 模式后重新发起共享。'
+        : 'Hardware H.264 encoder unavailable (${code.name}). Select CPU mode and start sharing again.';
+  }
+  return chinese ? '屏幕共享错误：${code.name}' : 'Screen-share error: ${code.name}';
+}

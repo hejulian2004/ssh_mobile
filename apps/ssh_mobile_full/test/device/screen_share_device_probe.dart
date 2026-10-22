@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'screen_share_probe_backend.dart';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/material.dart';
@@ -215,8 +216,9 @@ Future<void> _probe({
           .firstWhere((s) => s.state == RealtimeSessionState.connected)
           .timeout(const Duration(seconds: 30));
     }
-    final endpointBackend = _ProbeEndpointBackend(
+    final endpointBackend = ProbeEndpointBackend(
       AppRealtimeMediaBackend(networkRuntime: runtime),
+      onPhase: _report,
     );
     final RealtimeMediaBackend mediaBackend = windows
         ? WindowsRealtimeMediaBackend(
@@ -481,75 +483,4 @@ Future<void> _snapshotPublicViewer({String? suffix}) async {
   } finally {
     image.dispose();
   }
-}
-
-final class _ProbeEndpointBackend
-    implements RealtimeMediaBackend, RealtimeMediaNativeOwnerBackend {
-  _ProbeEndpointBackend(this.inner);
-  final AppRealtimeMediaBackend inner;
-  RealtimeMediaEndpointId? endpointId;
-  RealtimeMediaEndpointIdentity? identity;
-  @override
-  Future<RealtimeMediaEndpointId> start(
-    RealtimeMediaEndpointIdentity value,
-  ) async {
-    identity = value;
-    _report('endpoint_create');
-    endpointId = await inner.start(value);
-    _report('endpoint_created');
-    return endpointId!;
-  }
-
-  @override
-  Future<RealtimeMediaNativeOwnerToken> openNativeOwner({
-    required RealtimeMediaEndpointId endpointId,
-    required RealtimeMediaEndpointIdentity identity,
-  }) async {
-    _report('owner_open');
-    final token = await inner.openNativeOwner(
-      endpointId: endpointId,
-      identity: identity,
-    );
-    _report('owner_opened');
-    return token;
-  }
-
-  @override
-  Future<void> closeNativeOwner({
-    required RealtimeMediaNativeOwnerToken token,
-    required RealtimeMediaEndpointIdentity identity,
-  }) => inner.closeNativeOwner(token: token, identity: identity);
-  @override
-  Future<void> attachCaptureSource({
-    required RealtimeMediaEndpointId endpointId,
-    required RealtimeMediaEndpointIdentity identity,
-    required ScreenCaptureSource source,
-  }) => inner.attachCaptureSource(
-    endpointId: endpointId,
-    identity: identity,
-    source: source,
-  );
-  @override
-  Future<RemoteVideoSurface> attachRemoteVideoSurface({
-    required RealtimeMediaEndpointId endpointId,
-    required RealtimeMediaEndpointIdentity identity,
-  }) => inner.attachRemoteVideoSurface(
-    endpointId: endpointId,
-    identity: identity,
-  );
-  @override
-  Future<void> detach({
-    required RealtimeMediaEndpointId endpointId,
-    required RealtimeMediaEndpointIdentity identity,
-  }) => inner.detach(endpointId: endpointId, identity: identity);
-  @override
-  Future<void> release({
-    required RealtimeMediaEndpointId endpointId,
-    required RealtimeMediaEndpointIdentity identity,
-  }) => inner.release(endpointId: endpointId, identity: identity);
-  @override
-  Future<RealtimeMediaStats> readStats({
-    required RealtimeMediaEndpointId endpointId,
-    required RealtimeMediaEndpointIdentity identity,
-  }) => inner.readStats(endpointId: endpointId, identity: identity);
 }

@@ -1,4 +1,4 @@
-Last updated: 2026-10-15
+Last updated: 2026-10-23
 
 # realtime_media_android maintenance contract
 
@@ -27,6 +27,12 @@ concurrent requests must not leak a mode to another owner. Unknown modes fail
 closed. CPU mode preserves system recording consent and the same native ABI.
 
 ## Lifecycle contract
+
+On API 34+, request the default display through
+`createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay())`;
+earlier APIs use their full-display capture intent. Keep the system permission
+dialog and platform stop/revoke controls. Page visibility must not revoke the
+projection or stop its foreground service.
 
 Projection permission and the typed foreground service must be active before
 `getMediaProjection()` and capture start. Service readiness follows system

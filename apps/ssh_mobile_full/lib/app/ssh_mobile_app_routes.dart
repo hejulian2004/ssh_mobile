@@ -72,12 +72,17 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
                       navigatorKey: _navigatorKey,
                       screenSharePort: screenShareAdapter,
                       arbitration: screenShareAdapter.arbitration,
-                      child: feature_developer.DeveloperPanelFloatingHost(
-                        child: feature_lan_share.NetworkIncomingTransferHost(
-                          child: feature_lan_share.LanPairingNavigationHost(
-                            initializeReceiver: false,
-                            navigatorKey: _navigatorKey,
-                            child: ShadAppBuilder(child: effectiveChild),
+                      sessions: screenShareAdapter.sessions,
+                      child: AppScreenShareBackgroundHost(
+                        sessions: screenShareAdapter.sessions,
+                        navigatorKey: _navigatorKey,
+                        child: feature_developer.DeveloperPanelFloatingHost(
+                          child: feature_lan_share.NetworkIncomingTransferHost(
+                            child: feature_lan_share.LanPairingNavigationHost(
+                              initializeReceiver: false,
+                              navigatorKey: _navigatorKey,
+                              child: ShadAppBuilder(child: effectiveChild),
+                            ),
                           ),
                         ),
                       ),
@@ -187,9 +192,12 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
                           );
                         }
                         return MaterialPageRoute(
+                          // Keep live native textures out of route snapshots.
+                          allowSnapshotting: false,
                           builder: (_) => AppScreenShareRouteScope(
                             arguments: arguments,
                             resources: _runtime.realtimeMediaResources,
+                            sessions: _lanScreenShareAdapter!.sessions,
                           ),
                         );
                       case feature_ai.AiRouteNames.skills:

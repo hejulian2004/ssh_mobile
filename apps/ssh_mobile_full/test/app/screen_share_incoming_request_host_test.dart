@@ -16,6 +16,9 @@ import 'package:ssh_mobile/app/navigation/app_route_contributions.dart';
 
 import 'support/app_runtime_test_support.dart';
 
+late AppScreenShareSessions _hostSessions;
+late Future<void> Function() _closeHostRealtime;
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -25,6 +28,8 @@ void main() {
   late FakeCommandGateway commandGateway;
 
   setUp(() async {
+    _hostSessions = AppScreenShareSessions();
+    addTearDown(_hostSessions.dispose);
     commandGateway = FakeCommandGateway();
     network = FakeNetworkRuntime();
     harness = await newRuntimeHarness(
@@ -33,10 +38,51 @@ void main() {
       startPendingInitialization: false,
     );
     runtime = await harness.createFuture;
+    _closeHostRealtime = runtime.realtimeClient.dispose;
     network.realtimeGateway = RuntimeNetworkRealtimeGateway(commandGateway);
   });
 
-  testWidgets('disposed host cannot install a late accepted route', (
+  _testHostWidgets(
+    'pending invitation formally rejects an extra earlier intent',
+    (tester) async {
+      final arbitration = AppScreenSharePeerArbitrationRegistry();
+      addTearDown(arbitration.dispose);
+      await _mountHost(
+        tester: tester,
+        runtime: runtime,
+        commandGateway: commandGateway,
+        arbitration: arbitration,
+      );
+      final now = DateTime.now().toUtc();
+      await _emitOffer(
+        tester,
+        commandGateway,
+        realtimeId: '00112233445566778899aabbccddee11',
+        sharedSessionInstanceId: 'ffeeddccbbaa99887766554433221100',
+        operationId: 'operation-z',
+        bindingExpiry: now.add(const Duration(seconds: 1)),
+      );
+      await _emitOffer(
+        tester,
+        commandGateway,
+        realtimeId: '00112233445566778899aabbccddee22',
+        sharedSessionInstanceId: '11223344556677889900aabbccddeeff',
+        operationId: 'operation-a',
+        bindingExpiry: now.add(const Duration(seconds: 5)),
+      );
+      expect(commandGateway.countCommands('realtime-reject-incoming'), 1);
+      expect(commandGateway.countCommands('realtime-claim-incoming'), 0);
+      await tester.pump(const Duration(milliseconds: 1100));
+      await _settle(tester);
+      expect(find.text('Incoming screen-share request'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _settle(tester);
+      await commandGateway.close();
+      debugPrint = debugPrintSynchronously;
+    },
+  );
+
+  _testHostWidgets('disposed host cannot install a late accepted route', (
     tester,
   ) async {
     final arbitration = AppScreenSharePeerArbitrationRegistry();
@@ -100,7 +146,7 @@ void main() {
     expect(arbitration.isBusy, isFalse);
     await cleanUp();
   });
-  testWidgets(
+  _testHostWidgets(
     'busy sharing rejects another peer without claiming or replacing it',
     (tester) async {
       final arbitration = AppScreenSharePeerArbitrationRegistry();
@@ -156,7 +202,7 @@ void main() {
     },
   );
 
-  testWidgets(
+  _testHostWidgets(
     'accepted route rejects earlier invitations without replacement',
     (tester) async {
       final arbitration = AppScreenSharePeerArbitrationRegistry();
@@ -231,8 +277,8 @@ void main() {
     },
   );
 
-  testWidgets(
-    'completed route frees admission and the next invitation still expires',
+  _testHostWidgets(
+    'closing the route retains admission and rejects the next invitation',
     (tester) async {
       final navigatorKey = GlobalKey<NavigatorState>();
       final arbitration = AppScreenSharePeerArbitrationRegistry();
@@ -283,7 +329,7 @@ void main() {
       navigatorKey.currentState!.pop();
       await _settle(tester);
       expect(disposed, contains('operation-z'));
-      expect(arbitration.isBusy, isFalse);
+      expect(arbitration.isBusy, isTrue);
       await _emitOffer(
         tester,
         commandGateway,
@@ -292,16 +338,19 @@ void main() {
         operationId: 'operation-a',
         bindingExpiry: DateTime.now().toUtc().add(const Duration(seconds: 1)),
       );
-      expect(find.text('Incoming screen-share request'), findsOneWidget);
+      expect(find.text('Incoming screen-share request'), findsNothing);
       await tester.pump(const Duration(milliseconds: 1100));
       await _settle(tester);
       expect(find.text('Incoming screen-share request'), findsNothing);
-      expect(commandGateway.countCommands('realtime-discard-incoming'), 1);
+      expect(commandGateway.countCommands('realtime-reject-incoming'), 1);
+      expect(commandGateway.countCommands('realtime-stop'), 0);
       expect(commandGateway.countCommands('realtime-claim-incoming'), 1);
       await cleanUp();
     },
   );
-  testWidgets('accept resolution is not duplicated by expiry', (tester) async {
+  _testHostWidgets('accept resolution is not duplicated by expiry', (
+    tester,
+  ) async {
     final arbitration = AppScreenSharePeerArbitrationRegistry();
     final claimRelease = Completer<void>();
     var claimCount = 0;
@@ -379,7 +428,9 @@ void main() {
     await cleanUp();
   });
 
-  testWidgets('reject resolution is not duplicated by expiry', (tester) async {
+  _testHostWidgets('reject resolution is not duplicated by expiry', (
+    tester,
+  ) async {
     final arbitration = AppScreenSharePeerArbitrationRegistry();
     final rejectRelease = Completer<void>();
     var rejectCount = 0;
@@ -451,7 +502,7 @@ void main() {
     await cleanUp();
   });
 
-  testWidgets(
+  _testHostWidgets(
     'a losing incoming intent does not invalidate the current expiry owner',
     (tester) async {
       final arbitration = AppScreenSharePeerArbitrationRegistry();
@@ -511,6 +562,7 @@ Future<void> _mountHost({
   ValueListenable<bool>? hostVisible,
 }) async {
   final key = navigatorKey ?? GlobalKey<NavigatorState>();
+  final sessions = _hostSessions;
   await tester.pumpWidget(
     MaterialApp(
       navigatorKey: key,
@@ -532,6 +584,7 @@ Future<void> _mountHost({
                 navigatorKey: key,
                 screenSharePort: const _TestScreenSharePort(),
                 arbitration: arbitration,
+                sessions: sessions,
                 child: const ColoredBox(color: Colors.white),
               )
             : const SizedBox.shrink(),
@@ -663,16 +716,6 @@ final class _ControlledScreenShareRouteState
   @override
   void dispose() {
     widget.onDisposed(widget.arguments.operationId);
-    final lease = widget.arguments.sessionLease;
-    unawaited(() async {
-      await lease?.stopAndRelease();
-      final arguments = widget.arguments;
-      arguments.arbitration?.release(
-        remotePeerId: arguments.session.peerId,
-        initiatorPeerId: arguments.initialIncomingRequest!.senderPeerId,
-        operationId: arguments.operationId!,
-      );
-    }());
     super.dispose();
   }
 
@@ -759,4 +802,25 @@ List<int> _varint(int value) {
     bytes.add(remaining == 0 ? next : next | 0x80);
   } while (remaining != 0);
   return bytes;
+}
+
+void _testHostWidgets(String description, WidgetTesterCallback body) {
+  testWidgets(description, (tester) async {
+    try {
+      await body(tester);
+    } finally {
+      var closed = false;
+      final closing = _hostSessions.close().whenComplete(() => closed = true);
+      await _settle(tester);
+      for (var turn = 0; turn < 4 && !closed; turn++) {
+        await tester.pump(const Duration(seconds: 15));
+        await _settle(tester);
+      }
+      expect(closed, isTrue, reason: 'Test App owner must finish shutdown');
+      await closing;
+      final sdkClosing = _closeHostRealtime();
+      await _settle(tester);
+      await sdkClosing;
+    }
+  });
 }

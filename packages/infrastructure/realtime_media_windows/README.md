@@ -1,4 +1,4 @@
-Last updated: 2026-10-14
+Last updated: 2026-10-23
 
 # realtime_media_windows
 
@@ -80,6 +80,9 @@ dimensions within a padded coded frame. Native buffers stay alive until
 Flutter releases its frame lease, including during stop.
 Rendering counters advance when Flutter obtains a frame descriptor, not merely
 when the worker announces an available texture.
+Decoder stop retains the registered callback until Flutter's asynchronous
+texture-unregister completion. Releasing an operation cannot invalidate a
+callback still reachable by the render thread.
 
 ## Current phase boundary
 
@@ -106,8 +109,12 @@ root with CMake and the installed MSVC generator:
 cmake -S packages/infrastructure/realtime_media_windows/test/windows -B apps/ssh_mobile_full/build/native-probes -A x64
 cmake --build apps/ssh_mobile_full/build/native-probes --config Release
 ./apps/ssh_mobile_full/build/native-probes/Release/encoder_probe.exe --cpu --odd
+./apps/ssh_mobile_full/build/native-probes/Release/decoder_probe.exe --cpu --retain-frame --defer-unregister
 ```
 
 Run without `--cpu` to check hardware encoding, or without `--odd` for the even
 fixture.
 Add `--repeat` to verify the static-source path.
+The decoder probe's `--defer-unregister` keeps Flutter's completion pending and
+checks that its callback remains safe after owner release; `--retain-frame`
+checks that an outstanding native pixel lease remains valid during stop.

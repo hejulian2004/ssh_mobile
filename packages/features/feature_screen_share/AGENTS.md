@@ -1,4 +1,4 @@
-最新更新时间：2026-09-12
+最新更新时间：2026-10-23
 
 # feature_screen_share 维护约束
 
@@ -23,6 +23,9 @@
 - `compareScreenShareIntents` is the only public collision comparator. Keep its
   UTF-8 `(initiatorPeerId, operationId)` semantics pure and do not duplicate
   arbitration logic in a caller.
+- Consent replies use the earlier of the original request deadline and the
+  local issuance time plus `RealtimeConsent.maxLifetime`. Do not extend an
+  invitation or relax SDK freshness/schema validation to tolerate clock skew.
 
 ## Validation
 

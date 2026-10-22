@@ -333,7 +333,9 @@ struct DecoderState final {
     reset_requested.store(false);
     if (worker.joinable()) worker.join();
     if (registrar != nullptr && texture_id >= 0) {
-      registrar->UnregisterTexture(texture_id);
+      // Flutter can still invoke the texture callback until unregister completes.
+      auto retained = std::shared_ptr<flutter::TextureVariant>(std::move(texture));
+      registrar->UnregisterTexture(texture_id, [retained] {});
       texture_id = -1;
     }
     std::lock_guard<std::mutex> lock(mutex);
