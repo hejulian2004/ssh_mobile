@@ -2,7 +2,7 @@ import 'package:realtime_media/realtime_media.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('hardware is the default and CPU is part of the immutable binding', () {
+  test('automatic fallback is the default and mode remains immutable', () {
     final hardware = RealtimeMediaEndpointIdentity(
       realtimeId: 'fixture-session',
       peerId: 'fixture-peer',
@@ -16,7 +16,7 @@ void main() {
       direction: RealtimeMediaDirection.send,
       codecMode: RealtimeMediaCodecMode.cpu,
     );
-    expect(hardware.codecMode, RealtimeMediaCodecMode.hardware);
+    expect(hardware.codecMode.name, 'automatic');
     expect(cpu.matches(hardware), isFalse);
     expect(hardware.matches(cpu), isFalse);
   });

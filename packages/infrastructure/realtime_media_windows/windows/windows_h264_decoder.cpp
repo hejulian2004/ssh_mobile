@@ -399,8 +399,12 @@ void WindowsDecoderManager::SetNativeCallbacks(
 
 DecoderStatus WindowsDecoderManager::Attach(uint64_t owner, int64_t* surface_id,
                                             NativeCodecMode mode) {
-  if (owner == 0 || surface_id == nullptr)
-    return DecoderStatus::kBackendFailure;
+  if (mode == NativeCodecMode::Automatic) {
+    const auto status = Attach(owner, surface_id, NativeCodecMode::Hardware);
+    return status == DecoderStatus::kDecoderUnavailable
+        ? Attach(owner, surface_id, NativeCodecMode::Cpu) : status;
+  }
+  if (owner == 0 || surface_id == nullptr) return DecoderStatus::kBackendFailure;
   *surface_id = -1;
   std::lock_guard<std::mutex> lock(impl_->mutex);
   if (impl_->decoders.find(owner) != impl_->decoders.end()) {

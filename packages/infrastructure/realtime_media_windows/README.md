@@ -7,7 +7,8 @@ Last updated: 2026-10-23
 endpoint lease backend with a Windows platform owner. The native owner now
 implements Windows Graphics Capture for display/window sources, a native Media
 Foundation H.264 send-ingress worker, and a receive decoder with native Flutter
-Texture ownership. Hardware is the default; explicit CPU mode selects software
+Texture ownership. Automatic mode is the default and retries software H.264 if hardware acquisition
+is unavailable; explicit CPU mode selects software
 H.264 without changing the native media ABI or codec negotiation.
 
 The Dart side deliberately carries no frame bytes, encoded data, native
@@ -112,7 +113,9 @@ cmake --build apps/ssh_mobile_full/build/native-probes --config Release
 ./apps/ssh_mobile_full/build/native-probes/Release/decoder_probe.exe --cpu --retain-frame --defer-unregister
 ```
 
-Run without `--cpu` to check hardware encoding, or without `--odd` for the even
+Run `decoder_probe.exe --automatic` to check the default hardware-first receive
+policy with a fixed software-encoded fixture. Run without `--cpu` to check
+hardware encoding, or without `--odd` for the even
 fixture.
 Add `--repeat` to verify the static-source path.
 The decoder probe's `--defer-unregister` keeps Flutter's completion pending and

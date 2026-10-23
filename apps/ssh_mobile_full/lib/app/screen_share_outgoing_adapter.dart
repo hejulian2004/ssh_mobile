@@ -330,7 +330,7 @@ final class _SelectedScreenShareSource {
   const _SelectedScreenShareSource({
     required this.nativeSource,
     required this.option,
-    this.codecMode = RealtimeMediaCodecMode.hardware,
+    this.codecMode = RealtimeMediaCodecMode.automatic,
   });
 
   final ScreenCaptureSource nativeSource;

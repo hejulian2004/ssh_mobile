@@ -14,6 +14,28 @@ void main() {
     messenger.setMockMethodCallHandler(channel, null);
   });
 
+  test('automatic policy reaches native capture', () async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'startCapture');
+      expect((call.arguments as Map)['codec_mode'], 'automatic');
+      return null;
+    });
+    const platform = MethodChannelAndroidRealtimeMediaPlatform();
+    await platform.startCapture(
+      endpointId: RealtimeMediaEndpointId('fixture-endpoint'),
+      identity: RealtimeMediaEndpointIdentity(
+        realtimeId: 'fixture-session',
+        peerId: 'fixture-peer',
+        generation: 1,
+        direction: RealtimeMediaDirection.send,
+      ),
+      source: ScreenCaptureSource(
+        id: ScreenCaptureSourceId('fixture-display'),
+        kind: ScreenCaptureSourceKind.display,
+      ),
+    );
+  });
+
   test('maps projection denial to permissionDenied', () async {
     messenger.setMockMethodCallHandler(channel, (call) async {
       throw PlatformException(

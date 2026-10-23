@@ -10,7 +10,8 @@ Last updated: 2026-10-23
   surfaces, and Flutter texture registration native-owned.
 - Carry only bounded identity/source metadata, lifecycle commands, opaque
   surface IDs, and payload-free statistics over the platform channel.
-- Hardware is the default. Explicit CPU mode uses synchronous software H.264,
+- Automatic hardware-first H.264 with software fallback is the default. Explicit
+  CPU mode uses synchronous software H.264,
   WARP capture resources, and native pixel-buffer texture rendering. CPU receive
   must not require a hardware D3D device or DXGI decoder manager. Unknown modes
   fail before starting an owner; a missing selected codec remains a typed error.
@@ -20,8 +21,9 @@ Last updated: 2026-10-23
 - Do not expose raw or encoded frames, native pointers, or GPU buffers to Dart.
 - Do not move endpoint/session ownership out of `realtime_media` or the App
   Shell's injected native endpoint backend.
-- Do not silently fall back to software codecs, another video codec, or a
-  synthetic capture source when Windows hardware capability is unavailable.
+- Automatic policy may retry software H.264 only after hardware acquisition
+  reports unavailable without publishing an owner. Never substitute another
+  video codec or a synthetic capture source, or retry security/lifecycle errors.
 - Do not add signaling, consent/UI business state, TURN credentials, or QoS
   policy here; those belong to their later owners.
 

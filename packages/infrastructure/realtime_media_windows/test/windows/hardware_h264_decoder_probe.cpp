@@ -28,6 +28,7 @@ std::mutex fixture_mutex;
 std::deque<FixtureFrame> fixture_frames;
 uint32_t fixture_width = 640, fixture_height = 480;
 bool cpu_mode = false;
+bool automatic_mode = false;
 bool defer_render = false;
 bool retain_frame = false;
 bool defer_unregister = false;
@@ -88,7 +89,7 @@ class FixtureRegistrar final : public flutter::TextureRegistrar {
     return defer_render || RenderFixture();
   }
   bool RenderFixture() {
-    if (cpu_mode) {
+    if (std::holds_alternative<flutter::PixelBufferTexture>(*texture)) {
       const auto* pixels =
           std::get<flutter::PixelBufferTexture>(*texture).CopyPixelBuffer(
               fixture_width, fixture_height);
@@ -190,8 +191,21 @@ bool PrepareFixture() {
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (CodecModeArgument({}) != NativeCodecMode::Automatic ||
+      CodecModeArgument({{flutter::EncodableValue("codec_mode"),
+                          flutter::EncodableValue("automatic")}}) !=
+          NativeCodecMode::Automatic ||
+      CodecModeArgument({{flutter::EncodableValue("codec_mode"),
+                          flutter::EncodableValue("unknown")}}).has_value()) {
+    std::cout << "FAIL codec_policy_validation\n";
+    return 1;
+  }
   for (int index = 1; index < argc; ++index) {
     if (std::string(argv[index]) == "--cpu") cpu_mode = true;
+    if (std::string(argv[index]) == "--automatic") {
+      automatic_mode = true;
+      cpu_mode = true;  // Fixture encoding is independent of receiver policy.
+    }
     if (std::string(argv[index]) == "--defer-render") defer_render = true;
     if (std::string(argv[index]) == "--retain-frame") retain_frame = true;
     if (std::string(argv[index]) == "--defer-unregister") defer_unregister = true;
@@ -238,7 +252,8 @@ int main(int argc, char** argv) {
        {flutter::EncodableValue("direction"),
         flutter::EncodableValue("receive")},
        {flutter::EncodableValue("codec_mode"),
-        flutter::EncodableValue(cpu_mode ? "cpu" : "hardware")}},
+        flutter::EncodableValue(automatic_mode ? "automatic"
+                                             : (cpu_mode ? "cpu" : "hardware"))}},
       std::make_unique<FixtureResult>(attached), api, manager);
   if (!owner_started.load()) {
     std::cout << "FAIL native_owner_not_started_before_decoder\n";
@@ -304,7 +319,8 @@ int main(int argc, char** argv) {
     }
     // Flutter may invoke the registered callback until unregister completes.
     // The callback must still be callable after its decoder owner is released.
-    const bool stopped = cpu_mode
+    const bool stopped =
+        std::holds_alternative<flutter::PixelBufferTexture>(*registrar.texture)
         ? std::get<flutter::PixelBufferTexture>(*registrar.texture)
                   .CopyPixelBuffer(fixture_width, fixture_height) == nullptr
         : std::get<flutter::GpuSurfaceTexture>(*registrar.texture)
@@ -316,7 +332,8 @@ int main(int argc, char** argv) {
     registrar.unregister_complete();
     registrar.unregister_complete = nullptr;
   }
-  std::cout << "PASS " << (cpu_mode ? "cpu" : "hardware")
+  std::cout << "PASS "
+            << (automatic_mode ? "automatic" : (cpu_mode ? "cpu" : "hardware"))
             << "_fixture_decoded_and_rendered_in_existing_apartment\n";
   return 0;
 }

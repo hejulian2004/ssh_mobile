@@ -1070,7 +1070,7 @@ void main() {
     expect(_testSessions.isBusy, isFalse);
   });
 
-  _testSharedWidgets('encoder capability failure explains CPU mode', (
+  _testSharedWidgets('encoder failure does not expose codec selection', (
     tester,
   ) async {
     backend.captureFailure = const RealtimeMediaException(
@@ -1109,7 +1109,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Screen sharing failed'), findsOneWidget);
     expect(find.textContaining('encoderUnavailable'), findsOneWidget);
-    expect(find.textContaining('CPU mode'), findsOneWidget);
+    expect(find.textContaining('CPU mode'), findsNothing);
   });
 
   _testSharedWidgets(

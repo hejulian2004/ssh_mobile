@@ -18,10 +18,10 @@ Last updated: 2026-10-23
   to Dart, protobuf events, application Relay, or Feature packages.
 - Do not create another NetworkRuntime, RealtimeManager, PeerConnection, or
   endpoint registry. Phase 2 endpoint/generation/release semantics are fixed.
-- Do not silently fall back to software codecs, VP8/AV1, or an unbounded queue.
+- Automatic policy may fall back only to software H.264 after confirmed failed-attempt cleanup; never fall back to VP8/AV1 or an unbounded queue.
 - Do not add consent, TURN credentials, business state, or QoS policy here.
 
-Hardware codecs remain the default. Explicit CPU mode selects only software
+Automatic policy tries hardware codecs before software H.264. Explicit CPU mode selects only software
 H.264 MediaCodec instances within the synchronous owner operation. Nested and
 concurrent requests must not leak a mode to another owner. Unknown modes fail
 closed. CPU mode preserves system recording consent and the same native ABI.

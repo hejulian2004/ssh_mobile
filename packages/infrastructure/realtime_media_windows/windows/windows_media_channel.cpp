@@ -216,8 +216,9 @@ flutter::EncodableMap StatsMap(const CaptureStats& stats,
 std::optional<NativeCodecMode> CodecModeArgument(
     const flutter::EncodableMap& arguments) {
   const auto it = arguments.find(flutter::EncodableValue("codec_mode"));
-  if (it == arguments.end()) return NativeCodecMode::Hardware;
+  if (it == arguments.end()) return NativeCodecMode::Automatic;
   const auto value = StringArgument(arguments, "codec_mode");
+  if (value && *value == "automatic") return NativeCodecMode::Automatic;
   if (value && *value == "hardware") return NativeCodecMode::Hardware;
   if (value && *value == "cpu") return NativeCodecMode::Cpu;
   return std::nullopt;

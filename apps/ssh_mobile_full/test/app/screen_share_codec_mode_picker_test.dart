@@ -13,7 +13,7 @@ void main() {
     height: 480,
   );
   testWidgets(
-    'source selection defaults to hardware and carries explicit CPU choice',
+    'source selection hides codec choices and uses automatic fallback',
     (tester) async {
       final selected = <RealtimeMediaCodecMode>[];
       await tester.pumpWidget(
@@ -30,41 +30,9 @@ void main() {
         ),
       );
       await tester.tap(find.text('Fixture display'));
-      expect(selected, [RealtimeMediaCodecMode.hardware]);
-      await tester.tap(find.text('CPU mode'));
-      await tester.pump();
-      await tester.tap(find.text('Fixture display'));
-      expect(selected.last, RealtimeMediaCodecMode.cpu);
-      await tester.tap(find.text('CPU mode'));
-      await tester.pump();
-      await tester.tap(find.text('Fixture display'));
-      expect(selected.last, RealtimeMediaCodecMode.hardware);
-    },
-  );
-  testWidgets(
-    'busy incoming selection is disabled and Chinese text is localized',
-    (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Builder(
-            builder: (context) => Localizations.override(
-              context: context,
-              locale: const Locale('zh'),
-              child: Scaffold(
-                body: AppScreenShareCodecModePicker(
-                  mode: RealtimeMediaCodecMode.cpu,
-                  onChanged: null,
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-      expect(find.text('CPU 模式'), findsOneWidget);
-      expect(
-        tester.widget<SwitchListTile>(find.byType(SwitchListTile)).onChanged,
-        isNull,
-      );
+      expect(selected.single.name, 'automatic');
+      expect(find.text('CPU mode'), findsNothing);
+      expect(find.byType(SwitchListTile), findsNothing);
     },
   );
 }

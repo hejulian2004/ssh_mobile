@@ -210,7 +210,7 @@ final class AppRealtimeMediaSessionFactory {
 
   RealtimeMediaSessionController create(
     RealtimeSession session, {
-    RealtimeMediaCodecMode codecMode = RealtimeMediaCodecMode.hardware,
+    RealtimeMediaCodecMode codecMode = RealtimeMediaCodecMode.automatic,
   }) {
     final token = session.mediaToken;
     if (token == null) {

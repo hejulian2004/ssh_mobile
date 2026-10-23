@@ -61,7 +61,7 @@ class WindowsDecoderManager final {
                           H264BufferFreeCallback free_callback);
 
   DecoderStatus Attach(uint64_t owner, int64_t* surface_id,
-                       NativeCodecMode mode = NativeCodecMode::Hardware);
+                       NativeCodecMode mode = NativeCodecMode::Automatic);
   DecoderStatus Detach(uint64_t owner);
   DecoderStatus Release(uint64_t owner);
   DecoderStatus Reset(uint64_t owner);

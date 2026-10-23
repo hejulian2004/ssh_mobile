@@ -56,9 +56,11 @@ Android 默认请求共享整个屏幕，保留系统授权与撤销；API 34+ �
 及 [onCapturedContentResize](https://developer.android.com/reference/android/media/projection/MediaProjection.Callback#onCapturedContentResize(int,int))；
 当前实现状态以 owning package README 和设备验证为准。
 
-2026-10-13 补充决策：Windows/Android 允许用户显式选择 CPU H.264 编解码模式，
-默认硬件模式不变，不进行静默软件回退。模式属于本地媒体端点身份，由 App 在
-选择屏幕或接受邀请前固定；两端可独立选择，不改变信令或 SDP codec。
+2026-10-23 补充决策：Windows/Android 默认使用自动 H.264 策略，先尝试硬件，
+硬件不可用时自动降级为软件编解码；不向用户展示 CPU 模式选项。自动策略属于
+不可变的本地媒体端点身份，原生选择不改变身份、信令或 SDP codec。发送与接收
+独立选择；显式硬件/CPU 策略仅供内部调用与设备探针。失败候选释放未确认时
+停止尝试，不通过降级掩盖授权、身份、生命周期或传输错误。
 Windows CPU 采集使用 WARP，接收使用软件 MFT 与原生 PixelBufferTexture，
 无需硬件解码设备；Android 使用软件 MediaCodec。系统录屏许可、业务 consent、
 唯一 native runtime、三帧队列、停止/释放和 DTLS-SRTP 加密约束继续适用。
@@ -415,8 +417,8 @@ Flutter Widget 只观察 surface ready、resolution、pause/resume、stats 和 e
 Phase 0～7 的平台计划范围为：
 
 - Windows：Windows Graphics Capture（必要时由 owning platform contract 评审 DXGI
-  fallback）+ Media Foundation/H.264 encoder/decoder，默认硬件模式，显式 CPU 模式
-  使用 WARP 采集和软件编解码；
+  fallback）+ Media Foundation/H.264 encoder/decoder，默认自动选择硬件优先、软件 H.264 兜底，CPU 路径
+  使用 WARP 采集和软件编解码；显式硬件/CPU 策略仅供内部调用与设备探针；
 - Android：MediaProjection + foreground service + MediaCodec H.264 encoder/decoder，
   permission revoke 必须立即停止；
 - macOS、iOS/ReplayKit 和 Flutter Web 不在 Phase 0～7 的实现门禁内。它们未来若要

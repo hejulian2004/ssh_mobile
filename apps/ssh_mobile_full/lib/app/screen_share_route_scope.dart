@@ -154,7 +154,6 @@ final class _AppScreenShareRouteScopeState
                       _failureDescription(
                         context,
                         _operation.media!.failureCode!,
-                        widget.arguments.codecMode,
                       ),
                     ),
                   if ((!operation.isTerminal || _operation.cleanupFailed) &&
@@ -185,17 +184,7 @@ String _errorCode(Object? error) => error is RealtimeMediaException
     ? error.code.name
     : RealtimeMediaErrorCode.backendFailure.name;
 
-String _failureDescription(
-  BuildContext context,
-  RealtimeMediaErrorCode code,
-  RealtimeMediaCodecMode mode,
-) {
+String _failureDescription(BuildContext context, RealtimeMediaErrorCode code) {
   final chinese = Localizations.localeOf(context).languageCode == 'zh';
-  if (code == RealtimeMediaErrorCode.encoderUnavailable &&
-      mode == RealtimeMediaCodecMode.hardware) {
-    return chinese
-        ? '硬件 H.264 编码器不可用（${code.name}），请开启 CPU 模式后重新发起共享。'
-        : 'Hardware H.264 encoder unavailable (${code.name}). Select CPU mode and start sharing again.';
-  }
   return chinese ? '屏幕共享错误：${code.name}' : 'Screen-share error: ${code.name}';
 }

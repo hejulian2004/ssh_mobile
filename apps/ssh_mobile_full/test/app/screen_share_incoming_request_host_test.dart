@@ -5,7 +5,6 @@ import 'package:feature_lan_share/feature_lan_share.dart' as lan;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:realtime_media/realtime_media.dart';
 import 'package:network_transport/network_transport.dart';
 import 'package:ssh_mobile_network_native/ssh_mobile_network_native.dart';
 import 'package:ssh_mobile/app/app_runtime.dart';
@@ -251,8 +250,7 @@ void main() {
         operationId: 'operation-z',
         bindingExpiry: now.add(const Duration(seconds: 30)),
       );
-      await tester.tap(find.text('CPU mode'));
-      await tester.pump();
+      expect(find.text('CPU mode'), findsNothing);
       await tester.tap(find.text('Accept'));
       await _settle(tester);
       expect(arbitration.isBusy, isTrue);
@@ -270,7 +268,7 @@ void main() {
       expect(installed.map((arguments) => arguments.operationId), [
         'operation-z',
       ]);
-      expect(installed.single.codecMode, RealtimeMediaCodecMode.cpu);
+      expect(installed.single.codecMode.name, 'automatic');
       expect(disposed, isEmpty);
       expect(arbitration.isBusy, isTrue);
       await cleanUp();

@@ -11,16 +11,19 @@ owner-token ABI; encoded H.264 never enters Dart.
 The Dart method channel carries bounded endpoint identity, source metadata,
 projection/lifecycle commands, opaque texture IDs, and low-frequency counters.
 No runtime pointer, raw/encoded frame, `Uint8List` media API, or Surface handle
-is exposed. Hardware mode is the default. Explicit CPU mode selects software
+is exposed. Automatic mode is the default: hardware candidates precede software
+H.264. Explicit CPU mode selects software
 H.264 using a scoped factory choice; it preserves system recording consent,
 owner cleanup, and the native frame path. Unknown modes and unavailable selected
-codecs fail with typed errors; there is no silent or alternate-codec fallback.
+codecs fail with typed errors; automatic fallback stays within H.264 and never
+changes consent or endpoint identity.
 Screen-share permission requests select the default display on API 34+ using
 `MediaProjectionConfig.createConfigForDefaultDisplay()`, retaining Android's
 consent dialog; earlier APIs use their display-capture intent. Navigating away
 from the Flutter sharing page does not release the grant or native service.
-Configuration tries H.264 candidates only within the explicitly selected
-hardware or CPU mode. Each failed attempt is released before trying the next;
+Configuration tries hardware then software H.264 candidates in automatic mode;
+explicit hardware or CPU mode restricts candidates to that implementation. Each
+failed attempt is released before trying the next;
 unconfirmed cleanup aborts acquisition. A configured codec transfers to the
 existing media owner; exhausting unsupported formats fails capture/decoder startup.
 

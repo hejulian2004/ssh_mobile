@@ -259,6 +259,13 @@ CaptureStatus WindowsCaptureManager::Start(uint64_t owner,
                                            const std::string& source_id,
                                            const std::string& source_kind,
                                            NativeCodecMode mode) {
+  if (mode == NativeCodecMode::Automatic) {
+    const auto status = Start(owner, source_id, source_kind,
+                              NativeCodecMode::Hardware);
+    if (status != CaptureStatus::kEncoderUnavailable &&
+        status != CaptureStatus::kUnsupported) return status;
+    return Start(owner, source_id, source_kind, NativeCodecMode::Cpu);
+  }
   if (owner == 0 || source_id.empty() ||
       (source_kind != "display" && source_kind != "window")) {
     return CaptureStatus::kBackendFailure;

@@ -24,7 +24,7 @@ final class AppScreenShareRouteArguments {
     this.mode = AppScreenShareRouteMode.receive,
     this.startOutgoing = false,
     this.acceptIncomingOnOpen = false,
-    this.codecMode = RealtimeMediaCodecMode.hardware,
+    this.codecMode = RealtimeMediaCodecMode.automatic,
     this.arbitration,
   });
 

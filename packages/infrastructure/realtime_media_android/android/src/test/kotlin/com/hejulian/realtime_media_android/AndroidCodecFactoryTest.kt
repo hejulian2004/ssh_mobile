@@ -7,8 +7,17 @@ import org.junit.Test
 
 class AndroidCodecFactoryTest {
     @Test
-    fun cpuSelectionIsExplicitAndRestoresTheHardwareDefault() {
-        assertFalse(AndroidCodecFactory.isCodecAllowed(false, true))
+    fun automaticModeIsDefaultAndAllowsSoftwareFallback() {
+        assertTrue(AndroidCodecFactory.isCodecAllowed(false, true))
+        assertTrue(AndroidCodecFactory.isCodecAllowed(true, false))
+        assertFalse(AndroidCodecFactory.isCodecAllowed(false, false))
+        org.junit.Assert.assertEquals("AUTO", AndroidCodecFactory.parseCodecMode(null)?.name)
+        org.junit.Assert.assertEquals("AUTO", AndroidCodecFactory.parseCodecMode("automatic")?.name)
+    }
+
+    @Test
+    fun explicitCpuSelectionRestoresTheAutomaticDefault() {
+        assertTrue(AndroidCodecFactory.isCodecAllowed(false, true))
         assertTrue(AndroidCodecFactory.isCodecAllowed(true, false))
         AndroidCodecFactory.withCodecMode(AndroidCodecMode.CPU) {
             assertTrue(AndroidCodecFactory.isCodecAllowed(false, true))
@@ -18,7 +27,7 @@ class AndroidCodecFactoryTest {
             }
             assertTrue(AndroidCodecFactory.isCodecAllowed(false, true))
         }
-        assertFalse(AndroidCodecFactory.isCodecAllowed(false, true))
+        assertTrue(AndroidCodecFactory.isCodecAllowed(false, true))
     }
 
     @Test
@@ -28,7 +37,7 @@ class AndroidCodecFactoryTest {
                 throw IllegalStateException("fixture-failure")
             }
         } catch (_: IllegalStateException) {}
-        assertFalse(AndroidCodecFactory.isCodecAllowed(false, true))
+        assertTrue(AndroidCodecFactory.isCodecAllowed(false, true))
         assertNull(AndroidCodecFactory.parseCodecMode("unknown"))
     }
 }

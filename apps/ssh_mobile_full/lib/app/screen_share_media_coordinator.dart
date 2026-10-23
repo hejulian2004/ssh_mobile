@@ -25,7 +25,7 @@ final class AppScreenShareMediaCoordinator {
     required this.resources,
     required this.capabilities,
     this.source,
-    this.codecMode = RealtimeMediaCodecMode.hardware,
+    this.codecMode = RealtimeMediaCodecMode.automatic,
     this.admitOperation,
   }) {
     _port = AppScreenShareMediaPort(
