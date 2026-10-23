@@ -68,8 +68,8 @@ internal class ScreenCaptureForegroundService : Service() {
 
     private fun startProjectionForeground() {
         val notification = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("Screen sharing active")
-            .setContentText("SSH Mobile is capturing the selected display")
+            .setContentTitle(getString(R.string.realtime_media_share_active))
+            .setContentText(getString(R.string.realtime_media_capture_active))
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setOngoing(true)
             .build()
@@ -92,7 +92,7 @@ internal class ScreenCaptureForegroundService : Service() {
         manager?.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "Screen sharing",
+                getString(R.string.realtime_media_capture_channel),
                 NotificationManager.IMPORTANCE_LOW,
             ),
         )

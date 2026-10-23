@@ -1,13 +1,14 @@
-Last updated: 2026-10-13
+Last updated: 2026-10-23
 
 # realtime_media
 
-`RealtimeMediaCodecMode` selects `hardware` (default) or explicit `cpu`
-compression/decompression. A controller fixes that local mode for its lifetime;
-the mode is part of every endpoint identity and cannot be changed on a borrowed
-lease. Send and receive devices choose independently before source selection
-or invitation acceptance. Both modes retain the H.264 native media path,
-existing consent, encrypted transport, and opaque rendering capabilities.
+`RealtimeMediaCodecMode.automatic` is the default: native platform owners
+try H.264 hardware codecs first and use software H.264 when hardware is
+unavailable. Explicit `hardware` and `cpu` remain available to internal callers
+and device probes. The policy is immutable on an endpoint lease; native codec
+selection does not change its identity. Send and receive select independently.
+The application does not expose a codec-mode control. All paths retain consent,
+encrypted transport, bounded queues, and opaque native rendering.
 
 `realtime_media` owns the Dart lifecycle contract for an opaque native screen-media endpoint. It is infrastructure: it does not own `NetworkRuntime`, a WebRTC peer, signaling, a network socket, capture, encoding, decoding, or renderer implementation.
 

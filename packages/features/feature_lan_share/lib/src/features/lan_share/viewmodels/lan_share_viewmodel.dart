@@ -137,6 +137,9 @@ class LanShareViewModel extends ChangeNotifier {
   ///
   /// Trust records are retained when discovery disappears, so a peer with a
   /// trust record and no current endpoint remains visible as trusted offline.
+  /// The list is ordered by display name, then peer id. Discovery snapshots
+  /// are ordered by lastSeen, and heartbeats refresh that timestamp, so
+  /// following recency would move cards on every announcement.
   List<LanPeerViewState> get peerStates {
     final states = <String, LanPeerViewState>{};
     final routeStates =
@@ -175,7 +178,9 @@ class LanShareViewModel extends ChangeNotifier {
         lastOnlineAt: _latestOnlineTime(peer),
       );
     }
-    return List<LanPeerViewState>.unmodifiable(states.values);
+    final ordered = states.values.toList(growable: false)
+      ..sort(_compareDeviceListOrder);
+    return List<LanPeerViewState>.unmodifiable(ordered);
   }
 
   /// Returns one aggregated UI state by stable peer id.

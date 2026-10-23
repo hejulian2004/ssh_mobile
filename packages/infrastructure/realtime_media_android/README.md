@@ -1,4 +1,4 @@
-Last updated: 2026-10-15
+Last updated: 2026-10-23
 
 # realtime_media_android
 
@@ -11,12 +11,19 @@ owner-token ABI; encoded H.264 never enters Dart.
 The Dart method channel carries bounded endpoint identity, source metadata,
 projection/lifecycle commands, opaque texture IDs, and low-frequency counters.
 No runtime pointer, raw/encoded frame, `Uint8List` media API, or Surface handle
-is exposed. Hardware mode is the default. Explicit CPU mode selects software
+is exposed. Automatic mode is the default: hardware candidates precede software
+H.264. Explicit CPU mode selects software
 H.264 using a scoped factory choice; it preserves system recording consent,
 owner cleanup, and the native frame path. Unknown modes and unavailable selected
-codecs fail with typed errors; there is no silent or alternate-codec fallback.
-Configuration tries H.264 candidates only within the explicitly selected
-hardware or CPU mode. Each failed attempt is released before trying the next;
+codecs fail with typed errors; automatic fallback stays within H.264 and never
+changes consent or endpoint identity.
+Screen-share permission requests select the default display on API 34+ using
+`MediaProjectionConfig.createConfigForDefaultDisplay()`, retaining Android's
+consent dialog; earlier APIs use their display-capture intent. Navigating away
+from the Flutter sharing page does not release the grant or native service.
+Configuration tries hardware then software H.264 candidates in automatic mode;
+explicit hardware or CPU mode restricts candidates to that implementation. Each
+failed attempt is released before trying the next;
 unconfirmed cleanup aborts acquisition. A configured codec transfers to the
 existing media owner; exhausting unsupported formats fails capture/decoder startup.
 
@@ -61,8 +68,21 @@ one, preventing a paused texture consumer from filling the Surface queue.
 Returning to the foreground can display the retained frame without new input.
 Flush/stop return pending codec indices before invalidating the codec. The
 engine-scoped visibility observer follows only its attached Activity and does
-not hold an Activity lock while calling MediaCodec. Receiver service/power
-retention and actual background device behavior remain acceptance gaps.
+not hold an Activity lock while calling MediaCodec.
+
+Remote video playback uses a separate native `mediaPlayback` foreground service
+and service-local partial wake/Wi-Fi locks. It borrows the existing native
+endpoint/runtime and does not create a Flutter background engine or release
+SSH-owned locks. Readiness must complete before decoder attachment; cancellation,
+startup refusal, or its deadline fail the pending request exactly once. Decoder
+creation re-enters the owner's frozen CPU/hardware mode after this async boundary.
+Service-instance epochs isolate delayed destruction callbacks. Stop/release
+cancels pending readiness and retains the service only while receive resources
+still need acknowledged cleanup. The service owns lock renewal and releases its
+locks on destruction; it is not restarted automatically after process death.
+Device policy still controls foreground-service availability and system privacy
+revocation. The service type follows Android's
+[background media playback contract](https://developer.android.com/develop/background-work/services/fgs/service-types#media).
 
 Decoded size statistics use the current output format's validated crop rectangle,
 so portrait/landscape transitions can reduce either dimension. They do not retain
@@ -74,8 +94,9 @@ token; they do not create another resource owner. MediaCodec/JNI/thread teardown
 wrappers require device acceptance rather than JVM line-coverage claims. The
 pure pump, H.264 gates, pending-frame buffer, and projection lease are covered
 by host unit tests, as are presentation backpressure, capture-input replacement
-ordering/cancellation, timestamp continuity, and output crop validation. The new
-Activity observer and MediaCodec/VirtualDisplay resize wrapper require Android
+ordering/cancellation, timestamp continuity, output crop validation, and foreground
+readiness cancellation/deadline races. The Activity observer, codec/display resize,
+playback service, ResultReceiver adapter and power-lock wrappers require Android
 device acceptance; their platform calls are excluded from JVM line-coverage
 claims rather than simulated with Android stub methods.
 
@@ -153,3 +174,9 @@ the Windows encoder probe. It compares sparse input, repeated synthetic input,
 and end-of-stream flushing using bounded byte-buffer output polling. This
 checks codec buffering, not Flutter surface rendering; end-of-stream is only
 a diagnostic control and is never injected into a live sharing session.
+
+`test/android/EncoderCapabilityProbe.java` checks only AVC encoder capability
+metadata through `MediaCodecList`. Compile with `android.jar`, package with D8
+and run with `app_process`; it reports hardware/software availability without
+capturing a screen or reading application data. Capability absence is an
+actionable selected-mode failure, not permission to silently fall back.

@@ -1,4 +1,4 @@
-最新更新时间：2026-10-22
+最新更新时间：2026-10-23
 
 # ADR-034：WebRTC 实时屏幕共享媒体边界与生命周期
 
@@ -20,6 +20,14 @@ RTC 工作不在本文范围，也不因本文 Accepted 而视为已经交付。
 
 ## 背景与当前事实
 
+2026-10-22 产品决策：共享操作归 App 层持有，展示路由只借用操作。关闭或返回
+共享页不发送 CANCEL、不结束共享；隐藏页面期间仍只允许一个已认领/活动操作，
+额外可信邀请必须正式拒绝。后台入口可恢复同一视图或明确停止；只有明确停止、
+对端停止、系统撤销/源或传输故障及进程退出进入终态。原生清理未确认时不能允许
+第二个共享绕过占用。此决策替代下表原有的 route-dispose 停止语义。
+Android 默认请求共享整个屏幕，保留系统授权与撤销；API 34+ 使用
+`MediaProjectionConfig.createConfigForDefaultDisplay()`，不以 App 隐藏触发撤销。
+
 2026-10-15 补充产品约束：接收端手动旋转、全屏显示、Android 发送端横竖屏切换、
 后台持续传输和邀请冲突处理属于同一个屏幕共享操作。下列约束同时适用于实现
 和平台验收，不能用接收端视图旋转或宿主测试代替原生与设备验收：
@@ -28,6 +36,8 @@ RTC 工作不在本文范围，也不因本文 Accepted 而视为已经交付。
   新邀请须发送正式拒绝，不能中断当前共享。停止、初始化失败和迟到认领都必须按
   原 owner 清理，精确释放占用；原邀请的期限不能成为活动共享的期限。
 - 接收端手动旋转只变换本地视图；全屏切换不创建第二个媒体端点、不再次请求录屏。
+  接受共享且接收端点就绪后默认进入系统全屏，每个展示页面只自动进入一次；手动
+  退出后不因刷新强制重新进入，重新打开接收页面时重新应用默认展示。
   返回键/Escape 先退出全屏，停止操作始终可达。平台窗口/系统栏的全屏状态须作为
   展示租约恢复，不得影响其他窗口或用户原有状态。
 - Android 同一授权内容的尺寸变化计划保留原 `MediaProjection` 和单个
@@ -46,9 +56,11 @@ RTC 工作不在本文范围，也不因本文 Accepted 而视为已经交付。
 及 [onCapturedContentResize](https://developer.android.com/reference/android/media/projection/MediaProjection.Callback#onCapturedContentResize(int,int))；
 当前实现状态以 owning package README 和设备验证为准。
 
-2026-10-13 补充决策：Windows/Android 允许用户显式选择 CPU H.264 编解码模式，
-默认硬件模式不变，不进行静默软件回退。模式属于本地媒体端点身份，由 App 在
-选择屏幕或接受邀请前固定；两端可独立选择，不改变信令或 SDP codec。
+2026-10-23 补充决策：Windows/Android 默认使用自动 H.264 策略，先尝试硬件，
+硬件不可用时自动降级为软件编解码；不向用户展示 CPU 模式选项。自动策略属于
+不可变的本地媒体端点身份，原生选择不改变身份、信令或 SDP codec。发送与接收
+独立选择；显式硬件/CPU 策略仅供内部调用与设备探针。失败候选释放未确认时
+停止尝试，不通过降级掩盖授权、身份、生命周期或传输错误。
 Windows CPU 采集使用 WARP，接收使用软件 MFT 与原生 PixelBufferTexture，
 无需硬件解码设备；Android 使用软件 MediaCodec。系统录屏许可、业务 consent、
 唯一 native runtime、三帧队列、停止/释放和 DTLS-SRTP 加密约束继续适用。
@@ -129,7 +141,7 @@ Feature 只负责业务状态、用户授权、用户交互、错误展示以及
 | `RealtimeSession` 注册/终态 | Rust `RealtimeManager` | Realtime Session | 先令 signaling/session terminal，再释放 driver 与 media endpoint |
 | `WebRtcPeer` / PeerConnection | `network-webrtc`；由该 session 的 `RealtimeIoDriver` 持有 | Realtime Session | `RealtimeManager` 请求 terminal close；driver 取消并 join 后释放 |
 | UDP socket / I/O task | `RealtimeIoDriver` | Realtime Session | 取消并 join driver，再释放 socket |
-| `ScreenShareOperation` / ViewModel | `feature_screen_share` / Route Scope（计划） | Business/Route | stop 或 route dispose |
+| `ScreenShareOperation` / ViewModel | App `AppScreenShareSessions` 持有 Feature controller | App/Business operation | 明确停止、对端停止、系统/源/传输终态或 App shutdown；页面只释放展示租约 |
 | Screen source / capture | `realtime_media` platform adapter（计划） | Screen Share Session | 停止产帧后关闭并释放 |
 | H.264 encoder / decoder | `realtime_media` platform adapter（计划） | Screen Share Session | detach 后关闭实例 |
 | Flutter Texture / GPU surface | `realtime_media` renderer（计划） | Viewer Session | 停止解码后释放 surface/texture |
@@ -405,8 +417,8 @@ Flutter Widget 只观察 surface ready、resolution、pause/resume、stats 和 e
 Phase 0～7 的平台计划范围为：
 
 - Windows：Windows Graphics Capture（必要时由 owning platform contract 评审 DXGI
-  fallback）+ Media Foundation/H.264 encoder/decoder，默认硬件模式，显式 CPU 模式
-  使用 WARP 采集和软件编解码；
+  fallback）+ Media Foundation/H.264 encoder/decoder，默认自动选择硬件优先、软件 H.264 兜底，CPU 路径
+  使用 WARP 采集和软件编解码；显式硬件/CPU 策略仅供内部调用与设备探针；
 - Android：MediaProjection + foreground service + MediaCodec H.264 encoder/decoder，
   permission revoke 必须立即停止；
 - macOS、iOS/ReplayKit 和 Flutter Web 不在 Phase 0～7 的实现门禁内。它们未来若要

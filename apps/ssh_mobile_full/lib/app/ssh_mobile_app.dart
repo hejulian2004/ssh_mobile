@@ -30,6 +30,7 @@ import 'terminal_feature_adapters.dart';
 import 'sftp_feature_adapters.dart';
 import 'rag_feature_adapters.dart';
 import 'screen_share_route_scope.dart';
+import 'screen_share_background_host.dart';
 import 'screen_share_entry_coordinator.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'navigation/app_route_contributions.dart';
@@ -125,10 +126,12 @@ class _SshMobileAppState extends State<SshMobileApp>
     WidgetsBinding.instance.removeObserver(this);
     _terminalSettingsAdapter?.dispose();
     _terminalShortcutAdapter?.dispose();
-    _lanScreenShareAdapter?.dispose();
     final runtime = widget.runtime;
     if (runtime != null) {
-      unawaited(runtime.dispose());
+      unawaited(() async {
+        await _lanScreenShareAdapter?.close();
+        await runtime.dispose();
+      }());
     }
     super.dispose();
   }

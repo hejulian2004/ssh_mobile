@@ -516,6 +516,71 @@ void main() {
     expect(created.ip, '192.168.1.30');
     expect(created.advertisedNativePort, isNull);
   });
+
+  test('device list keeps its order when discovery recency changes', () async {
+    final discovery = FakeLanDiscoveryService();
+    final transfer = FakeLanTransferService();
+    final settings = FakeLanShareSettings();
+    final viewModel = LanShareViewModel(
+      discoveryService: discovery,
+      securityService: FakeLanSecurityService(),
+      storageService: FakeLanStorageService(),
+      transferService: transfer,
+      historyDao: FakeLanHistoryDao(),
+      appSettings: settings,
+      dataProtection: FakeLanShareDataProtection(),
+      logger: FakeLanShareLogger(),
+      ownsRuntime: false,
+    );
+    addTearDown(() async {
+      viewModel.dispose();
+      settings.dispose();
+      await transfer.close();
+      await discovery.close();
+    });
+    await viewModel.initialize();
+
+    LanDiscoveredPeer peer(String id, String alias, DateTime seen) {
+      return LanDiscoveredPeer(
+        deviceId: id,
+        alias: alias,
+        ip: '192.168.1.20',
+        controlPort: 53317,
+        os: 'android',
+        lastSeen: seen,
+      );
+    }
+
+    final older = DateTime.utc(2026, 10, 23, 1);
+    final newer = older.add(const Duration(seconds: 5));
+    // Recency is the reverse of the stable name order, and the two Alpha
+    // cards would swap with each other if equal names kept lastSeen order.
+    discovery.emitDiscoveredPeers([
+      peer('a-desk', 'Zebra', newer),
+      peer('c-tablet', 'Alpha', older.add(const Duration(seconds: 1))),
+      peer('b-phone', 'Alpha', older),
+    ]);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(viewModel.peerStates.map((state) => state.peerId), [
+      'b-phone',
+      'c-tablet',
+      'a-desk',
+    ]);
+
+    discovery.emitDiscoveredPeers([
+      peer('c-tablet', 'Alpha', newer.add(const Duration(seconds: 5))),
+      peer('b-phone', 'Alpha', newer),
+      peer('a-desk', 'Zebra', older),
+    ]);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(viewModel.peerStates.map((state) => state.peerId), [
+      'b-phone',
+      'c-tablet',
+      'a-desk',
+    ]);
+  });
 }
 
 final class _MissingKeySecurityService extends Fake

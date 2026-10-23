@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:network_sdk/network_sdk.dart';
 
-/// Route-transfer lease for one App-created Realtime session.
+/// Operation-transfer lease for one App-created Realtime session.
 ///
 /// The lease owns only the SDK session. Capture, endpoints, decoder and
 /// platform surfaces remain with [AppScreenShareMediaCoordinator].
@@ -44,7 +44,7 @@ final class AppScreenShareSessionLease {
     try {
       await client.releaseSession(session);
     } catch (_) {
-      // Route teardown must continue even if the App/SDK owner is already
+      // Operation teardown must continue even if the App/SDK owner is already
       // disposing. The exact-object release remains idempotent.
     }
   }

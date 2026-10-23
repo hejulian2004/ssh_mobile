@@ -77,13 +77,27 @@ extension _LanShareDialogActions on _LanShareScreenState {
     if (!vm.isWebShareActive) {
       final result = await lanUiIgnored(vm.toggleWebShare());
       if (result.failure != null && context.mounted) {
-        final message = vm.webShareAddressSelectionMessage;
-        if (message != null) {
-          ScaffoldMessenger.of(
+        final selection = vm.webShareAddressSelectionResult;
+        if (selection is LanShareLocalAddressAmbiguous &&
+            selection.candidates.isNotEmpty) {
+          await _showIpSelectorDialog(
             context,
-          ).showSnackBar(SnackBar(content: Text(message)));
+            {
+              for (final candidate in selection.candidates)
+                candidate.address: candidate.interfaceName,
+            },
+            vm,
+            startWebShareOnSelect: true,
+          );
+        } else {
+          final message = vm.webShareAddressSelectionMessage;
+          if (message != null) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(message)));
+          }
+          return;
         }
-        return;
       }
     }
     if (!context.mounted) return;
@@ -239,11 +253,15 @@ extension _LanShareDialogActions on _LanShareScreenState {
   }
 
   /// 展示本机 LAN 地址选择器并更新 WebShare 地址覆盖值。
-  void _showIpSelectorDialog(
+  ///
+  /// [startWebShareOnSelect] 用于网页快传入口：用户点选一个具体地址后继续启动
+  /// 会话。自动选择仍然只记录覆盖值，多地址时选择器保持打开。
+  Future<void> _showIpSelectorDialog(
     BuildContext context,
     Map<String, String> ipMap,
-    LanShareViewModel vm,
-  ) {
+    LanShareViewModel vm, {
+    bool startWebShareOnSelect = false,
+  }) {
     final isEn = vm.appSettings.isEnglish;
     final desktop =
         isDesktopTargetPlatform() ||
@@ -261,6 +279,18 @@ extension _LanShareDialogActions on _LanShareScreenState {
           ).showSnackBar(SnackBar(content: Text(message)));
         }
         return;
+      }
+      if (startWebShareOnSelect && ip != null && !vm.isWebShareActive) {
+        final started = await lanUiIgnored(vm.toggleWebShare());
+        if (started.failure != null) {
+          final message = vm.webShareAddressSelectionMessage;
+          if (message != null && context.mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(message)));
+          }
+          return;
+        }
       }
       if (dialogContext.mounted) Navigator.pop(dialogContext);
     }
@@ -310,7 +340,7 @@ extension _LanShareDialogActions on _LanShareScreenState {
     }
 
     if (desktop) {
-      showDialog(
+      return showDialog<void>(
         context: context,
         builder: (ctx) {
           return StatefulBuilder(
@@ -422,115 +452,112 @@ extension _LanShareDialogActions on _LanShareScreenState {
           );
         },
       );
-    } else {
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (ctx) {
-          return StatefulBuilder(
-            builder: (ctx, setDialogState) {
-              final colors = Theme.of(ctx).colorScheme;
-              final textTheme = Theme.of(ctx).textTheme;
-
-              return SafeArea(
-                child: Container(
-                  constraints: BoxConstraints(
-                    maxHeight: MediaQuery.sizeOf(ctx).height * 0.75,
-                  ),
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 36,
-                          height: 4,
-                          margin: const EdgeInsets.only(bottom: 12),
-                          decoration: BoxDecoration(
-                            color: colors.outlineVariant,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  isEn
-                                      ? 'Select LAN IP Address'
-                                      : '选择局域网 IP 地址',
-                                  style: textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 17,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  isEn
-                                      ? 'Pick the preferred network card'
-                                      : '选择用于局域网扫描与传输的网卡',
-                                  style: textTheme.bodySmall?.copyWith(
-                                    color: colors.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            icon: isRefreshing
-                                ? AppLoadingIndicator(
-                                    size: 18,
-                                    strokeWidth: 2,
-                                    color: colors.primary,
-                                  )
-                                : const Icon(Icons.refresh_rounded),
-                            tooltip: isEn ? 'Refresh' : '刷新网卡',
-                            onPressed: isRefreshing
-                                ? null
-                                : () async {
-                                    setDialogState(() => isRefreshing = true);
-                                    try {
-                                      final updated = await vm
-                                          .localIpInterfaces();
-                                      if (ctx.mounted) {
-                                        setDialogState(() {
-                                          currentIpMap = updated;
-                                          isRefreshing = false;
-                                        });
-                                      }
-                                    } catch (_) {
-                                      if (ctx.mounted) {
-                                        setDialogState(
-                                          () => isRefreshing = false,
-                                        );
-                                      }
-                                    }
-                                  },
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Flexible(
-                        child: SingleChildScrollView(
-                          child: buildIpList(ctx, setDialogState),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      );
     }
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            final colors = Theme.of(ctx).colorScheme;
+            final textTheme = Theme.of(ctx).textTheme;
+
+            return SafeArea(
+              child: Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(ctx).height * 0.75,
+                ),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: colors.outlineVariant,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                isEn ? 'Select LAN IP Address' : '选择局域网 IP 地址',
+                                style: textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 17,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                isEn
+                                    ? 'Pick the preferred network card'
+                                    : '选择用于局域网扫描与传输的网卡',
+                                style: textTheme.bodySmall?.copyWith(
+                                  color: colors.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: isRefreshing
+                              ? AppLoadingIndicator(
+                                  size: 18,
+                                  strokeWidth: 2,
+                                  color: colors.primary,
+                                )
+                              : const Icon(Icons.refresh_rounded),
+                          tooltip: isEn ? 'Refresh' : '刷新网卡',
+                          onPressed: isRefreshing
+                              ? null
+                              : () async {
+                                  setDialogState(() => isRefreshing = true);
+                                  try {
+                                    final updated = await vm
+                                        .localIpInterfaces();
+                                    if (ctx.mounted) {
+                                      setDialogState(() {
+                                        currentIpMap = updated;
+                                        isRefreshing = false;
+                                      });
+                                    }
+                                  } catch (_) {
+                                    if (ctx.mounted) {
+                                      setDialogState(
+                                        () => isRefreshing = false,
+                                      );
+                                    }
+                                  }
+                                },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        child: buildIpList(ctx, setDialogState),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Widget _buildIpSelectorCardItem({

@@ -6,7 +6,7 @@ import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Build
 
-internal enum class AndroidCodecMode { HARDWARE, CPU }
+internal enum class AndroidCodecMode { AUTO, HARDWARE, CPU }
 
 /** Explicit, request-scoped native H.264 selection. */
 internal object AndroidCodecFactory {
@@ -14,7 +14,8 @@ internal object AndroidCodecFactory {
     private val requestMode = ThreadLocal<AndroidCodecMode>()
 
     fun parseCodecMode(value: Any?): AndroidCodecMode? = when (value) {
-        null, "hardware" -> AndroidCodecMode.HARDWARE
+        null, "automatic" -> AndroidCodecMode.AUTO
+        "hardware" -> AndroidCodecMode.HARDWARE
         "cpu" -> AndroidCodecMode.CPU
         else -> null
     }
@@ -28,10 +29,13 @@ internal object AndroidCodecFactory {
     }
 
     fun isCodecAllowed(hardware: Boolean, software: Boolean): Boolean =
-        when (requestMode.get() ?: AndroidCodecMode.HARDWARE) {
+        when (requestMode.get() ?: AndroidCodecMode.AUTO) {
+            AndroidCodecMode.AUTO -> hardware || software
             AndroidCodecMode.HARDWARE -> hardware
             AndroidCodecMode.CPU -> software
         }
+
+    fun codecPriority(hardware: Boolean): Int = if (hardware) 0 else 1
 
     fun boundedNonNegativeInt(value: Any?): Int? {
         val number = value as? Number ?: return null
@@ -84,7 +88,7 @@ internal object AndroidCodecFactory {
                 info.isSoftwareOnly
             } else { !hardware }
             isCodecAllowed(hardware, software)
-        }
+        }.sortedBy { codecPriority(isHardware(it)) }
     }
 
     private fun isHardware(info: MediaCodecInfo): Boolean {

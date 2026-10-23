@@ -124,7 +124,13 @@ RealtimeConsent buildScreenShareConsent({
   realtimeId: realtimeId,
   sharedSessionInstanceId: sharedSessionInstanceId,
   issuedAt: issuedAt,
-  expiresAt: expiresAt,
+  // Replies cannot extend the request deadline or exceed the local wire limit
+  // when the requester clock is slightly ahead of the responding device.
+  expiresAt:
+      decision != RealtimeConsentDecision.request &&
+          expiresAt.isAfter(issuedAt.add(RealtimeConsent.maxLifetime))
+      ? issuedAt.add(RealtimeConsent.maxLifetime)
+      : expiresAt,
   decision: decision,
   senderPeerId: senderPeerId,
   actionRevision: actionRevision,

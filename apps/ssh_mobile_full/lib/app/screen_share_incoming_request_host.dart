@@ -10,7 +10,6 @@ import 'navigation/app_route_contributions.dart';
 import 'screen_share_peer_arbitration.dart';
 import 'screen_share_route_scope.dart';
 import 'screen_share_session_lease.dart';
-import 'screen_share_codec_mode_picker.dart';
 
 /// App-global host for incoming screen-share requests. It is mounted around
 /// the MaterialApp child so a request is visible while the user is in any
@@ -21,6 +20,7 @@ final class AppScreenShareIncomingRequestHost extends StatefulWidget {
     required this.navigatorKey,
     required this.screenSharePort,
     required this.arbitration,
+    required this.sessions,
     required this.child,
     super.key,
   });
@@ -29,6 +29,7 @@ final class AppScreenShareIncomingRequestHost extends StatefulWidget {
   final GlobalKey<NavigatorState> navigatorKey;
   final lan.LanShareScreenSharePort screenSharePort;
   final AppScreenSharePeerArbitrationRegistry arbitration;
+  final AppScreenShareSessions sessions;
   final Widget child;
 
   @override
@@ -50,7 +51,6 @@ final class _AppScreenShareIncomingRequestHostState
   int? _activeOfferEpoch;
   final Completer<void> _disposedSignal = Completer<void>();
   bool _busy = false;
-  RealtimeMediaCodecMode _codecMode = RealtimeMediaCodecMode.hardware;
 
   @override
   void initState() {
@@ -98,10 +98,11 @@ final class _AppScreenShareIncomingRequestHostState
       _rejectBusyBestEffort(offer);
       return;
     }
-    if (_offer != null && _offerState != _IncomingOfferState.pending) {
-      // A claim/reject resolution already owns the current offer. Do not let
-      // a later notification replace it or discard its provisional binding.
-      _discardBestEffort(offer);
+    if (_offer != null) {
+      // Keep one user decision at a time, including while claim/reject awaits
+      // native completion. An extra request always gets a formal response.
+      _rememberOffer(key, effectiveExpiry, now);
+      _rejectBusyBestEffort(offer);
       return;
     }
     _rememberOffer(key, effectiveExpiry, now);
@@ -114,25 +115,16 @@ final class _AppScreenShareIncomingRequestHostState
       operationId: offer.request.operationId,
       onReplaced: () async {
         if (_isExactPending(offer, candidateEpoch)) {
-          await _expirePending(offer, candidateEpoch);
+          await _reject(offer);
         }
       },
     );
     if (!acquired) {
-      _discardBestEffort(offer);
+      _rejectBusyBestEffort(offer);
       return;
-    }
-    final previous = _offer;
-    if (previous != null && !identical(previous, offer)) {
-      // Finish the current owner while [_hostEpoch] still names it. The
-      // arbitration callback may also run asynchronously; doing this before
-      // committing the candidate epoch makes replacement cleanup deterministic
-      // and leaves the new owner as the only mutable Host state.
-      _finishPending(previous, _hostEpoch, discard: true);
     }
     _hostEpoch = candidateEpoch;
     _offer = offer;
-    _codecMode = RealtimeMediaCodecMode.hardware;
     _offerState = _IncomingOfferState.pending;
     _busy = false;
     _armExpiryTimer(offer, candidateEpoch, effectiveExpiry);
@@ -190,12 +182,6 @@ final class _AppScreenShareIncomingRequestHostState
             const SizedBox(height: 8),
             Text('Peer ${offer.authenticatedPeerId} wants to share a screen.'),
             const SizedBox(height: 12),
-            AppScreenShareCodecModePicker(
-              mode: _codecMode,
-              onChanged: _busy
-                  ? null
-                  : (mode) => setState(() => _codecMode = mode),
-            ),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: <Widget>[
@@ -230,7 +216,7 @@ final class _AppScreenShareIncomingRequestHostState
     if (!_beginResolving(offer)) return;
     final ownerEpoch = _hostEpoch;
     AppScreenShareSessionLease? lease;
-    final codecMode = _codecMode;
+    const codecMode = RealtimeMediaCodecMode.automatic;
     RealtimeSession? session;
     var handedOff = false;
     try {
@@ -259,22 +245,21 @@ final class _AppScreenShareIncomingRequestHostState
         client: widget.runtime.realtimeClient,
         session: session,
       );
-      final navigation = widget.navigatorKey.currentState!.pushNamed(
-        AppShellRouteNames.screenShare,
-        arguments: AppScreenShareRouteArguments(
-          session: session,
-          sessionLease: lease,
-          localPeerId: widget.runtime.lanShareSettingsAdapter.lanDeviceId,
-          operationId: offer.request.operationId,
-          initialIncomingRequest: offer.request,
-          mode: AppScreenShareRouteMode.receive,
-          acceptIncomingOnOpen: true,
-          codecMode: codecMode,
-          arbitration: widget.arbitration,
-        ),
+      final arguments = AppScreenShareRouteArguments(
+        session: session,
+        sessionLease: lease,
+        localPeerId: widget.runtime.lanShareSettingsAdapter.lanDeviceId,
+        operationId: offer.request.operationId,
+        initialIncomingRequest: offer.request,
+        mode: AppScreenShareRouteMode.receive,
+        acceptIncomingOnOpen: true,
+        codecMode: codecMode,
+        arbitration: widget.arbitration,
       );
-      // Transfer ownership as soon as Navigator installs the route. The
-      // returned Future completes only after the eventual pop.
+      final operation = widget.sessions.open(
+        arguments,
+        widget.runtime.realtimeMediaResources,
+      );
       handedOff = true;
       lease = null;
       _activeOffer = offer;
@@ -286,7 +271,15 @@ final class _AppScreenShareIncomingRequestHostState
           _busy = false;
         });
       }
-      await navigation;
+      try {
+        await widget.navigatorKey.currentState!.pushNamed(
+          AppShellRouteNames.screenShare,
+          arguments: arguments,
+        );
+      } catch (_) {
+        await operation.stop();
+        rethrow;
+      }
     } finally {
       if (!handedOff && session != null) {
         if (lease != null) {
@@ -393,7 +386,7 @@ final class _AppScreenShareIncomingRequestHostState
     if (!_isExactActive(offer, ownerEpoch)) return;
     _activeOffer = null;
     _activeOfferEpoch = null;
-    // The route owns admission after handoff and releases it after cleanup.
+    // The App operation owns admission after handoff, including without a page.
     // A pending replacement owns the global state and timer. An old active
     // route completion must never overwrite it.
     if (_offer == null && _offerState == _IncomingOfferState.handedOff) {

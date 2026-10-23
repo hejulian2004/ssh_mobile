@@ -1,4 +1,4 @@
-最新更新时间：2026-10-22
+最新更新时间：2026-10-23
 
 # ssh_mobile_full 维护约束
 
@@ -42,9 +42,23 @@ owner of Network, SSH, Logger, Modules, and adapters and exposes explicit
 `dispose/close/cancel/release`; Route Scope releases only its ViewModel resources.
 Debug assertions verify observable Timer/Subscription/Lease/native-handle release.
 
+`ScreenShareEntryCoordinator` owns one `AppScreenShareSessions` for the App
+Shell. It owns operation controllers, readiness subscriptions, media and session
+leases independently of presentation routes. Closing a screen-share page only
+detaches its view and restores its window presentation; it never sends CANCEL
+or releases a running operation. Explicit local Stop, authenticated peer stop,
+transport/source failure or App shutdown performs operation cleanup. Keep global
+admission until media release is confirmed; failed cleanup stays owned and can
+be retried. The background host may reopen the same operation or stop it, never
+create another session. App shutdown closes screen shares before AppRuntime.
+Screen-share routes disable transition snapshotting: native video textures
+remain live across navigation and must not be flattened into route images.
+
 The receiving route's window-presentation controller owns one native fullscreen
 snapshot lease, separate from media/session ownership. Serialize enter/restore;
-route disposal compensates a late enter with the same lease. Windows restores
+an accepted ready receiver requests fullscreen once per page attachment. Manual
+exit stays effective for that page; a sender never requests automatic fullscreen.
+Route disposal compensates a late enter with the same lease. Windows restores
 the original placement/styles, Android restores the prior system-bar visibility
 and behavior. Stale lease release cannot affect a newer owner. Retain a failed
 restore for retry, surface a bounded error, and never guess a default window

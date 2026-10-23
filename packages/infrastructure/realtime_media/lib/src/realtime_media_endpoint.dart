@@ -6,7 +6,7 @@ import 'screen_capture_source.dart';
 enum RealtimeMediaDirection { send, receive }
 
 /// Local native codec choice, fixed for the lifetime of an endpoint.
-enum RealtimeMediaCodecMode { hardware, cpu }
+enum RealtimeMediaCodecMode { automatic, hardware, cpu }
 
 /// Stable Dart-side value for a native endpoint lease, never a native address.
 final class RealtimeMediaEndpointId {
@@ -29,7 +29,7 @@ final class RealtimeMediaEndpointIdentity {
     required String peerId,
     required this.generation,
     required this.direction,
-    this.codecMode = RealtimeMediaCodecMode.hardware,
+    this.codecMode = RealtimeMediaCodecMode.automatic,
   }) : realtimeId = _validateIdentity(realtimeId, 'realtime ID'),
        peerId = _validateIdentity(peerId, 'peer ID') {
     if (generation <= 0) {

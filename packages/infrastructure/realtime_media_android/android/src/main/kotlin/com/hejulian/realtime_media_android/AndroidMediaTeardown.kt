@@ -124,6 +124,7 @@ internal fun AndroidMediaOwner.releaseDecoderResources() {
         textureEntry?.setOnFrameConsumedListener(null)
         textureEntry?.release()
         textureEntry = null
+        playbackServiceEpoch = null
         pendingDecoderFrame.clear()
         decoderThread = null
         decoderStopAck = null

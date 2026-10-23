@@ -54,7 +54,7 @@ final class RealtimeMediaSessionController {
     required String realtimeId,
     required String peerId,
     required this.generation,
-    this.codecMode = RealtimeMediaCodecMode.hardware,
+    this.codecMode = RealtimeMediaCodecMode.automatic,
   }) : realtimeId = _validateRealtimeId(realtimeId),
        peerId = _validatePeerId(peerId) {
     if (generation <= 0) {

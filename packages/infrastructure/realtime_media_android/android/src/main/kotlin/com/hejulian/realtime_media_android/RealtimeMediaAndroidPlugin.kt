@@ -34,6 +34,7 @@ class RealtimeMediaAndroidPlugin :
     private var pendingProjectionResult: MethodChannel.Result? = null
     private val owners = HashMap<Long, AndroidMediaOwner>()
     private val rendererVisibility = AndroidRendererVisibility()
+    private val playbackObserver = screenPlaybackServiceObserver { owners.values.toList() }
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
@@ -138,17 +139,12 @@ class RealtimeMediaAndroidPlugin :
             "listSources" -> result.success(listSources())
             "startCapture" -> handleStartCapture(call, result)
             "attachRemoteVideoSurface" -> withOwner(call, result) { owner, _ ->
-                val failure = owner.attachDecoder()
-                if (failure != null) {
-                    error(result, failure, "Android H.264 decoder could not start.")
-                    return@withOwner
-                }
-                val surfaceId = owner.surfaceId()
-                if (surfaceId == null) {
-                    error(result, "backend_failure", "Android renderer returned no surface ID.")
-                } else {
-                    result.success(mapOf("surface_id" to surfaceId))
-                }
+                owner.attachDecoderWithRetention(
+                    playbackObserver,
+                    isCurrent = { owners[owner.token] === owner && context != null },
+                    onFinished = ::stopForegroundServiceIfUnused,
+                    result = result,
+                )
             }
             "detach" -> withOwner(call, result) { owner, _ ->
                 val failure = owner.detach()
@@ -245,7 +241,9 @@ class RealtimeMediaAndroidPlugin :
         pendingProjectionResult = result
         try {
             currentActivity.startActivityForResult(
-                manager.createScreenCaptureIntent(),
+                if (android.os.Build.VERSION.SDK_INT >= 34) manager.createScreenCaptureIntent(
+                    android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay())
+                else manager.createScreenCaptureIntent(),
                 PROJECTION_REQUEST_CODE,
             )
         } catch (_: Exception) {
@@ -454,6 +452,7 @@ class RealtimeMediaAndroidPlugin :
             owners.values.none { it.isCaptureOwnerActive() }) {
             context?.let { ScreenCaptureForegroundService.stop(it) }
         }
+        context?.let { ScreenReceiveForegroundService.stopIfUnused(it, owners.values) }
     }
 
     private fun disposeOwners() {

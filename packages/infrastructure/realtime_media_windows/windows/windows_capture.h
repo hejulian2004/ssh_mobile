@@ -9,7 +9,7 @@
 
 namespace realtime_media_windows {
 
-enum class NativeCodecMode { Hardware, Cpu };
+enum class NativeCodecMode { Automatic, Hardware, Cpu };
 
 // These descriptors deliberately contain no HWND/HMONITOR or graphics
 // resource. The native implementation keeps those handles behind this
@@ -91,7 +91,7 @@ class WindowsCaptureManager final {
   bool EnumerateSources(std::vector<CaptureSourceDescriptor>* sources);
   CaptureStatus Start(uint64_t owner, const std::string& source_id,
                       const std::string& source_kind,
-                      NativeCodecMode mode = NativeCodecMode::Hardware);
+                      NativeCodecMode mode = NativeCodecMode::Automatic);
   CaptureStatus Stop(uint64_t owner);
   CaptureStatus Release(uint64_t owner);
   CaptureStatus ApplyAdaptation(uint64_t owner, uint32_t bitrate_kbps,

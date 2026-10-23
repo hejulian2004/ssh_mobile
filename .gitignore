@@ -57,6 +57,9 @@ app.*.map.json
 **/android/app/profile
 **/android/app/release
 **/android/key.properties
+# NDK/CMake outputs. App android/.gitignore only covers that app tree.
+**/.cxx/
+**/.externalNativeBuild/
 *.jks
 *.keystore
 

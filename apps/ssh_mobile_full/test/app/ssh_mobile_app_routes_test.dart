@@ -26,6 +26,7 @@ import 'package:ssh_mobile/app/connection_feature_adapters.dart';
 import 'package:ssh_mobile/app/navigation/app_route_contributions.dart';
 import 'package:ssh_mobile/app/sftp_feature_adapters.dart';
 import 'package:ssh_mobile/app/ssh_mobile_app.dart';
+import 'package:ssh_mobile/app/screen_share_route_scope.dart';
 import 'package:ssh_mobile/app/terminal_feature_adapters.dart';
 import 'package:ssh_mobile/features/home/views/home_screen.dart';
 import 'package:ssh_mobile/features/startup/views/startup_screen.dart';
@@ -152,6 +153,31 @@ void main() {
       await popRoute(tester);
       expectRoute(tester, StartupScreen);
 
+      await disposeTree(tester);
+    });
+  });
+
+  testWidgets('screen-share navigation preserves live native textures', (
+    tester,
+  ) async {
+    await withWindowsPlatform(tester, () async {
+      await pumpApp(tester);
+      final session = runtime.realtimeClient.createSession(
+        realtimeId: '00112233445566778899aabbccddeeff',
+        peerId: 'public-test-peer',
+      );
+      await pushRoute(
+        tester,
+        AppShellRouteNames.screenShare,
+        arguments: AppScreenShareRouteArguments(
+          session: session,
+          localPeerId: 'public-local-peer',
+        ),
+      );
+      final page = tester.element(find.byType(AppScreenShareRouteScope));
+      expect(ModalRoute.of(page)!.allowSnapshotting, isFalse);
+      expect(tester.takeException(), isNull);
+      await popRoute(tester);
       await disposeTree(tester);
     });
   });

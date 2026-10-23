@@ -9,6 +9,35 @@ class ConfiguredCodecTest {
     private data class Codec(val name: String)
 
     @Test
+    fun automaticSelectionPrefersHardwareAndFallsBackAfterConfirmedRelease() {
+        val attempts = mutableListOf<String>()
+        val candidates = listOf("cpu", "hardware")
+            .filter { AndroidCodecFactory.isCodecAllowed(it == "hardware", it == "cpu") }
+            .sortedBy { AndroidCodecFactory.codecPriority(it == "hardware") }
+        val selected = acquireConfiguredCodec<String, Codec>(candidates,
+            create = { Codec(it).also { codec -> attempts += "create:${codec.name}" } },
+            configure = { if (it.name == "hardware") throw IllegalArgumentException("unsupported") },
+            release = { attempts += "release:${it.name}" },
+        )
+        assertEquals("cpu", selected?.name)
+        assertEquals(listOf("create:hardware", "release:hardware", "create:cpu"), attempts)
+    }
+
+    @Test
+    fun automaticSelectionKeepsWorkingHardwareWithoutAllocatingSoftware() {
+        val attempts = mutableListOf<String>()
+        val candidates = listOf("cpu", "hardware")
+            .sortedBy { AndroidCodecFactory.codecPriority(it == "hardware") }
+        val selected = acquireConfiguredCodec<String, Codec>(candidates,
+            create = { Codec(it).also { codec -> attempts += codec.name } },
+            configure = {},
+            release = { throw AssertionError("Selected codec remains owned") },
+        )
+        assertEquals("hardware", selected?.name)
+        assertEquals(listOf("hardware"), attempts)
+    }
+
+    @Test
     fun releasesRejectedCodecBeforeTryingAnotherCandidate() {
         val calls = mutableListOf<String>()
         val selected = acquireConfiguredCodec<String, Codec>(listOf("unsupported", "supported"),

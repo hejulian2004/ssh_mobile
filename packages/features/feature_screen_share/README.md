@@ -1,4 +1,4 @@
-最新更新时间：2026-10-14
+最新更新时间：2026-10-23
 
 # feature_screen_share
 
@@ -26,6 +26,10 @@ claim, sends `ACCEPT` immediately, and starts viewing only after the same media
 gate. `compareScreenShareIntents` is the public pure comparator used by App
 arbitration; the Feature controller still owns consent construction, revisions,
 freshness, and business state.
+Replies cap their deadline at both the original request expiry and the local
+protocol lifetime limit. Small allowed clock skew cannot make an acceptance,
+rejection or cancellation exceed the SDK's lifetime limit; expired actions and
+oversized requests remain invalid.
 
 Request expiry limits pending consent only. A timely acceptance cancels that
 timer, including while native media readiness or system recording consent is
