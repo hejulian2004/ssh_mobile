@@ -56,7 +56,9 @@ remain live across navigation and must not be flattened into route images.
 
 The receiving route's window-presentation controller owns one native fullscreen
 snapshot lease, separate from media/session ownership. Serialize enter/restore;
-route disposal compensates a late enter with the same lease. Windows restores
+an accepted ready receiver requests fullscreen once per page attachment. Manual
+exit stays effective for that page; a sender never requests automatic fullscreen.
+Route disposal compensates a late enter with the same lease. Windows restores
 the original placement/styles, Android restores the prior system-bar visibility
 and behavior. Stale lease release cannot affect a newer owner. Retain a failed
 restore for retry, surface a bounded error, and never guess a default window

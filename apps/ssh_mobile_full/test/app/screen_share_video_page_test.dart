@@ -15,18 +15,97 @@ void main() {
   });
   tearDown(() => size.dispose());
 
-  Widget page({VoidCallback? onStop, bool enabled = true, Locale? locale}) =>
-      MaterialApp(
-        locale: locale,
-        home: AppScreenShareVideoPage(
-          video: const _Video(),
-          videoSize: size,
-          controls: const Text('consent state'),
-          enableViewerControls: enabled,
-          onStop: onStop,
-          windowPlatform: platform,
-        ),
-      );
+  Widget page({
+    VoidCallback? onStop,
+    bool enabled = true,
+    bool automatic = false,
+    Locale? locale,
+  }) => MaterialApp(
+    locale: locale,
+    home: AppScreenShareVideoPage(
+      video: const _Video(),
+      videoSize: size,
+      controls: const Text('consent state'),
+      enableViewerControls: enabled,
+      autoEnterFullscreen: automatic,
+      onStop: onStop,
+      windowPlatform: platform,
+    ),
+  );
+
+  testWidgets('automatic fullscreen waits for a ready viewer and enters once', (
+    tester,
+  ) async {
+    await tester.pumpWidget(page(automatic: true, enabled: false));
+    await tester.pumpAndSettle();
+    expect(platform.calls, isEmpty);
+    final video = tester.state(find.byType(_Video));
+    await tester.pumpWidget(page(automatic: true));
+    await tester.pumpAndSettle();
+    expect(platform.calls.map((call) => call.$2), [true]);
+    expect(find.byType(AppBar), findsNothing);
+    expect(tester.state(find.byType(_Video)), same(video));
+    await tester.tap(find.byTooltip('Exit fullscreen'));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(page(automatic: true));
+    size.value = const Size(1920, 1080);
+    await tester.pumpAndSettle();
+    expect(platform.calls.map((call) => call.$2), [true, false]);
+    expect(find.byType(AppBar), findsOneWidget);
+    expect(tester.state(find.byType(_Video)), same(video));
+  });
+
+  testWidgets('ready receiver enters automatically with stop still available', (
+    tester,
+  ) async {
+    var stopped = 0;
+    await tester.pumpWidget(page(automatic: true, onStop: () => stopped++));
+    await tester.pumpAndSettle();
+    expect(platform.calls.map((call) => call.$2), [true]);
+    expect(find.byType(AppBar), findsNothing);
+    await tester.tap(find.byTooltip('Stop screen share'));
+    expect(stopped, 1);
+    await tester.pumpWidget(page(automatic: true, enabled: false));
+    await tester.pumpAndSettle();
+    expect(platform.calls.map((call) => call.$2), [true, false]);
+    expect(find.byType(AppBar), findsOneWidget);
+  });
+
+  testWidgets('failed automatic enter allows an explicit fullscreen retry', (
+    tester,
+  ) async {
+    platform.failEnter = true;
+    await tester.pumpWidget(page(automatic: true));
+    await tester.pumpAndSettle();
+    expect(find.byType(AppBar), findsOneWidget);
+    expect(
+      find.text('Unable to change or restore fullscreen.'),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(page(automatic: true));
+    await tester.pumpAndSettle();
+    expect(platform.calls.map((call) => call.$2), [true, false]);
+    platform.failEnter = false;
+    await tester.tap(find.byTooltip('Enter fullscreen'));
+    await tester.pumpAndSettle();
+    expect(platform.calls.map((call) => call.$2), [true, false, true]);
+    expect(find.byType(AppBar), findsNothing);
+  });
+
+  testWidgets('terminal state compensates a pending automatic enter', (
+    tester,
+  ) async {
+    final entered = Completer<void>();
+    platform.entering = entered.future;
+    await tester.pumpWidget(page(automatic: true));
+    await tester.pumpWidget(page(automatic: true, enabled: false));
+    entered.complete();
+    await tester.pumpAndSettle();
+    expect(platform.calls.map((call) => call.$2), [true, false]);
+    expect(platform.calls.first.$1, platform.calls.last.$1);
+    expect(find.byType(AppBar), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('rotation keeps native aspect ratio and wraps after four turns', (
     tester,

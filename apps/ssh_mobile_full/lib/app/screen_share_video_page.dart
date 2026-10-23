@@ -13,6 +13,7 @@ final class AppScreenShareVideoPage extends StatefulWidget {
     required this.videoSize,
     required this.controls,
     this.enableViewerControls = true,
+    this.autoEnterFullscreen = false,
     this.onStop,
     this.windowPlatform = const MethodChannelAppWindowPresentation(),
     super.key,
@@ -22,6 +23,7 @@ final class AppScreenShareVideoPage extends StatefulWidget {
   final ValueListenable<Size?> videoSize;
   final Widget controls;
   final bool enableViewerControls;
+  final bool autoEnterFullscreen;
   final VoidCallback? onStop;
   final AppWindowPresentationPlatform windowPlatform;
 
@@ -35,11 +37,13 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
   );
   bool get _fullscreen => _window.fullscreen;
   int _quarterTurns = 0;
+  bool _defaultFullscreenRequested = false;
 
   @override
   void initState() {
     super.initState();
     _window.addListener(_windowChanged);
+    _enterDefaultFullscreen();
   }
 
   void _windowChanged() => setState(() {});
@@ -57,6 +61,23 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
     if (oldWidget.enableViewerControls && !widget.enableViewerControls) {
       unawaited(_window.setFullscreen(false));
     }
+    _enterDefaultFullscreen();
+  }
+
+  void _enterDefaultFullscreen() {
+    if (_defaultFullscreenRequested ||
+        !widget.autoEnterFullscreen ||
+        !widget.enableViewerControls) {
+      return;
+    }
+    _defaultFullscreenRequested = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          widget.autoEnterFullscreen &&
+          widget.enableViewerControls) {
+        unawaited(_window.setFullscreen(true));
+      }
+    });
   }
 
   void _exitFullscreen() {

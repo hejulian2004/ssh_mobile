@@ -856,6 +856,34 @@ void main() {
     },
   );
 
+  _testSharedWidgets('accepted receiver enters fullscreen automatically', (
+    tester,
+  ) async {
+    final fullscreen = <bool>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(windowChannel, (call) async {
+          fullscreen.add((call.arguments as Map)['enabled'] as bool);
+          return true;
+        });
+    await tester.pumpWidget(_routeApp(backend, session, capabilities));
+    await tester.pumpAndSettle();
+    session.emitConsent(_incomingConsent());
+    await tester.pumpAndSettle();
+    expect(fullscreen, isEmpty);
+    await tester.tap(find.text('Accept screen share'));
+    await tester.pumpAndSettle();
+    expect(fullscreen, [true]);
+    expect(find.byType(AppBar), findsNothing);
+    expect(find.byTooltip('Exit fullscreen'), findsOneWidget);
+    expect(find.byTooltip('Stop screen share'), findsOneWidget);
+    final started = List<String>.of(backend.operations);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(fullscreen, [true, false]);
+    expect(backend.operations, started);
+    expect(_testSessions.isBusy, isTrue);
+  });
+
   _testSharedWidgets(
     'reopening a hidden page borrows the same active endpoint',
     (tester) async {
@@ -876,7 +904,8 @@ void main() {
       expect(_testSessions.current, same(operation));
       expect(operation.media!.remoteSurface, same(surface));
       expect(backend.operations, started);
-      expect(find.text('Screen sharing active'), findsOneWidget);
+      expect(operation.controller!.state, ScreenShareOperationState.active);
+      expect(find.byTooltip('Exit fullscreen'), findsOneWidget);
       expect(_testSessions.pageVisible, isTrue);
     },
   );
@@ -956,7 +985,11 @@ void main() {
     final started = List<String>.of(backend.operations);
     await tester.tap(find.text('Open screen share'));
     await tester.pumpAndSettle();
-    expect(find.text('Screen sharing active'), findsOneWidget);
+    expect(
+      _testSessions.current!.controller!.state,
+      ScreenShareOperationState.active,
+    );
+    expect(find.byTooltip('Exit fullscreen'), findsOneWidget);
     expect(find.text('Screen sharing is running'), findsNothing);
     navigator.currentState!.pop();
     await tester.pumpAndSettle();
@@ -1211,6 +1244,12 @@ void main() {
   _testSharedWidgets('send route can start an outgoing consent operation', (
     tester,
   ) async {
+    final fullscreen = <bool>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(windowChannel, (call) async {
+          fullscreen.add((call.arguments as Map)['enabled'] as bool);
+          return true;
+        });
     await tester.pumpWidget(
       _routeApp(
         backend,
@@ -1232,6 +1271,25 @@ void main() {
       session.sentConsents.single.decision,
       RealtimeConsentDecision.request,
     );
+
+    final request = session.sentConsents.single;
+    final now = DateTime.now().toUtc();
+    session.emitConsent(
+      RealtimeConsent(
+        operationId: request.operationId,
+        realtimeId: request.realtimeId,
+        sharedSessionInstanceId: request.sharedSessionInstanceId,
+        issuedAt: now,
+        expiresAt: now.add(const Duration(minutes: 1)),
+        decision: RealtimeConsentDecision.accept,
+        senderPeerId: session.peerId,
+        actionRevision: 1,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Screen sharing active'), findsOneWidget);
+    expect(fullscreen, isEmpty);
+    expect(find.byType(AppBar), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
@@ -1299,7 +1357,11 @@ void main() {
 
       await tester.tap(find.text('Accept screen share'));
       await tester.pumpAndSettle();
-      expect(find.text('Screen sharing active'), findsOneWidget);
+      expect(
+        _testSessions.current!.controller!.state,
+        ScreenShareOperationState.active,
+      );
+      expect(find.byTooltip('Exit fullscreen'), findsOneWidget);
       expect(
         session.sentConsents.last.decision,
         RealtimeConsentDecision.accept,
@@ -1341,6 +1403,9 @@ void main() {
         tester.widget<AspectRatio>(find.byType(AspectRatio)).aspectRatio,
         2424 / 1080,
       );
+      await tester.tap(find.byTooltip('Exit fullscreen'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppBar), findsOneWidget);
       await tester.tap(find.byTooltip('Enter fullscreen'));
       await tester.pumpAndSettle();
       expect(find.byType(AppBar), findsNothing);
@@ -1426,7 +1491,7 @@ void main() {
       await tester.tap(find.text('Accept screen share'));
       await tester.pumpAndSettle();
       expect(arbitration.isBusy, isTrue);
-      await tester.tap(find.text('Stop screen share'));
+      await tester.tap(find.byTooltip('Stop screen share'));
       await tester.pumpAndSettle();
       expect(find.byType(AppScreenShareRouteScope), findsOneWidget);
       expect(find.text('Screen sharing cancelled'), findsOneWidget);
@@ -1507,7 +1572,11 @@ void main() {
       await tester.tap(find.text('Accept screen share'));
       await tester.pumpAndSettle();
       expect(backend.identities.single.codecMode, RealtimeMediaCodecMode.cpu);
-      expect(find.text('Screen sharing active'), findsOneWidget);
+      expect(
+        _testSessions.current!.controller!.state,
+        ScreenShareOperationState.active,
+      );
+      expect(find.byTooltip('Exit fullscreen'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
       expect(backend.operations, isNot(contains('release:1')));

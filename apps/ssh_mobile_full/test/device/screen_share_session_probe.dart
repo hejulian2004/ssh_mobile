@@ -82,6 +82,22 @@ Future<void> _until(bool Function() ready, {int seconds = 90}) async {
   }
 }
 
+bool _hasFullscreenExit() {
+  var found = false;
+  void visit(Element element) {
+    if (element.widget case IconButton(tooltip: 'Exit fullscreen')) {
+      found = true;
+    }
+    element.visitChildElements(visit);
+  }
+
+  WidgetsBinding.instance.rootElement?.visitChildElements(visit);
+  return found;
+}
+
+bool _sameSize(Size a, Size b) =>
+    (a.width - b.width).abs() <= 1 && (a.height - b.height).abs() <= 1;
+
 Future<void> _probe(bool reverse) async {
   final windows = Platform.isWindows;
   final sender = reverse ? !windows : windows;
@@ -210,6 +226,8 @@ Future<void> _probe(bool reverse) async {
       acceptIncomingOnOpen: !sender,
       codecMode: RealtimeMediaCodecMode.cpu,
     );
+    final view = WidgetsBinding.instance.platformDispatcher.views.first;
+    final originalWindowSize = view.physicalSize;
     final operation = _sessions.open(
       arguments,
       _resources,
@@ -256,6 +274,15 @@ Future<void> _probe(bool reverse) async {
     _report(
       'video_active frames=${frames(progress)} rendered=${progress.framesRendered}',
     );
+    if (!sender) {
+      await _until(_hasFullscreenExit, seconds: 10);
+      if (windows && !_sameSize(view.physicalSize, view.display.size)) {
+        throw StateError('Receiver window did not fill the display');
+      }
+      _report('receiver_default_fullscreen');
+    } else if (_hasFullscreenExit()) {
+      throw StateError('Sender entered viewer fullscreen');
+    }
     _navigator.currentState!.pop();
     await Future<void>.delayed(const Duration(seconds: 15));
     final hidden = await stats();
@@ -265,6 +292,11 @@ Future<void> _probe(bool reverse) async {
       throw StateError('Hidden page stopped sharing');
     }
     _report('page_hidden_continues frames=${frames(hidden)}');
+    if (windows &&
+        !sender &&
+        !_sameSize(view.physicalSize, originalWindowSize)) {
+      throw StateError('Closing viewer did not restore its window');
+    }
     unawaited(
       _navigator.currentState!.pushNamed<void>(
         AppShellRouteNames.screenShare,
@@ -278,6 +310,10 @@ Future<void> _probe(bool reverse) async {
       throw StateError('Reopening created another media owner');
     }
     _report('page_reopened_same_endpoint');
+    if (!sender) {
+      await _until(_hasFullscreenExit, seconds: 10);
+      _report('receiver_reopened_fullscreen');
+    }
     if (windows) {
       await Future<void>.delayed(const Duration(seconds: 10));
       await operation.stop().timeout(const Duration(seconds: 20));
@@ -286,6 +322,9 @@ Future<void> _probe(bool reverse) async {
     } else {
       await _until(() => operation.finished, seconds: 45);
       _report('peer_stop_finished');
+    }
+    if (!sender) {
+      await _until(() => !_hasFullscreenExit(), seconds: 10);
     }
     _report('PASS');
   } on RealtimeMediaException catch (error) {
