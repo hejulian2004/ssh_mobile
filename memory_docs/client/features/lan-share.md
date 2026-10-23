@@ -1,4 +1,4 @@
-> Last updated: 2026-10-22
+> Last updated: 2026-10-23
 
 # LAN Share Feature Memory
 
@@ -9,7 +9,9 @@ single-flight per peer; explicit termination closes their owned HTTP clients
 and invalidates late proof/navigation results without revoking existing trust.
 
 Device list cards show independent online/pairing labels and the latest observed
-non-online→online transition in local time; heartbeats do not advance it. The existing metadata DAO retains paired aliases and
+non-online→online transition in local time; heartbeats do not advance it.
+The list order is display name, then peer id, and does not follow discovery
+lastSeen. The existing metadata DAO retains paired aliases and
 timestamps after discovery expires, without restoring endpoints. Explicit
 long-press/right-click/menu unpair cancels in-flight authentication, drains control
 work, delegates trust/native removal to the registry, and removes presentation
@@ -91,7 +93,9 @@ explicit/configured, not an import or App-start side effect.
   unavailable state. Windows groups IPv4 default-route rows by interface and
   compares route metric + interface metric; duplicate lowest routes on one
   interface are equivalent, while cross-interface ties or multiple candidates
-  on the selected interface require manual selection. With no eligible route,
+  on the selected interface require manual selection. Web Share opens the
+  existing address picker for that result and starts the session after a
+  concrete address is chosen. With no eligible route,
   only a sole candidate is a valid fallback. A route-query failure is unavailable,
   not evidence that no default route exists. Other platforms auto-select only a
   sole candidate; sorted order is for display only.

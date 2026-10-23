@@ -1,4 +1,4 @@
-最新更新时间：2026-10-22
+最新更新时间：2026-10-23
 
 # feature_lan_share 维护约束
 
@@ -38,11 +38,16 @@
 
 ## Protocol, trust, and transfer invariants
 
-- Device cards present presence and pairing separately. Saved trust/metadata is
-  never online evidence or a restored endpoint. Paired aliases and latest observed
-  came-online transitions use the existing non-secret metadata DAO; heartbeats
-  cannot advance that timestamp, and dynamic ports/IPs stay
-  absent. Explicit unpair invalidates pending authentication and disconnects
+- Device cards present presence and pairing separately. The device list stays
+  in display-name then peer-id order; discovery lastSeen must not reorder it.
+  An ambiguous Web Share address opens the existing address picker and starts
+  the session after a concrete address is chosen. A snackbar alone is not the
+  selection UI.
+  Saved trust/metadata is never online evidence or a restored endpoint. Paired
+  aliases and latest observed came-online transitions use the existing
+  non-secret metadata DAO; heartbeats cannot advance that timestamp, and
+  dynamic ports/IPs stay absent. Explicit unpair invalidates pending
+  authentication and disconnects
   control before registry trust removal, clears the current list observation and
   metadata, preserves history, and never suppresses rediscovery.
 

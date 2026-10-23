@@ -1,4 +1,4 @@
-最新更新时间：2026-10-22
+最新更新时间：2026-10-23
 
 # feature_lan_share
 
@@ -7,7 +7,8 @@ mDNS 发现使用已解析的有效 IPv4，不能把 canonical hostname 当作 H
 重新发现。设备配对邀请和 PIN 验证都禁止重复连接，并提供终止入口；终止关闭该
 操作的 HTTP 连接、使迟到结果失效，不移除已有 Trust 或释放 App Runtime。
 
-设备列表将在线状态与配对状态分别展示。当前发现、已连接控制通道或 native/Relay
+设备列表将在线状态与配对状态分别展示，并按显示名称、再按 peer id 固定排序。
+发现心跳只会刷新 lastSeen，不能带动卡片换位。当前发现、已连接控制通道或 native/Relay
 在线观察可提供在线证据；旧配对记录本身不能证明在线。已配对设备离线后仍显示
 已保存别名和最近上线时间（本地观测的非在线→在线时间，持续在线时不随心跳刷新），
 首次没有观察记录时显示“未知”。这些非秘密信息使用
@@ -112,7 +113,9 @@ control HTTP、WSS Relay enrollment/编排、Web Share、传输历史和非秘�
   不检查 Windows 平台或依赖 Windows 类型。Windows 按接口聚合 IPv4 default routes，
   使用 route metric + interface metric；同接口重复最低 routes 等价，跨接口并列或
   被选接口有多个 IPv4 时要求手动选择。无 eligible route 时，仅一个候选可回退；
-  route 查询失败不执行回退。其他平台只在候选唯一时自动选择。
+  route 查询失败不执行回退。其他平台只在候选唯一时自动选择。网页快传遇到多个
+  地址时打开现有地址选择器，选定具体地址后继续启动会话；只提示文案而不打开
+  选择器是不完整的。
 - QR 永不发布 loopback。地址无法确定或 override 过期时只停止 WebShare HTTPS
   session、清空 QR URL，LAN Control listener 保持运行。QR 字段保持
   `deviceId`、`lanPort`、`nativePort`、`access` 和 `certFingerprint`；WebShare

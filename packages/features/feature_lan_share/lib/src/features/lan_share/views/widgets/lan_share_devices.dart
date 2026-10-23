@@ -103,9 +103,9 @@ extension _LanShareDevices on _LanShareScreenState {
         final state = peers[index];
         final device = state.discovery;
         return Padding(
+          key: ValueKey(state.peerId),
           padding: const EdgeInsets.only(bottom: 12),
           child: LanPeerDeviceCard(
-            key: ValueKey(state.peerId),
             peer: state,
             strings: strings,
             isConnecting: vm.isPairingConnecting(state.peerId),

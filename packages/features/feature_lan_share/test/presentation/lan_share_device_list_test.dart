@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:feature_lan_share/feature_lan_share.dart';
@@ -191,6 +192,40 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+    'web share opens the address picker when several LAN addresses match',
+    (tester) async {
+      final vm = _ViewModel()..ambiguousWebShare = true;
+      final settings = _Settings();
+      addTearDown(vm.dispose);
+      addTearDown(settings.dispose);
+      await _pump(tester, vm, settings);
+
+      await tester.tap(find.byIcon(Icons.qr_code_outlined));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Select LAN IP Address'), findsOneWidget);
+      expect(find.text('192.0.2.8'), findsOneWidget);
+      expect(find.text('192.0.2.9'), findsOneWidget);
+      expect(
+        find.text('Multiple LAN addresses detected. Select one manually.'),
+        findsNothing,
+      );
+
+      await tester.tap(find.text('192.0.2.9'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(vm.addressOverrides, ['192.0.2.9']);
+      expect(vm.webShareStarts, 2);
+      expect(
+        find.textContaining('https://192.0.2.9:53319/share'),
+        findsOneWidget,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 }
 
 Future<void> _pump(
@@ -338,13 +373,81 @@ final class _ViewModel extends ChangeNotifier implements LanShareViewModel {
   @override
   LanDiscoveryService get discoveryService => _discovery;
   final _discovery = FakeLanDiscoveryService();
+  bool ambiguousWebShare = false;
+  bool webShareActive = false;
+  String? shareUrl;
+  int webShareStarts = 0;
+  final List<String?> addressOverrides = [];
+  LanShareLocalAddressSelectionResult? selectionResult;
+  final _pendingInterfaces = Completer<Map<String, String>>();
+
   @override
-  bool get isWebShareActive => false;
+  bool get isWebShareActive => webShareActive;
   @override
-  String? get customIp => null;
+  String? get webShareUrl => shareUrl;
+  @override
+  String? get customIp =>
+      addressOverrides.isEmpty ? null : addressOverrides.last;
   @override
   LanShareLocalAddressSelectionResult? get webShareAddressSelectionResult =>
-      null;
+      selectionResult;
+  @override
+  String? get webShareAddressSelectionMessage =>
+      selectionResult is LanShareLocalAddressAmbiguous
+      ? 'Multiple LAN addresses detected. Select one manually.'
+      : null;
+  @override
+  Future<Map<String, String>> localIpInterfaces() => _pendingInterfaces.future;
+  @override
+  LanSecurityService get securityService => FakeLanSecurityService();
+  @override
+  Future<NetworkResult<void>> toggleWebShare() async {
+    webShareStarts++;
+    if (ambiguousWebShare && customIp == null) {
+      selectionResult = LanShareLocalAddressAmbiguous(const [
+        LanShareLocalIpv4Candidate(
+          address: '192.0.2.8',
+          interfaceName: 'wlan0',
+          interfaceIndex: 1,
+        ),
+        LanShareLocalIpv4Candidate(
+          address: '192.0.2.9',
+          interfaceName: 'rmnet0',
+          interfaceIndex: 2,
+        ),
+      ]);
+      notifyListeners();
+      return const NetworkFailure(
+        NetworkError(
+          code: NetworkErrorCode.configuration,
+          message: 'ambiguous',
+          operation: NetworkOperation.startWebShare,
+        ),
+      );
+    }
+    webShareActive = true;
+    shareUrl = 'https://${customIp ?? '192.0.2.8'}:53319/share';
+    selectionResult = null;
+    notifyListeners();
+    return const NetworkSuccess(null);
+  }
+
+  @override
+  Future<NetworkResult<void>> updateWebShareAddressOverride(String? ip) async {
+    addressOverrides.add(ip);
+    notifyListeners();
+    if (ip == null) {
+      return const NetworkFailure(
+        NetworkError(
+          code: NetworkErrorCode.configuration,
+          message: 'ambiguous',
+          operation: NetworkOperation.startWebShare,
+        ),
+      );
+    }
+    return const NetworkSuccess(null);
+  }
+
   @override
   LanShareSettingsPort get appSettings => _Settings();
   @override

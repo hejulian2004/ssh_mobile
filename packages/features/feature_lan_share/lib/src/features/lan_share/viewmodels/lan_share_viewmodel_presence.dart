@@ -1,5 +1,14 @@
 part of 'lan_share_viewmodel.dart';
 
+/// Device-list order. Recency is intentionally not a key.
+int _compareDeviceListOrder(LanPeerViewState left, LanPeerViewState right) {
+  final alias = left.displayAlias.toLowerCase().compareTo(
+    right.displayAlias.toLowerCase(),
+  );
+  if (alias != 0) return alias;
+  return left.peerId.compareTo(right.peerId);
+}
+
 /// Non-secret peer presentation; dynamic endpoints never enter persisted metadata.
 extension LanShareViewModelPresence on LanShareViewModel {
   bool _isRouteOnline(String id, LanPeerRouteState route) =>
