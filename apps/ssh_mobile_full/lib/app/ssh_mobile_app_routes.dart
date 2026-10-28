@@ -89,21 +89,27 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
                     );
 
                     final currentTheme = Theme.of(context);
-                    if (identical(adaptedMediaQuery, mediaQuery) &&
-                        visualDensity == currentTheme.visualDensity) {
-                      return shadChild;
-                    }
-
-                    return MediaQuery(
-                      data: adaptedMediaQuery,
-                      child: currentTheme.visualDensity == visualDensity
-                          ? shadChild
-                          : Theme(
-                              data: currentTheme.copyWith(
-                                visualDensity: visualDensity,
-                              ),
-                              child: shadChild,
-                            ),
+                    final themedChild =
+                        identical(adaptedMediaQuery, mediaQuery) &&
+                            visualDensity == currentTheme.visualDensity
+                        ? shadChild
+                        : MediaQuery(
+                            data: adaptedMediaQuery,
+                            child: currentTheme.visualDensity == visualDensity
+                                ? shadChild
+                                : Theme(
+                                    data: currentTheme.copyWith(
+                                      visualDensity: visualDensity,
+                                    ),
+                                    child: shadChild,
+                                  ),
+                          );
+                    return LanSystemNotificationHost(
+                      navigatorKey: _navigatorKey,
+                      english: () => context.read<AppSettings>().isEnglish,
+                      diagnostic: (message) =>
+                          AppLogService.instance.warning(message),
+                      child: themedChild,
                     );
                   },
                   initialRoute: AppShellRouteNames.root,

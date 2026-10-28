@@ -4,8 +4,8 @@ import 'dart:convert';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:app_notifications/app_notifications.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'app_log_service.dart';
 
@@ -300,22 +300,21 @@ class BackgroundServiceManager {
   }
 
   static Future<void> _createNotificationChannel() async {
-    const channel = AndroidNotificationChannel(
-      _channelId,
-      'SSH connection',
+    final ready = await AppNotificationCenter.shared.ensureInitialized(
+      identity: AppNotificationIdentity.full,
+    );
+    if (!ready) {
+      throw StateError('notification center is not initialized');
+    }
+    await AppNotificationCenter.shared.ensureAndroidChannel(
+      id: _channelId,
+      name: 'SSH connection',
       description: 'Keeps active SSH sessions alive in a foreground service.',
-      importance: Importance.low,
+      highPriority: false,
       playSound: false,
       enableVibration: false,
       showBadge: false,
     );
-
-    final plugin = FlutterLocalNotificationsPlugin();
-    await plugin
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >()
-        ?.createNotificationChannel(channel);
   }
 
   static Future<void> _acquirePowerLocks() async {

@@ -1,12 +1,14 @@
-最新更新时间：2026-10-23
+最新更新时间：2026-10-28
 
 # ssh_mobile_network
 
 网络传输 App 组合 `feature_lan_share` 的网络传输页。页面包含设备列表、传输历史、
 扫码和手动添加、配对、聊天、网页快传、设置，以及传入传输和配对导航宿主。
 
-它装配 `app_core`、`app_ui`、`feature_lan_share`、`network_sdk` 和
-`network_transport`。完整版 `ssh_mobile_full` 保持原有组合根，本 App 不复制
+它装配 `app_core`、`app_notifications`、`app_ui`、`feature_lan_share`、
+`network_sdk` 和 `network_transport`。进程仍在运行时，后台局域网事件可以显示
+使用本 App 自己的 Windows 通知身份的脱敏系统通知。完整版 `ssh_mobile_full`
+保持原有组合根，本 App 不复制
 `NativeNetworkService`。因此 `borrowFacade` 返回 null：发现、配对和 LAN 控制面
 可以运行，原生文件传输和 Relay 数据面仍只在完整 App 中可用。屏幕共享保持关闭。
 

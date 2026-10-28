@@ -8,6 +8,7 @@ import 'package:feature_lan_share/feature_lan_share.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'lan_system_notification_host.dart';
 import 'network_app_runtime.dart';
 
 /// 网络传输 App 根 Widget 和 Runtime 生命周期 Owner。
@@ -98,10 +99,15 @@ final class NetworkTransportAppState extends State<NetworkTransportApp>
         theme: AppTheme.lightThemeFor(),
         darkTheme: AppTheme.darkThemeFor(),
         builder: (context, child) {
-          return NetworkIncomingTransferHost(
-            child: LanPairingNavigationHost(
-              navigatorKey: _navigatorKey,
-              child: child ?? const SizedBox.shrink(),
+          return LanSystemNotificationHost(
+            navigatorKey: _navigatorKey,
+            english: () => runtime.settings.isEnglish,
+            diagnostic: (message) => runtime.loggerPort.warning(message),
+            child: NetworkIncomingTransferHost(
+              child: LanPairingNavigationHost(
+                navigatorKey: _navigatorKey,
+                child: child ?? const SizedBox.shrink(),
+              ),
             ),
           );
         },

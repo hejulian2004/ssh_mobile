@@ -17,6 +17,14 @@ media adapters. Legacy Full App paths
 remain only for consumers listed in the [compatibility inventory](../../docs/architecture/COMPATIBILITY_MIGRATION_INVENTORY.md);
 new code belongs in the owning package.
 
+Full App and Network App each mount `LanSystemNotificationHost`. While the
+process is alive, a backgrounded app can show a redacted system notification
+for a persisted incoming LAN text or clipboard message, a new incoming file
+request, or an incoming transfer's terminal state. The plugin is initialized
+once per process. A click opens the existing chat or resumes the app, and
+never accepts a transfer. Delivery after the process has been killed is not
+available.
+
 Feature/Core persistence is split by owner. No shared business DB exists and a
 production DB-open failure never falls back to memory. Telemetry uses isolated
 `DriftTelemetryStorage` at `${supportDirectory}/telemetry.sqlite`; transactional

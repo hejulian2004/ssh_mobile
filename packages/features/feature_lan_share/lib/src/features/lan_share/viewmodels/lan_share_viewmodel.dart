@@ -19,6 +19,7 @@ import '../../../services/lan_share/lan_storage_service.dart';
 import '../../../services/lan_share/lan_native_transfer_coordinator.dart';
 import '../../../services/lan_share/lan_pairing_reciprocal.dart';
 import '../../../services/lan_share/lan_transfer_service.dart';
+import '../notifications/lan_system_notification.dart';
 import 'package:network_sdk/network_sdk.dart';
 
 part 'lan_share_viewmodel_network.dart';
@@ -70,6 +71,18 @@ class LanShareViewModel extends ChangeNotifier {
 
   final _pairingRequestController =
       StreamController<LanPairingRequest>.broadcast();
+  final _notificationEvents =
+      StreamController<LanNotificationEvent>.broadcast();
+
+  /// Events published after a notifiable LAN record is persisted.
+  Stream<LanNotificationEvent> get notificationEvents =>
+      _notificationEvents.stream;
+
+  void _emitNotification(LanNotificationEvent? event) {
+    if (event == null || _disposed || _notificationEvents.isClosed) return;
+    _notificationEvents.add(event);
+  }
+
   final Map<String, LanPairingRequest> _latestPairingRequests = {};
   final Map<String, Object> _pairingConnections = {};
   final Set<Object> _cancelledPairingConnections = {};
@@ -445,6 +458,7 @@ class LanShareViewModel extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    if (!_notificationEvents.isClosed) _notificationEvents.close();
     for (final peerId in _pairingConnections.keys.toList()) {
       cancelPairingConnection(peerId);
     }

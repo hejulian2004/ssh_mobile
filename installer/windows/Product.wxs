@@ -34,7 +34,9 @@
           Name="$(var.ProductName)"
           Description="$(var.ProductName)"
           Target="[INSTALLFOLDER]ssh_mobile.exe"
-          WorkingDirectory="INSTALLFOLDER" />
+          WorkingDirectory="INSTALLFOLDER">
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="Hejulian.SSHMobile" />
+        </Shortcut>
         <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall" />
         <RegistryValue
           Root="HKCU"

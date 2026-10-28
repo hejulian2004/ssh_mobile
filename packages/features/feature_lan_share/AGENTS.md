@@ -35,6 +35,13 @@
   access the TrustStore from App Shell, or replace the existing device-tap Chat
   action. Outgoing UI calls `canShareWith`; incoming App hosts call the
   independent `canReceiveScreenShareFrom` capability.
+- Notification events are published only after an incoming text or clipboard
+  message is persisted, or for a new incoming file request and an incoming
+  transfer's terminal state. The event carries kind, peer id, business id, and
+  an optional display name. It does not carry message text, file names, paths,
+  or credentials. This feature does not import a notification plugin. A click
+  may open the existing chat route or resume the app; it never accepts a
+  transfer.
 
 ## Protocol, trust, and transfer invariants
 

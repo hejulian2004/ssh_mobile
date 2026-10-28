@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:app_notifications/app_notifications.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -538,6 +539,14 @@ class ClientSystemToolService implements ClientSystemToolAdapter {
   }
 
   Future<void> _ensureNotificationsInitialized() {
+    if (AppNotificationCenter.shared.isInitialized) {
+      return AppNotificationCenter.shared.ensureAndroidChannel(
+        id: _channelId,
+        name: 'Client tools',
+        description: 'Notifications created by AI client-side tools.',
+        highPriority: true,
+      );
+    }
     if (!_supportsLocalNotifications) return Future<void>.value();
     final existing = _initFuture;
     if (existing != null) return existing;

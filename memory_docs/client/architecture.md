@@ -1,4 +1,4 @@
-> Last updated: 2026-10-11
+> Last updated: 2026-10-28
 
 # Client Architecture
 
@@ -20,6 +20,10 @@ Transfer page. It owns one `NetworkRuntime`, its LAN settings, identity, and
 data protection, and hosts `feature_lan_share`. It does not create a
 `NetworkFacade`, because the only production `SessionClient` remains in the
 Full App. The Full App composition root is unchanged.
+
+`app_notifications` is the shared Android and Windows notification adapter.
+Both composition roots initialize it. `feature_lan_share` publishes body-free
+events and does not depend on the adapter.
 
 Stable boundaries:
 

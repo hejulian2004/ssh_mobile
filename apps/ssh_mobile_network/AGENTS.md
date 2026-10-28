@@ -1,7 +1,10 @@
-最新更新时间：2026-10-22
+最新更新时间：2026-10-28
 
 # Network-transfer App Guidelines
 
+- `LanSystemNotificationHost` initializes `AppNotificationIdentity.network`
+  for this process. Notification clicks may open an existing chat and never
+  accept a transfer. This app does not reuse the Full App toast identity.
 - This App hosts the Network Transfer page from `feature_lan_share`. It owns
   one `NetworkRuntime`, LAN settings, network identity, data protection, and
   the control-plane HTTP executor. `LanShareModule` owns `lan_share.db`.

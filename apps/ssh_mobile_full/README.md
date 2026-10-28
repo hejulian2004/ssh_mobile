@@ -15,7 +15,7 @@ SFTP、Realtime 和 Relay 只借用这些 App Scope 资源；Feature
 停止、销毁或重新配置它们。局域网运行时经 `LanShareNetworkRuntimePort` 注入：
 `ensureRuntime` 映射为 `NetworkCapability.runtime`，`ensureWebSocketRelay`
 映射为 `NetworkCapability.webSocketRelay`。`feature_lan_share` 不依赖
-`network_transport`。
+`network_transport`。进程仍在运行时，后台的局域网文字、文件申请和传入传输终态可以显示脱敏系统通知；点击只恢复应用或打开已有聊天。
 
 ## 不负责什么
 
