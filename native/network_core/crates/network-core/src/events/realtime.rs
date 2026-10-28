@@ -3,8 +3,9 @@
 use super::unix_timestamp_ms;
 use crate::runtime::EventSender;
 use network_protocol::{
-    network_event, NetworkError as ProtocolError, NetworkEvent, RealtimeIncomingSessionOfferEvent,
-    RealtimeSignalEvent, RealtimeSnapshotEvent, RealtimeStateChangedEvent, ScreenShareConsentV2,
+    network_event, NetworkError as ProtocolError, NetworkEvent, RealtimeApplicationChannelEvent,
+    RealtimeApplicationDataEvent, RealtimeIncomingSessionOfferEvent, RealtimeSignalEvent,
+    RealtimeSnapshotEvent, RealtimeStateChangedEvent, ScreenShareConsentV2,
     NETWORK_PROTOCOL_VERSION,
 };
 use prost::Message;
@@ -107,6 +108,55 @@ pub(crate) fn emit_realtime_snapshot(
                 error,
                 generation: session_identity.generation,
                 shared_session_instance_id: session_identity.shared_session_instance_id.to_owned(),
+            },
+        )),
+    });
+}
+
+pub(crate) fn emit_realtime_application_data(
+    event_tx: &EventSender,
+    realtime_id: &str,
+    peer_id: &str,
+    session_identity: RealtimeSessionIdentity<'_>,
+    payload: Vec<u8>,
+) {
+    let _ = event_tx.send(NetworkEvent {
+        event_id: format!("realtime/{realtime_id}/application/{}", unix_timestamp_ms()),
+        timestamp_ms: unix_timestamp_ms(),
+        protocol_version: NETWORK_PROTOCOL_VERSION,
+        payload: Some(network_event::Payload::RealtimeApplicationData(
+            RealtimeApplicationDataEvent {
+                realtime_id: realtime_id.to_owned(),
+                peer_id: peer_id.to_owned(),
+                generation: session_identity.generation,
+                shared_session_instance_id: session_identity.shared_session_instance_id.to_owned(),
+                payload,
+            },
+        )),
+    });
+}
+
+pub(crate) fn emit_realtime_application_channel(
+    event_tx: &EventSender,
+    realtime_id: &str,
+    peer_id: &str,
+    session_identity: RealtimeSessionIdentity<'_>,
+    open: bool,
+) {
+    let _ = event_tx.send(NetworkEvent {
+        event_id: format!(
+            "realtime/{realtime_id}/application-channel/{}",
+            unix_timestamp_ms()
+        ),
+        timestamp_ms: unix_timestamp_ms(),
+        protocol_version: NETWORK_PROTOCOL_VERSION,
+        payload: Some(network_event::Payload::RealtimeApplicationChannel(
+            RealtimeApplicationChannelEvent {
+                realtime_id: realtime_id.to_owned(),
+                peer_id: peer_id.to_owned(),
+                generation: session_identity.generation,
+                shared_session_instance_id: session_identity.shared_session_instance_id.to_owned(),
+                open,
             },
         )),
     });

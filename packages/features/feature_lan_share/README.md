@@ -141,6 +141,8 @@ Control 只暴露 V2 pairing/upload contract。
 
 - 职责：提供 LAN Control V2 发现/配对/capabilities/control HTTP、WSS Relay
   enrollment/状态、Web Share 和传输历史；二进制数据面只消费 Network V2 Transfer。
+  本机发出的图片、视频、音频和文件会记下源路径；失败或取消后，源文件仍在且
+  失败原因可重试或未知时，可以按同一条历史记录重试。
 - 不负责：SSH、其他 Feature 实现、App `/src/`、未审批的网络写入或秘密持久化。
 - Public API：`package:feature_lan_share/feature_lan_share.dart`，包括 Module、
   Receiver 配置、页面和 Port。不再保留旧 `AppLanguage`、`AppSettings`、`AppStrings` 别名

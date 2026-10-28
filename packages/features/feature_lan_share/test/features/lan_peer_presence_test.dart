@@ -78,6 +78,91 @@ void main() {
       expect(await fixture.store.read('peer'), isNotNull);
     },
   );
+  test('outgoing media keeps its source path and can be retried', () async {
+    final fixture = await _Fixture.create();
+    addTearDown(fixture.close);
+    await fixture.store.setRelayAuthorization('peer', true);
+    await fixture.vm.initialize();
+    final directory = await Directory.systemTemp.createTemp('lan-vm-retry-');
+    addTearDown(() => directory.delete(recursive: true));
+    final file = File('${directory.path}${Platform.pathSeparator}clip.mp4')
+      ..writeAsStringSync('video');
+    fixture.facade.nextTransferError = NetworkError(
+      code: NetworkErrorCode.timeout,
+      message: 'network command acceptance timed out',
+      operation: NetworkOperation.sendFile,
+      peerId: 'peer',
+    );
+
+    final failed = await fixture.vm.sendFile(
+      peerId: 'peer',
+      filePath: file.path,
+    );
+    expect(failed, isA<NetworkFailure<TransferSession>>());
+    final transferId =
+        (await fixture.database.lanHistoryDao.getAllRecords()).single.id;
+    final stored = await fixture.database.lanHistoryDao.getRecord(transferId);
+    expect(stored!.localPath, file.path);
+    expect(stored.failureReason, 'timeout');
+    expect(fixture.facade.transferIds, [transferId]);
+    final message = await _historyMessage(
+      fixture.vm,
+      (item) => item.id == transferId && item.failureReason == 'timeout',
+    );
+    expect(message.localPath, file.path);
+    expect(message.payloadType, LanPayloadType.video);
+    expect(canRetryOutgoingLanFile(message, sourceExists: true), isTrue);
+
+    final retried = await fixture.vm.retryOutgoingFile(message);
+    expect(retried, isA<NetworkSuccess<TransferSession>>());
+    expect(
+      (retried as NetworkSuccess<TransferSession>).data.transferId,
+      transferId,
+    );
+    expect(fixture.facade.transferIds, [transferId, transferId]);
+    final retrying = await fixture.database.lanHistoryDao.getRecord(transferId);
+    expect(retrying!.status, 'transferring');
+    expect(retrying.failureReason, isNull);
+    expect(retrying.bytesTransferred, 0);
+    expect(retrying.localPath, file.path);
+
+    await fixture.database.lanHistoryDao.updateRecordStatus(
+      transferId,
+      LanTransferStatus.failed.toJson(),
+      failureReason: NetworkErrorCode.authenticationFailed.name,
+    );
+    final blockedMessage = await _historyMessage(
+      fixture.vm,
+      (item) =>
+          item.id == transferId && item.failureReason == 'authenticationFailed',
+    );
+    expect(
+      await fixture.vm.retryOutgoingFile(blockedMessage),
+      isA<NetworkFailure<TransferSession>>(),
+    );
+    expect(fixture.facade.transferIds, [transferId, transferId]);
+
+    await fixture.database.lanHistoryDao.updateRecordStatus(
+      transferId,
+      LanTransferStatus.failed.toJson(),
+      failureReason: NetworkErrorCode.timeout.name,
+    );
+    await file.delete();
+    final missingSource = await _historyMessage(
+      fixture.vm,
+      (item) => item.id == transferId && item.failureReason == 'timeout',
+    );
+    expect(
+      await fixture.vm.retryOutgoingFile(missingSource),
+      isA<NetworkFailure<TransferSession>>(),
+    );
+    expect(fixture.facade.transferIds, [transferId, transferId]);
+    final unchanged = await fixture.database.lanHistoryDao.getRecord(
+      transferId,
+    );
+    expect(unchanged!.status, 'failed');
+    expect(unchanged.failureReason, 'timeout');
+  });
   test(
     'Relay presence supplies online evidence independently from pairing authorization',
     () async {
@@ -290,6 +375,19 @@ void main() {
   );
 }
 
+Future<LanMessage> _historyMessage(
+  LanShareViewModel viewModel,
+  bool Function(LanMessage message) match,
+) async {
+  for (var attempt = 0; attempt < 40; attempt++) {
+    for (final message in viewModel.history) {
+      if (match(message)) return message;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 25));
+  }
+  fail('LAN history did not publish the expected message');
+}
+
 LanDiscoveredPeer _peer(DateTime seen) => LanDiscoveredPeer(
   deviceId: 'peer',
   alias: 'My phone',
@@ -409,6 +507,8 @@ final class _Fixture {
 final class _Facade extends Fake implements NetworkFacade {
   final controller = StreamController<SdkEvent>.broadcast();
   final List<String> removed = [];
+  final List<String> transferIds = [];
+  NetworkError? nextTransferError;
   @override
   Stream<SdkEvent> get events => controller.stream;
   @override
@@ -425,14 +525,23 @@ final class _Facade extends Fake implements NetworkFacade {
     required String peerId,
     required String filePath,
     CommunicationClass communicationClass = CommunicationClass.bulkTransfer,
-  }) async => NetworkSuccess(
-    TransferSession(
-      transferId: transferId,
-      peerId: peerId,
-      filePath: filePath,
-      routeType: NetworkRouteType.relay,
-    ),
-  );
+  }) async {
+    transferIds.add(transferId);
+    final error = nextTransferError;
+    if (error != null) {
+      nextTransferError = null;
+      return NetworkFailure(error);
+    }
+    return NetworkSuccess(
+      TransferSession(
+        transferId: transferId,
+        peerId: peerId,
+        filePath: filePath,
+        routeType: NetworkRouteType.relay,
+      ),
+    );
+  }
+
   @override
   Future<NetworkResult<void>> disconnectPeer(String id) async =>
       const NetworkSuccess(null);

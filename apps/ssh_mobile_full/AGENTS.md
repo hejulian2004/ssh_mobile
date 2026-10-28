@@ -50,7 +50,8 @@ Debug assertions verify observable Timer/Subscription/Lease/native-handle releas
 Shell. It owns operation controllers, readiness subscriptions, media and session
 leases independently of presentation routes. Closing a screen-share page only
 detaches its view and restores its window presentation; it never sends CANCEL
-or releases a running operation. Explicit local Stop, authenticated peer stop,
+or releases a running operation. Annotation state stays on that operation.
+Page pop does not clear marks; stop, generation change, and transport loss do. Explicit local Stop, authenticated peer stop,
 transport/source failure or App shutdown performs operation cleanup. Keep global
 admission until media release is confirmed; failed cleanup stays owned and can
 be retried. The background host may reopen the same operation or stop it, never
@@ -67,6 +68,16 @@ the original placement/styles, Android restores the prior system-bar visibility
 and behavior. Stale lease release cannot affect a newer owner. Retain a failed
 restore for retry, surface a bounded error, and never guess a default window
 state or create/restart a media endpoint to change presentation.
+
+Android receiver picture-in-picture uses this same activity and Flutter texture.
+It becomes eligible only while the receiver has a live remote surface and the
+operation is not terminal. Leaving the app enters the system PiP window on API
+26+, and API 31+ uses auto-enter. The fullscreen lease is suspended for that
+transition and reapplied when the window expands. The small window hides viewer
+controls and annotation chrome; it does not release the operation, media
+endpoint, or annotation session. Closing the system window moves the task back
+instead of finishing the activity. Stopping the share expands back to the same
+route. Senders and Windows do not enter picture-in-picture.
 
 `BackgroundServiceManager` owns UI-isolate notifications/permissions/power lock/
 platform service. Background entry points create `_BackgroundSshRuntime`, which

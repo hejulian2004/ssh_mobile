@@ -1,3 +1,5 @@
+import 'package:app_diagnostics/app_diagnostics.dart';
+
 // SSH-only App 的 App Scope 运行时。
 //
 // Runtime 持有连接数据库、直接 TCP SSH 和 Terminal Module。它不创建
@@ -110,7 +112,9 @@ final class SshOnlyAppRuntime implements Disposable {
 
   /// 创建并初始化 SSH-only App 的资源。
   static Future<SshOnlyAppRuntime> create() async {
-    final logger = AppLoggerImpl();
+    final logger = AppLoggerImpl(
+      sinks: [?DiagnosticFileSink.fromEnvironment('flutter')],
+    );
     final navigatorKey = GlobalKey<NavigatorState>();
     final hostKeyPrompts = SshHostKeyPromptGateway();
     final connectionDatabase = ConnectionDatabase();

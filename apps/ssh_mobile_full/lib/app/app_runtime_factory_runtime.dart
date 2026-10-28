@@ -18,6 +18,11 @@ extension _AppRuntimeFactoryRuntime on _AppRuntimeFactoryContext {
         logger: logger,
         backend: runtimeRealtimeMediaBackend,
         sessionFactory: runtimeRealtimeMediaSessionFactory,
+        guidanceOverlay: defaultTargetPlatform == TargetPlatform.android
+            ? const AndroidScreenShareGuidanceDisplay(
+                MethodChannelAndroidGuidanceOverlay(),
+              )
+            : null,
       ),
       bootstrapCoordinator: bootstrapCoordinator,
       shortcutCommandService: shortcutCommandService,

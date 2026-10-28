@@ -146,6 +146,7 @@ run_dart_package realtime_media "$realtime_media_dir" "$RUN_DIR/realtime-media.l
   test/realtime_media_public_contract_test.dart
 run_dart_package ssh_mobile_network_native "$native_sdk_dir" "$RUN_DIR/native-sdk.lcov" \
   test/ssh_mobile_network_native_test.dart \
+  test/native_diagnostic_options_test.dart \
   test/protocol_event_matrix_test.dart \
   test/protocol_event_matrix_events_test.dart
 

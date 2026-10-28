@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:feature_lan_share/feature_lan_share.dart' as lan;
+import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:flutter/material.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'package:realtime_media/realtime_media.dart';
@@ -181,6 +182,8 @@ final class _AppScreenShareIncomingRequestHostState
             ),
             const SizedBox(height: 8),
             Text('Peer ${offer.authenticatedPeerId} wants to share a screen.'),
+            const SizedBox(height: 8),
+            Text(screenShareMarkConsent(context, drawing: true)),
             const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,

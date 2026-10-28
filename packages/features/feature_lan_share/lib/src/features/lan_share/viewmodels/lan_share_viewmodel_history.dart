@@ -102,6 +102,7 @@ extension LanShareViewModelHistory on LanShareViewModel {
       isRecalled: record.isRecalled,
       sftpServerId: record.sftpServerId,
       sftpRemotePath: sftpRemotePath,
+      failureReason: record.failureReason,
     );
   }
 

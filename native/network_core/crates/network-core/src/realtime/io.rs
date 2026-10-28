@@ -272,24 +272,15 @@ pub(crate) async fn handle_io_event(
             );
             true
         }
-        RealtimeIoEvent::DataChannelMessage {
-            channel_id,
-            is_string,
-            payload,
-        } => {
-            tracing::debug!(
-                realtime_id,
-                peer_id,
-                channel_id,
-                is_string,
-                payload_bytes = payload.len(),
-                "WebRTC data channel payload received by native realtime owner"
-            );
+        RealtimeIoEvent::DataChannelMessage { .. }
+        | RealtimeIoEvent::DataChannelOpened(_)
+        | RealtimeIoEvent::DataChannelClosed(_) => {
+            // Marks stay off logs. Identity and size checks happen before emit.
+            super::application::forward_data_channel_message(state, realtime_id, peer_id, event)
+                .await;
             false
         }
-        RealtimeIoEvent::IceConnected
-        | RealtimeIoEvent::DataChannelOpened(_)
-        | RealtimeIoEvent::DataChannelClosed(_) => false,
+        RealtimeIoEvent::IceConnected => false,
     }
 }
 

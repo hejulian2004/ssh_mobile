@@ -11,6 +11,11 @@ The package is intentionally usable before a platform owner is available: a
 request can remain pending, and all platform failures become a terminal typed
 Feature state without a byte or native handle crossing the boundary.
 
+Annotation is a separate in-memory model. The receiver draws; a sender-only
+session only displays peer marks. A closed transport disables the pen and
+clears marks without ending consent. Coordinates are normalized to the capture
+frame and are not logged or stored.
+
 ## PR74 product flow
 
 The App Shell enters this Feature from a trusted LAN peer action or the global

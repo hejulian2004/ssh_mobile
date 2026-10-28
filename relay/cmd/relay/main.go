@@ -13,11 +13,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ssh-mobile/relay/internal/diagnostics"
 	"github.com/ssh-mobile/relay/internal/relay"
 )
 
 // main 加载环境配置并启动 Relay HTTP/WebSocket 服务。
 func main() {
+	if err := diagnostics.InstallFromEnvironment("relay"); err != nil {
+		log.Fatal("invalid development diagnostic configuration")
+	}
 	seedFile := flag.String("seed-enrollments", "", "path to a JSON array of enrollments to seed into storage before serving")
 	flag.Parse()
 

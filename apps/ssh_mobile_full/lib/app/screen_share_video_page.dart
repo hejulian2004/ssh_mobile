@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'screen_share_picture_in_picture.dart';
 import 'window_fullscreen_controller.dart';
 
 /// Presentation-only state; the caller keeps its media and session leases.
@@ -15,6 +17,9 @@ final class AppScreenShareVideoPage extends StatefulWidget {
     this.enableViewerControls = true,
     this.autoEnterFullscreen = false,
     this.onStop,
+    this.annotation,
+    this.allowPictureInPicture = false,
+    this.pictureInPicturePlatform,
     this.windowPlatform = const MethodChannelAppWindowPresentation(),
     super.key,
   });
@@ -25,6 +30,9 @@ final class AppScreenShareVideoPage extends StatefulWidget {
   final bool enableViewerControls;
   final bool autoEnterFullscreen;
   final VoidCallback? onStop;
+  final ScreenShareAnnotationSession? annotation;
+  final bool allowPictureInPicture;
+  final AppPictureInPicturePlatform? pictureInPicturePlatform;
   final AppWindowPresentationPlatform windowPlatform;
 
   @override
@@ -38,18 +46,36 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
   bool get _fullscreen => _window.fullscreen;
   int _quarterTurns = 0;
   bool _defaultFullscreenRequested = false;
+  bool _painting = false;
+  ScreenShareAnnotationTool _tool = ScreenShareAnnotationTool.pen;
+  ScreenShareAnnotationColor _color = ScreenShareAnnotationColor.red;
+  late final AppScreenSharePictureInPicture _pip;
 
   @override
   void initState() {
     super.initState();
     _window.addListener(_windowChanged);
+    _pip = AppScreenSharePictureInPicture(
+      platform:
+          widget.pictureInPicturePlatform ?? MethodChannelAppPictureInPicture(),
+    );
+    _pip.addListener(_pipChanged);
+    widget.videoSize.addListener(_onVideoSize);
+    _syncPictureInPicture();
     _enterDefaultFullscreen();
   }
 
   void _windowChanged() => setState(() {});
 
+  void _pipChanged() => setState(() {});
+
+  void _onVideoSize() => _syncPictureInPicture();
+
   @override
   void dispose() {
+    widget.videoSize.removeListener(_onVideoSize);
+    _pip.removeListener(_pipChanged);
+    _pip.dispose();
     _window.removeListener(_windowChanged);
     _window.dispose();
     super.dispose();
@@ -58,10 +84,15 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
   @override
   void didUpdateWidget(covariant AppScreenShareVideoPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoSize != widget.videoSize) {
+      oldWidget.videoSize.removeListener(_onVideoSize);
+      widget.videoSize.addListener(_onVideoSize);
+    }
     if (oldWidget.enableViewerControls && !widget.enableViewerControls) {
       unawaited(_window.setFullscreen(false));
     }
     _enterDefaultFullscreen();
+    _syncPictureInPicture();
   }
 
   void _enterDefaultFullscreen() {
@@ -86,9 +117,32 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
     }
   }
 
+  void _syncPictureInPicture() {
+    final size = widget.videoSize.value;
+    final valid =
+        widget.allowPictureInPicture &&
+        size != null &&
+        size.width.isFinite &&
+        size.height.isFinite &&
+        size.width > 0 &&
+        size.height > 0;
+    if (!valid) {
+      _pip.update(null);
+      return;
+    }
+    final odd = _quarterTurns.isOdd;
+    _pip.update(
+      AppPictureInPictureSession(
+        width: odd ? size.height : size.width,
+        height: odd ? size.width : size.height,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final chinese = Localizations.localeOf(context).languageCode == 'zh';
+    final compact = _pip.active;
     return PopScope(
       canPop: !_window.needsRestore && !_window.busy,
       onPopInvokedWithResult: (didPop, _) {
@@ -101,8 +155,10 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
         child: Focus(
           autofocus: true,
           child: Scaffold(
-            backgroundColor: _fullscreen ? Colors.black : Colors.transparent,
-            appBar: _fullscreen
+            backgroundColor: _fullscreen || compact
+                ? Colors.black
+                : Colors.transparent,
+            appBar: _fullscreen || compact
                 ? null
                 : AppBar(title: Text(chinese ? '屏幕共享' : 'Screen sharing')),
             body: Stack(
@@ -112,13 +168,30 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
                   children: [
                     Expanded(
                       child: Padding(
-                        padding: EdgeInsets.all(_fullscreen ? 0 : 16),
+                        padding: EdgeInsets.all(
+                          _fullscreen || compact ? 0 : 16,
+                        ),
                         child: ValueListenableBuilder<Size?>(
                           valueListenable: widget.videoSize,
                           builder: (context, size, _) {
+                            final annotation = widget.annotation;
                             final rotated = RotatedBox(
                               quarterTurns: _quarterTurns,
-                              child: widget.video,
+                              child: annotation == null
+                                  ? widget.video
+                                  : Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        widget.video,
+                                        if (!compact)
+                                          ScreenShareAnnotationCanvas(
+                                            session: annotation,
+                                            painting: _painting,
+                                            tool: _tool,
+                                            color: _color,
+                                          ),
+                                      ],
+                                    ),
                             );
                             final validSize =
                                 size != null &&
@@ -143,7 +216,7 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
                         ),
                       ),
                     ),
-                    if (!_fullscreen)
+                    if (!_fullscreen && !compact)
                       SafeArea(
                         top: false,
                         child: Padding(
@@ -153,7 +226,7 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
                       ),
                   ],
                 ),
-                if (_window.failure != null)
+                if (!compact && _window.failure != null)
                   Positioned(
                     bottom: 16,
                     left: 16,
@@ -187,7 +260,26 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
                       ),
                     ),
                   ),
-                if (widget.enableViewerControls)
+                if (!compact &&
+                    widget.annotation != null &&
+                    widget.enableViewerControls)
+                  Positioned(
+                    top: 16,
+                    left: 16,
+                    child: SafeArea(
+                      child: ScreenShareAnnotationToolbar(
+                        session: widget.annotation!,
+                        painting: _painting,
+                        tool: _tool,
+                        color: _color,
+                        onPainting: (value) =>
+                            setState(() => _painting = value),
+                        onTool: (value) => setState(() => _tool = value),
+                        onColor: (value) => setState(() => _color = value),
+                      ),
+                    ),
+                  ),
+                if (!compact && widget.enableViewerControls)
                   Positioned(
                     top: 16,
                     right: 16,
@@ -202,9 +294,10 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
                               tooltip: chinese ? '旋转画面' : 'Rotate view',
                               color: Colors.white,
                               icon: const Icon(Icons.rotate_right),
-                              onPressed: () => setState(
-                                () => _quarterTurns = (_quarterTurns + 1) % 4,
-                              ),
+                              onPressed: () => setState(() {
+                                _quarterTurns = (_quarterTurns + 1) % 4;
+                                _syncPictureInPicture();
+                              }),
                             ),
                             IconButton(
                               tooltip: _fullscreen

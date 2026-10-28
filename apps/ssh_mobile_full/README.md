@@ -57,6 +57,10 @@ Android 隐藏系统栏，退出时恢复先前的状态栏、导航栏可见性
 返回键或 Escape 先退出全屏，全屏中仍提供停止共享入口。原生切换期间禁用重复
 点击；路由关闭或共享结束会恢复窗口，迟到的进入结果也按原租约补偿。
 恢复失败保留原始快照并提供重试提示；没有原生能力时报告失败并允许正常返回。
+Android 接收端在画面尺寸有效且共享未结束时，用户离开应用会进入系统画中画。
+小窗只保留同一个 Flutter 纹理，隐藏控制条、涂鸦和全屏按钮，不新建 WebRTC
+会话或解码器。回到应用或共享停止后展开原页面。关闭小窗不会结束 Activity。
+发送端和 Windows 不进入画中画。
 
 窗口租约控制与 Android 快照仲裁分别有独立 Dart/JVM 回归；Win32 生命周期测试
 使用隐藏的固定测试窗口，检查全显示器范围、原样恢复与迟到释放保护。
@@ -111,6 +115,10 @@ Windows 接收端参数 `verify-window` 会检查原生全屏尺寸、恢复尺�
 Android → Windows，否则验证 Windows → Android。Windows 发送只选择探针自身的
 唯一 `SSH Mobile` 窗口，Android 发送仍需系统整屏录制授权。探针检查真实视频进度、
 关闭页面后继续传帧、重新打开复用端点，以及明确停止和对端停止后的清理。
+增加启动参数 `annotate`，或 `--dart-define=SCREEN_PROBE_ANNOTATE=true` 时，
+接收端在正式操作上画一条公开测试笔迹，发送端确认收到，并在清理前保留约二十五秒供截图；
+探针不记录坐标。方向同样接受 `--dart-define=SCREEN_PROBE_REVERSE=true`。
+Android 上以 dart-define 为准。
 测试期间可将 Android 退到公开的模拟器桌面，验证原生录屏服务继续运行；测试不读取
 或导出帧内容。仅使用公开测试画面，沿用上述模拟器端口映射并在完成后清理映射。
 接收页面还检查默认全屏、重新打开后的全屏及 Windows 页面关闭后的窗口恢复。
@@ -193,3 +201,10 @@ SSH 目标绑定与有界命令执行；后者返回 Route-owned Lease，并在�
 flutter analyze
 flutter test
 ```
+
+## Local development diagnostics
+
+Runtime output and agent queries follow the [local diagnostic contract](../../docs/agent/runtime-diagnostics.md).
+App composition roots inject `app_diagnostics` through public Core logging
+contracts; Feature dependencies remain unchanged. Development tools own launched
+processes and file queries, and are never imported by runtime packages.

@@ -1,6 +1,10 @@
 /// Public entry point for the screen-share consent Feature.
 library;
 
+export 'src/screen_share_annotation_canvas.dart';
+export 'src/screen_share_annotation_codec.dart';
+export 'src/screen_share_annotation_session.dart';
+export 'src/screen_share_annotation_toolbar.dart';
 export 'src/screen_share_controller.dart';
 export 'src/screen_share_intent_comparator.dart';
 export 'src/screen_share_models.dart';

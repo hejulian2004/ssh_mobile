@@ -162,6 +162,7 @@ pub(crate) fn command_peer_id(command: &NetworkCommand) -> Option<String> {
         Some(network_command::Payload::DiscardIncomingRealtimeOffer(command)) => {
             Some(command.peer_id.clone())
         }
+        Some(network_command::Payload::SendRealtimeApplicationData(_)) => None,
         Some(network_command::Payload::UpsertPeerV2(command)) => {
             command.config.as_ref().map(|config| config.peer_id.clone())
         }
@@ -303,6 +304,9 @@ async fn dispatch_command_payload(
         }
         Some(network_command::Payload::DiscardIncomingRealtimeOffer(discard)) => {
             crate::realtime::discard_incoming_offer(&state, discard).await
+        }
+        Some(network_command::Payload::SendRealtimeApplicationData(data)) => {
+            crate::realtime::send_application_data(&state, data).await
         }
         Some(network_command::Payload::ConfigureRelay(config)) => {
             start_configure_relay(state, config).await

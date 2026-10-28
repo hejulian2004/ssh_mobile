@@ -32,9 +32,15 @@ workspace:
   - packages/infrastructure/realtime_media_android
   - packages/infrastructure/realtime_media_windows
   - packages/infrastructure/ssh_core
+  - packages/infrastructure/app_diagnostics
   - packages/infrastructure/ssh_mobile_network_native
 
 dev_dependencies:
+  test: 1.31.1
+  app_core:
+    path: packages/core/app_core
+  app_diagnostics:
+    path: packages/infrastructure/app_diagnostics
   melos: ^8.2.2
   # Used by tool/gen_telemetry_contract.dart and
   # tool/check_telemetry_contract_generated.dart to read the YAML contract

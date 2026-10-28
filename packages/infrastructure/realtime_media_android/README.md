@@ -9,7 +9,10 @@ SurfaceTexture resources. A small JNI bridge invokes the existing native-only
 owner-token ABI; encoded H.264 never enters Dart.
 
 The Dart method channel carries bounded endpoint identity, source metadata,
-projection/lifecycle commands, opaque texture IDs, and low-frequency counters.
+projection/lifecycle commands, opaque texture IDs, low-frequency counters, and
+normalized guidance-path snapshots. The guidance window uses
+`SYSTEM_ALERT_WINDOW`, does not receive touches, and is removed with the
+capture foreground service. Denying that permission does not stop capture.
 No runtime pointer, raw/encoded frame, `Uint8List` media API, or Surface handle
 is exposed. Automatic mode is the default: hardware candidates precede software
 H.264. Explicit CPU mode selects software

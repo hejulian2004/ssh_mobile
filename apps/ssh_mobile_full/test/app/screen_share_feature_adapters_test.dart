@@ -218,6 +218,19 @@ final class _FakeRealtimeSession implements RealtimeSession {
       onSendConsent(value);
 
   @override
+  bool get applicationChannelOpen => false;
+
+  @override
+  Stream<bool> get applicationChannelEvents => const Stream<bool>.empty();
+
+  @override
+  Stream<Uint8List> get applicationData => const Stream<Uint8List>.empty();
+
+  @override
+  Future<SdkResult<void>> sendApplicationData(Uint8List payload) async =>
+      const SdkSuccess<void>(null);
+
+  @override
   Future<SdkResult<void>> start() async => const SdkSuccess<void>(null);
 
   @override

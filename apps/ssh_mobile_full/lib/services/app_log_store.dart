@@ -275,6 +275,23 @@ extension AppLogServiceDatabaseStore on AppLogService {
     String? details,
     bool captureSource = true,
     String? sourceLocation,
+  }) => _add(
+    level,
+    message,
+    stackTrace: stackTrace,
+    details: details,
+    captureSource: captureSource,
+    sourceLocation: sourceLocation,
+  );
+
+  void _add(
+    String level,
+    String message, {
+    StackTrace? stackTrace,
+    String? details,
+    bool captureSource = true,
+    String? sourceLocation,
+    app_core.LogRecord? structuredRecord,
   }) {
     final safeMessage = _redact(message);
     final safeDetails = details == null ? null : _redact(details);
@@ -295,6 +312,35 @@ extension AppLogServiceDatabaseStore on AppLogService {
     _entries.add(entry);
     _invalidateCaches();
     _scheduleNotify();
+
+    // Only the local stream receives legacy records. Structured records retain
+    // their timestamp/correlation and are emitted once, before legacy projection.
+    final diagnostic =
+        structuredRecord ??
+        app_core.LogRecord(
+          timestamp: entry.time,
+          level: switch (AppLogLevel.fromName(level)) {
+            AppLogLevel.error ||
+            AppLogLevel.flutter ||
+            AppLogLevel.platform => app_core.LogLevel.error,
+            AppLogLevel.warning => app_core.LogLevel.warning,
+            AppLogLevel.debug => app_core.LogLevel.debug,
+            _ => app_core.LogLevel.info,
+          },
+          message: safeMessage,
+          source: sourceLocation,
+          details: safeDetails,
+          stackTrace: safeStackTrace == null
+              ? null
+              : StackTrace.fromString(safeStackTrace),
+        );
+    for (final sink in List<app_core.LogSink>.of(_localSinks)) {
+      try {
+        sink.write(diagnostic);
+      } catch (_) {
+        /* Local output is best effort. */
+      }
+    }
 
     // 磁盘写入保持异步，避免日志路径阻塞 SSH、UI 或启动流程。
     unawaited(_writeToDisk(entry.text));

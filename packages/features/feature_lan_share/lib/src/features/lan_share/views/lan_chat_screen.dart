@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,6 +13,7 @@ import '../viewmodels/lan_ui_outcome.dart';
 import '../viewmodels/lan_share_viewmodel.dart';
 import 'lan_preview_viewer_screen.dart';
 import 'lan_text_selection_screen.dart';
+import 'widgets/lan_outgoing_file_status.dart';
 
 class LanChatScreen extends StatefulWidget {
   final String targetDeviceId;
@@ -1055,6 +1058,22 @@ class _LanChatScreenState extends State<LanChatScreen> {
               ],
             ),
           ],
+          LanOutgoingFileStatus(
+            message: msg,
+            strings: strings,
+            foreground: subColor,
+            onRetry: () {
+              unawaited(
+                retryOutgoingLanFile(
+                  context: context,
+                  strings: strings,
+                  viewModel: vm,
+                  message: msg,
+                  discovery: device,
+                ),
+              );
+            },
+          ),
         ],
       ),
     );

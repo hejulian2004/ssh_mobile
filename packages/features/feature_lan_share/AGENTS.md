@@ -68,7 +68,11 @@
 - Network V2 transfer events (`Progress`/`Completed`/`Failed`) require authoritative
   `peerId`; missing/mismatched IDs fail closed, never use `transferId` alone.
   App↔App binary image/video/audio/file uses Native Network V2 regular-file
-  transfer; directory/multi-file and `/api/lan/upload` are rejected. Browser
+  transfer; directory/multi-file and `/api/lan/upload` are rejected. Outgoing
+  media history stores the sender source path. A failed or cancelled outgoing
+  image/video/audio/file can be retried in place when that file still exists
+  and the stored failure is retryable or unknown; retry reuses the history id,
+  resets progress, and clears the stored reason. Browser
   WebShare alone may use authenticated/encrypted `POST /api/web/upload`, with
   bounded cleanup, and it is never an App transfer fallback. Text/clipboard use
   authenticated LAN HTTPS + application E2E with no plaintext toggle.

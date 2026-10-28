@@ -49,6 +49,8 @@ void main() {
     expect(chinese['isEnglish'], 'false');
     expect(english['isEnglish'], 'true');
     expect(chinese['retry'], '重试');
+    expect(chinese['lanShareFailed'], '失败');
+    expect(english['lanShareFailed'], 'Failed');
     expect(chinese['filePreviewTooLargeHint'], contains('1 KB'));
     expect(english['filePreviewTooLargeHintMb'], contains('1 MB'));
     expect(chinese['networkIncomingTransferDescription'], contains('设备 peer'));
@@ -339,6 +341,7 @@ Map<String, String> _read(NetworkLanStrings strings) {
     'lanShareDeviceOfflineHint': strings.lanShareDeviceOfflineHint,
     'lanShareDragDropHint': strings.lanShareDragDropHint,
     'lanShareExport': strings.lanShareExport,
+    'lanShareFailed': strings.lanShareFailed,
     'lanShareFileExpired': strings.lanShareFileExpired,
     'lanShareForgetConfirm': strings.lanShareForgetConfirm,
     'lanShareForgetConfirmMessage': strings.lanShareForgetConfirmMessage,

@@ -1,4 +1,4 @@
-最新更新时间：2026-10-09
+最新更新时间：2026-10-23
 
 # ssh_mobile_ssh
 
@@ -59,3 +59,10 @@ flutter test
 - 生命周期与资源 Owner：Runtime 负责 App Scope；Module 负责终端数据库；
   Route Scope 负责页面资源。单项清理失败仍继续释放后续 Owner。
 - 测试命令：`flutter pub deps`、`flutter analyze`、`flutter test`。
+
+## Local development diagnostics
+
+Runtime output and agent queries follow the [local diagnostic contract](../../docs/agent/runtime-diagnostics.md).
+App composition roots inject `app_diagnostics` through public Core logging
+contracts; Feature dependencies remain unchanged. Development tools own launched
+processes and file queries, and are never imported by runtime packages.

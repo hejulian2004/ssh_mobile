@@ -8,8 +8,9 @@
   subscriptions only. It does not own a Realtime session, native runtime,
   endpoint, capture source, codec, surface or texture.
 - Cross-layer access uses the public `ScreenShareConsentPort` and
-  `ScreenShareMediaPort` contracts. There is no FFI, WebRTC, SDP, ICE, socket,
-  native handle or encoded-frame dependency in this package.
+  `ScreenShareMediaPort` contracts. Annotation uses an injected byte transport.
+  There is no FFI, WebRTC, SDP, ICE, socket, native handle or encoded-frame
+  dependency in this package. Marks are not consent signals and are not stored.
 - A media operation is bound to `(realtimeId, generation, operationId)`.
   Stale consent and late platform events are ignored. An incoming request never
   starts capture before explicit acceptance and media readiness.

@@ -3,7 +3,7 @@ name: ssh-mobile-maintenance
 description: Maintain and debug SSH Mobile (Flutter/Dart, Rust SDK, Relay/Admin, React, tests, docs, and Agent guidance).
 ---
 
-> Last updated: 2026-08-31
+> Last updated: 2026-10-23
 
 # SSH Mobile Maintenance
 
@@ -22,6 +22,10 @@ contract, preserve compatibility bridges until their inventory permits removal,
 and do not invent a protocol/version rule absent an owning ADR or contract.
 
 ## Scope and safety
+
+For local runtime log collection/query and reproduction, use
+[`ssh-mobile-logs`](../ssh-mobile-logs/SKILL.md). Its tooling reuses the public
+logging/redaction boundary; it does not authorize unrelated code changes.
 
 - Classify the request (explain/review, diagnose, implement, monitor). A review
   or diagnosis does not receive an unsolicited implementation.

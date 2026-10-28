@@ -1,4 +1,4 @@
-最新更新时间：2026-08-24
+最新更新时间：2026-10-23
 
 # ssh_mobile_terminal
 
@@ -44,3 +44,10 @@ flutter test
   负责 ViewModel 和页面资源。Runtime 清理单项失败仍继续释放后续 Owner，最后
   重新抛出第一个错误。
 - 测试命令：`flutter pub deps`、`flutter analyze`、`flutter test`。
+
+## Local development diagnostics
+
+Runtime output and agent queries follow the [local diagnostic contract](../../docs/agent/runtime-diagnostics.md).
+App composition roots inject `app_diagnostics` through public Core logging
+contracts; Feature dependencies remain unchanged. Development tools own launched
+processes and file queries, and are never imported by runtime packages.

@@ -61,11 +61,25 @@ abstract interface class NativeNetworkHandle
 /// 默认的 ssh_mobile_network_native adapter。
 final class SshMobileNativeNetworkAdapter implements NativeNetworkAdapter {
   /// 创建无状态 adapter；真正的 native handle 由 [create] 延迟创建。
-  const SshMobileNativeNetworkAdapter();
+  const SshMobileNativeNetworkAdapter({
+    this.diagnosticDirectory,
+    this.diagnosticRunId,
+  });
+
+  /// Optional local output; supplying it does not create a handle eagerly.
+  final String? diagnosticDirectory;
+  final String? diagnosticRunId;
 
   @override
   Future<NativeNetworkHandle> create() async {
-    final runtime = await const SshMobileNetworkNative().createRuntime();
+    final runtime = await const SshMobileNetworkNative().createRuntime(
+      diagnostics: diagnosticDirectory == null || diagnosticRunId == null
+          ? null
+          : NativeDiagnosticOptions(
+              directory: diagnosticDirectory!,
+              runId: diagnosticRunId!,
+            ),
+    );
     return _SshMobileNativeNetworkHandle(runtime);
   }
 }

@@ -22,6 +22,7 @@ pub(crate) use peer::{
     emit_peer_state_profile,
 };
 pub(crate) use realtime::{
+    emit_realtime_application_channel, emit_realtime_application_data,
     emit_realtime_incoming_session_offer, emit_realtime_signal, emit_realtime_snapshot,
     emit_realtime_state, RealtimeIncomingSessionOfferMetadata, RealtimeSessionIdentity,
 };

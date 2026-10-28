@@ -1,4 +1,4 @@
-> Last updated: 2026-10-23
+> Last updated: 2026-10-28
 
 # LAN Share Feature Memory
 
@@ -21,7 +21,14 @@ metadata/current discovery while preserving history and future rediscovery.
 pairing, capabilities, authenticated control HTTPS/WebSocket, Web Share, Relay
 enrollment/orchestration, transfer history, non-secret metadata, and
 `lan_share.db`. Binary App↔App payloads use Native Network Protocol V2 Transfer;
-text/clipboard use authenticated LAN HTTPS + application E2E. Browser WebShare
+text/clipboard use authenticated LAN HTTPS + application E2E. Outgoing
+image/video/audio/file history stores the sender source path in `localPath`
+and exposes `failureReason`. A failed or cancelled outgoing media row can be
+retried in place when that file still exists and the reason is retryable or
+unknown. Retry reuses the history id, resets progress, and clears the stored
+reason. Native `SendFile` acceptance returns after cheap validation; full-file
+hashing and route selection run afterward, and those failures arrive as
+`TransferFailed`. Browser WebShare
 uses the isolated authenticated/encrypted `POST /api/web/upload` boundary only
 because browsers cannot run Native Network V2; it is never an App-transfer
 fallback.

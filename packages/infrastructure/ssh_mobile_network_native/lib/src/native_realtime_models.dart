@@ -173,6 +173,46 @@ final class NativeRealtimeSignalEvent extends NativeNetworkEvent {
   final Uint8List payload;
 }
 
+/// Opaque application bytes from the session DataChannel.
+final class NativeRealtimeApplicationDataEvent extends NativeNetworkEvent {
+  NativeRealtimeApplicationDataEvent({
+    required super.eventId,
+    required super.timestampMs,
+    required super.protocolVersion,
+    required this.realtimeId,
+    required this.peerId,
+    required this.generation,
+    required this.sharedSessionInstanceId,
+    required Uint8List payload,
+  }) : payload = Uint8List.fromList(payload);
+
+  final String realtimeId;
+  final String peerId;
+  final int generation;
+  final String sharedSessionInstanceId;
+  final Uint8List payload;
+}
+
+/// Whether the session DataChannel is open for application bytes.
+final class NativeRealtimeApplicationChannelEvent extends NativeNetworkEvent {
+  const NativeRealtimeApplicationChannelEvent({
+    required super.eventId,
+    required super.timestampMs,
+    required super.protocolVersion,
+    required this.realtimeId,
+    required this.peerId,
+    required this.generation,
+    required this.sharedSessionInstanceId,
+    required this.open,
+  });
+
+  final String realtimeId;
+  final String peerId;
+  final int generation;
+  final String sharedSessionInstanceId;
+  final bool open;
+}
+
 /// Stable business identity for a logical ReliableStream.
 ///
 /// `streamId` is only unique within the opener device namespace.
