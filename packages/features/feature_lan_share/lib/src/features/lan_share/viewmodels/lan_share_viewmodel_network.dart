@@ -77,11 +77,29 @@ extension LanShareViewModelNetworkEvents on LanShareViewModel {
                   LanTransferStatus.completed.toJson(),
                   localPath: adoptedFile.path,
                 );
+                _emitNotification(
+                  incomingTransferTerminalNotification(
+                    isIncoming: true,
+                    succeeded: true,
+                    transferId: transferId,
+                    peerId: record.senderId,
+                    displayName: record.senderAlias,
+                  ),
+                );
               } catch (error) {
                 await historyDao.updateRecordStatus(
                   transferId,
                   LanTransferStatus.failed.toJson(),
                   failureReason: NetworkErrorCode.ioError.name,
+                );
+                _emitNotification(
+                  incomingTransferTerminalNotification(
+                    isIncoming: true,
+                    succeeded: false,
+                    transferId: transferId,
+                    peerId: record.senderId,
+                    displayName: record.senderAlias,
+                  ),
                 );
               }
             } else {
@@ -89,6 +107,15 @@ extension LanShareViewModelNetworkEvents on LanShareViewModel {
                 transferId,
                 LanTransferStatus.completed.toJson(),
                 localPath: localPath.isEmpty ? null : localPath,
+              );
+              _emitNotification(
+                incomingTransferTerminalNotification(
+                  isIncoming: record.isIncoming,
+                  succeeded: true,
+                  transferId: transferId,
+                  peerId: record.senderId,
+                  displayName: record.senderAlias,
+                ),
               );
             }
           }),
@@ -98,11 +125,23 @@ extension LanShareViewModelNetworkEvents on LanShareViewModel {
         _trackBackgroundOperation(
           _enqueueMessagePersistence(transferId, () async {
             if (!await _eventMatchesRecordPeer(transferId, peerId)) return;
+            final record = await historyDao.getRecord(transferId);
             await historyDao.updateRecordStatus(
               transferId,
               LanTransferStatus.failed.toJson(),
               failureReason: error.code.name,
             );
+            if (record != null) {
+              _emitNotification(
+                incomingTransferTerminalNotification(
+                  isIncoming: record.isIncoming,
+                  succeeded: false,
+                  transferId: transferId,
+                  peerId: record.senderId,
+                  displayName: record.senderAlias,
+                ),
+              );
+            }
           }),
           'LAN transfer failure persistence failed',
         );

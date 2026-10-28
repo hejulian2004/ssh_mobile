@@ -14,6 +14,8 @@ dependencies:
     sdk: flutter
   app_core:
     path: ../../packages/core/app_core
+  app_notifications:
+    path: ../../packages/infrastructure/app_notifications
   app_ui:
     path: ../../packages/core/app_ui
   cryptography: ^2.9.0

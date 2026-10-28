@@ -170,6 +170,64 @@ void main() {
     },
   );
 
+  test('incoming text and clipboard publish one notification event', () async {
+    final fixture = _Fixture();
+    addTearDown(fixture.close);
+    final events = <LanNotificationEvent>[];
+    final subscription = fixture.vm.notificationEvents.listen(events.add);
+    addTearDown(subscription.cancel);
+    await fixture.vm.initialize();
+
+    LanMessage incoming(
+      LanPayloadType type,
+      String id, {
+      bool recalled = false,
+    }) {
+      return LanMessage(
+        id: id,
+        senderId: 'peer',
+        senderAlias: 'Phone',
+        receiverId: 'local',
+        payloadType: type,
+        textContent: 'hello secret',
+        createdAt: DateTime.utc(2026),
+        isIncoming: true,
+        isRecalled: recalled,
+      );
+    }
+
+    fixture.transfer.handleIncomingMessageFromWeb(
+      incoming(LanPayloadType.text, 'text-1'),
+    );
+    await pumpEventQueue();
+    expect(events, hasLength(1));
+    expect(events.single.kind, LanNotificationKind.message);
+    expect(events.single.businessId, 'text-1');
+    expect(events.single.displayName, 'Phone');
+    expect(events.single.toString(), isNot(contains('hello secret')));
+
+    fixture.transfer.handleIncomingMessageFromWeb(
+      incoming(LanPayloadType.image, 'image-1'),
+    );
+    fixture.transfer.handleIncomingMessageFromWeb(
+      incoming(LanPayloadType.text, 'recalled-1', recalled: true),
+    );
+    fixture.transfer.handleIncomingMessageFromWeb(
+      incoming(
+        LanPayloadType.text,
+        'outgoing-shaped',
+      ).copyWith(isIncoming: false, senderId: 'local', receiverId: 'peer'),
+    );
+    fixture.transfer.handleIncomingMessageFromWeb(
+      incoming(LanPayloadType.clipboard, 'clip-1'),
+    );
+    await pumpEventQueue();
+    expect(events.map((event) => event.businessId).toSet(), {
+      'text-1',
+      'clip-1',
+    });
+  });
+
   test(
     'listener failure remains visible and shutdown still releases its owner',
     () async {

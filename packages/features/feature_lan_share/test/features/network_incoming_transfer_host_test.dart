@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:feature_lan_share/src/domain/lan_page_outcome.dart';
 import 'package:feature_lan_share/src/domain/lan_share_ports.dart';
+import 'package:feature_lan_share/src/features/lan_share/notifications/lan_system_notification.dart';
 import 'package:feature_lan_share/src/features/lan_share/views/network_incoming_transfer_host.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -353,4 +354,43 @@ void main() {
       expect(find.byType(IncomingApprovalDialog), findsNothing);
     },
   );
+
+  test('incoming file request queues one redacted notification', () {
+    final pending = <IncomingApprovalRequest>[];
+    final request = IncomingApprovalRequest(
+      sessionId: 'secret-file',
+      senderId: 'peer-a',
+      fileName: 'secret-file.bin',
+      totalBytes: 1,
+      expiresAt: DateTime.now().add(const Duration(minutes: 5)),
+      accept: () async => const LanUiOutcome<void>.success(),
+      reject: () async => const LanUiOutcome<void>.success(),
+    );
+
+    final first = decideIncomingTransferNotification(pending, request);
+    final duplicate = decideIncomingTransferNotification(pending, request);
+    final expired = decideIncomingTransferNotification(
+      pending,
+      IncomingApprovalRequest(
+        sessionId: 'other',
+        senderId: 'peer-a',
+        fileName: 'secret-file.bin',
+        totalBytes: 1,
+        expiresAt: DateTime.now().subtract(const Duration(seconds: 1)),
+        accept: request.accept,
+        reject: request.reject,
+      ),
+    );
+
+    expect(first.queued, isTrue);
+    expect(first.event?.kind, LanNotificationKind.transferRequest);
+    expect(first.event?.businessId, 'secret-file');
+    expect(first.event?.peerId, 'peer-a');
+    expect(first.event?.displayName, isNull);
+    expect(first.event.toString(), isNot(contains('secret-file.bin')));
+    expect(duplicate.queued, isFalse);
+    expect(duplicate.event, isNull);
+    expect(expired.queued, isFalse);
+    expect(pending, hasLength(1));
+  });
 }

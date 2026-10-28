@@ -89,6 +89,7 @@ extension LanReceiverCoordinatorLifecycle on LanReceiverCoordinator {
         }
       }
       _viewModel = viewModel;
+      _notifyListeners();
       return viewModel;
     } catch (_) {
       viewModel?.dispose();

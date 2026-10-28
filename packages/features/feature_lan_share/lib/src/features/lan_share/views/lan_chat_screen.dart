@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../../domain/lan_share_ports.dart';
 import '../../../services/lan_share/lan_share_models.dart';
 import 'package:app_ui/app_ui.dart';
+import '../notifications/lan_visible_chat.dart';
 import '../viewmodels/lan_ui_outcome.dart';
 import '../viewmodels/lan_share_viewmodel.dart';
 import 'lan_preview_viewer_screen.dart';
@@ -34,6 +35,7 @@ class _LanChatScreenState extends State<LanChatScreen> {
   bool _isPaired = false;
   bool _isCheckingPairing = true;
   LanShareScreenSharePort? _screenSharePort;
+  LanVisibleChat? _visibleChat;
 
   @override
   void initState() {
@@ -48,6 +50,23 @@ class _LanChatScreenState extends State<LanChatScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _screenSharePort ??= widget.screenSharePort ?? _tryReadScreenSharePort();
+    _claimVisiblePeer();
+  }
+
+  void _claimVisiblePeer() {
+    if (_visibleChat != null) return;
+    final chat = _readVisibleChat(context);
+    if (chat == null) return;
+    _visibleChat = chat;
+    chat.claim(widget.targetDeviceId);
+  }
+
+  LanVisibleChat? _readVisibleChat(BuildContext context) {
+    try {
+      return Provider.of<LanVisibleChat>(context, listen: false);
+    } on ProviderNotFoundException {
+      return null;
+    }
   }
 
   LanShareScreenSharePort? _tryReadScreenSharePort() {
@@ -69,6 +88,7 @@ class _LanChatScreenState extends State<LanChatScreen> {
 
   @override
   void dispose() {
+    _visibleChat?.release(widget.targetDeviceId);
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();

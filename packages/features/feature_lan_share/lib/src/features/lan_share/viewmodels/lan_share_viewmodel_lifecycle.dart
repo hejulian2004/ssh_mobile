@@ -66,7 +66,10 @@ extension LanShareViewModelLifecycle on LanShareViewModel {
     _incomingMessageSubscription = transferService.incomingMessageStream.listen(
       (msg) {
         _trackBackgroundOperation(
-          _enqueueMessagePersistence(msg.id, () => _saveMessageToDb(msg)),
+          _enqueueMessagePersistence(msg.id, () async {
+            await _saveMessageToDb(msg);
+            _emitNotification(incomingMessageNotification(msg));
+          }),
           'LAN incoming history persistence failed',
         );
       },

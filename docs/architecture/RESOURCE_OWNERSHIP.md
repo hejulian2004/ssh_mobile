@@ -1,4 +1,4 @@
-最新更新时间：2026-10-23
+最新更新时间：2026-10-28
 
 # 资源 Owner 审计
 
@@ -11,6 +11,7 @@
 | AppLogger | `AppRuntime` → `AppLogService` | App | `dispose` last; cancels UI notification timer; does not close the log DB |
 | AppLogDatabase | binder via `AppLogService.setDatabase` (not closed by `AppLogService.dispose`) | App | `detachDatabase` drains writes, then `dispose` closes Drift handle (idempotent) |
 | AppSettings | `AppRuntime` | App | `dispose` cancels listeners and pending work |
+| System notification plugin | Full App and Network App `SystemNotificationScope` through one `AppNotificationCenter.shared` | App process | one plugin `initialize` per process; Features publish events and do not close the plugin |
 | App startup initializers | `AppRuntimeInitializationOwner` → `AppRuntime` | App/Startup | register lazily; start after Runtime commit; construction rollback cancels in reverse and closes late diagnostics after bounded wait |
 | ConnectionDatabase | `AppRuntime` / Connection Core | App | await repository init, then `close` |
 | NetworkRuntime | `AppRuntime` | App | `dispose` after SSH/SFTP stop |

@@ -1,4 +1,4 @@
-最新更新时间：2026-10-23
+最新更新时间：2026-10-28
 
 # ssh_mobile_full 维护约束
 
@@ -22,6 +22,10 @@
 
 ## Scope, dependencies, and API
 
+- `LanSystemNotificationHost` owns the process notification center for this
+  app, using `AppNotificationIdentity.full`. It may resume the app or open an
+  existing LAN chat. It must not accept a file transfer or screen share from a
+  notification click. SSH foreground and client-tool channels stay distinct.
 - Allowed: App Shell/`AppRuntime`, route aggregation, Port adapters, retained
   compatibility bridges, App `network_sdk`/`SdkRequestExecutor` request,
   Bootstrap/auth assembly, App tests, startup configuration, and platform

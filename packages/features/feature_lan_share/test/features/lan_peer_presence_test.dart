@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:io';
 
+import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
 import 'package:feature_lan_share/feature_lan_share.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -194,6 +194,98 @@ void main() {
       final rediscovered = fixture.vm.peerStateFor('peer')!;
       expect(rediscovered.isOnline, isTrue);
       expect(rediscovered.isTrusted, isFalse);
+    },
+  );
+
+  test(
+    'incoming transfer terminal states publish one notification each',
+    () async {
+      final fixture = await _Fixture.create();
+      addTearDown(fixture.close);
+      await fixture.vm.initialize();
+      final events = <LanNotificationEvent>[];
+      final subscription = fixture.vm.notificationEvents.listen(events.add);
+      addTearDown(subscription.cancel);
+      await fixture.database.lanHistoryDao.insertRecord(
+        LanTransferRecordsCompanion.insert(
+          id: 'tx-in',
+          senderId: 'peer',
+          senderAlias: 'Phone',
+          receiverId: 'test-device',
+          payloadType: 'file',
+          status: 'transferring',
+          createdAt: 1,
+          isIncoming: const Value(true),
+        ),
+      );
+      await fixture.database.lanHistoryDao.insertRecord(
+        LanTransferRecordsCompanion.insert(
+          id: 'tx-out',
+          senderId: 'test-device',
+          senderAlias: 'Me',
+          receiverId: 'peer',
+          payloadType: 'file',
+          status: 'transferring',
+          createdAt: 2,
+          isIncoming: const Value(false),
+        ),
+      );
+
+      fixture.facade.controller.add(
+        TransferProgress(
+          eventId: 'progress',
+          timestamp: DateTime.utc(2026),
+          transferId: 'tx-in',
+          peerId: 'peer',
+          bytesTransferred: 1,
+          totalBytes: 4,
+        ),
+      );
+      await pumpEventQueue();
+      expect(events, isEmpty);
+
+      fixture.facade.controller.add(
+        TransferCompleted(
+          eventId: 'done',
+          timestamp: DateTime.utc(2026),
+          transferId: 'tx-in',
+          peerId: 'peer',
+          localPath: '',
+        ),
+      );
+      await pumpEventQueue();
+      expect(events.map((event) => event.kind), [
+        LanNotificationKind.transferSucceeded,
+      ]);
+      expect(events.single.displayName, 'Phone');
+
+      fixture.facade.controller.add(
+        TransferFailed(
+          eventId: 'fail',
+          timestamp: DateTime.utc(2026),
+          transferId: 'tx-in',
+          peerId: 'peer',
+          error: const NetworkError(
+            code: NetworkErrorCode.ioError,
+            message: 'disk',
+            operation: NetworkOperation.respondToIncoming,
+          ),
+        ),
+      );
+      fixture.facade.controller.add(
+        TransferCompleted(
+          eventId: 'out',
+          timestamp: DateTime.utc(2026),
+          transferId: 'tx-out',
+          peerId: 'peer',
+          localPath: '',
+        ),
+      );
+      await pumpEventQueue();
+      expect(events.map((event) => event.kind), [
+        LanNotificationKind.transferSucceeded,
+        LanNotificationKind.transferFailed,
+      ]);
     },
   );
 }

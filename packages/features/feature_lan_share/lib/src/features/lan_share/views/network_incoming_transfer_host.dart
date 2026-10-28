@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../domain/lan_share_ports.dart';
+import '../notifications/lan_system_notification.dart';
 import '../services/lan_receiver_coordinator.dart';
 import '../viewmodels/lan_ui_outcome.dart';
 
@@ -62,12 +63,12 @@ class _NetworkIncomingTransferHostState
 
   /// 将不重复的传入审批请求加入队列。
   void _handleRequest(IncomingApprovalRequest request) {
-    if (!mounted ||
-        request.isExpired ||
-        _pending.any((item) => item.sessionId == request.sessionId)) {
-      return;
-    }
-    _pending.add(request);
+    if (!mounted) return;
+    final decision = decideIncomingTransferNotification(_pending, request);
+    if (!decision.queued) return;
+    final event = decision.event;
+    final port = _readNotificationPort(context);
+    if (event != null && port != null) unawaited(port.present(event));
     unawaited(_showNext());
   }
 
@@ -368,6 +369,47 @@ class IncomingApprovalRequest {
 
   /// 此审批请求是否已过期。
   bool get isExpired => DateTime.now().isAfter(expiresAt);
+}
+
+/// 新的传入审批是否入队，以及对应的脱敏通知。
+final class IncomingTransferNotificationDecision {
+  const IncomingTransferNotificationDecision._({
+    required this.queued,
+    this.event,
+  });
+
+  final bool queued;
+  final LanNotificationEvent? event;
+}
+
+/// 将 [request] 入队一次，并返回不含文件名的通知。
+///
+/// 已过期的申请和重复的 session id 不会入队。调用方仍需自行展示原有审批界面。
+IncomingTransferNotificationDecision decideIncomingTransferNotification(
+  List<IncomingApprovalRequest> pending,
+  IncomingApprovalRequest request,
+) {
+  if (request.isExpired ||
+      pending.any((item) => item.sessionId == request.sessionId)) {
+    return const IncomingTransferNotificationDecision._(queued: false);
+  }
+  pending.add(request);
+  return IncomingTransferNotificationDecision._(
+    queued: true,
+    event: transferRequestNotification(
+      sessionId: request.sessionId,
+      peerId: request.senderId,
+      expired: request.isExpired,
+    ),
+  );
+}
+
+LanSystemNotificationPort? _readNotificationPort(BuildContext context) {
+  try {
+    return Provider.of<LanSystemNotificationPort>(context, listen: false);
+  } on ProviderNotFoundException {
+    return null;
+  }
 }
 
 String _formatByteCount(int bytes) {
