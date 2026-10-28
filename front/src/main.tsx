@@ -10,6 +10,10 @@ import '@fontsource/ibm-plex-sans/600.css';
 import '@fontsource/ibm-plex-sans/700.css';
 import { App } from './app';
 import './styles.css';
+import { installBrowserDiagnostics } from './diagnostics/browser';
+
+const releaseDiagnostics = installBrowserDiagnostics();
+if (import.meta.hot) import.meta.hot.dispose(releaseDiagnostics);
 
 const queryClient = new QueryClient({
   defaultOptions: {

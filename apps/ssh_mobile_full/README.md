@@ -197,3 +197,10 @@ SSH 目标绑定与有界命令执行；后者返回 Route-owned Lease，并在�
 flutter analyze
 flutter test
 ```
+
+## Local development diagnostics
+
+Runtime output and agent queries follow the [local diagnostic contract](../../docs/agent/runtime-diagnostics.md).
+App composition roots inject `app_diagnostics` through public Core logging
+contracts; Feature dependencies remain unchanged. Development tools own launched
+processes and file queries, and are never imported by runtime packages.

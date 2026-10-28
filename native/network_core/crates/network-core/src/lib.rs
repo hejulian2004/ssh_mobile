@@ -10,6 +10,7 @@ pub mod connection;
 pub(crate) mod crypto;
 mod crypto_handshake;
 pub mod delivery;
+pub mod diagnostics;
 mod discovery;
 mod errors;
 mod events;

@@ -112,6 +112,8 @@ final class _AppRuntimeFactoryContext {
 
   Future<AppRuntime> create() async {
     logger = suppliedAppLogService ?? AppLogService();
+    final diagnostics = DiagnosticFileSink.fromEnvironment('flutter');
+    if (diagnostics != null) logger.addLocalSink(diagnostics);
     cleanup = _CleanupStack(observer: lifecycleObserver);
     pendingInitialization = AppRuntimeInitializationOwner(
       onError: (description, error, stackTrace) {
@@ -120,6 +122,7 @@ final class _AppRuntimeFactoryContext {
     );
     if (disposeLogger) {
       cleanup.add(logger.dispose, priority: _CleanupPriority.logger);
+      cleanup.add(logger.closeLocalSinks, priority: _CleanupPriority.logger);
     }
 
     try {

@@ -1,4 +1,4 @@
-> Last updated: 2026-08-31
+> Last updated: 2026-10-23
 
 # SSH Mobile Relay Admin & Observability Console
 
@@ -79,3 +79,10 @@ temporary directory for each run, redacts credentials, and is never committed.
 The Docker image is built by `Dockerfile` and serves the Vite output through
 Nginx. Do not store administrator sessions or Enrollment Tokens in browser
 storage or URLs.
+
+## Local development diagnostics
+
+Runtime output and agent queries follow the [local diagnostic contract](../docs/agent/runtime-diagnostics.md).
+App composition roots inject `app_diagnostics` through public Core logging
+contracts; Feature dependencies remain unchanged. Development tools own launched
+processes and file queries, and are never imported by runtime packages.

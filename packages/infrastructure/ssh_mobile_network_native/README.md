@@ -1,4 +1,4 @@
-> Last updated: 2026-10-13
+> Last updated: 2026-10-23
 
 # SSH Mobile Network Native
 
@@ -152,3 +152,11 @@ cargo test -p network-webrtc --locked -- --ignored relay_only_drivers_exchange_d
 - 生命周期与资源 Owner：调用方拥有 `NativeNetworkRuntime`；必须先停止 helper
   isolate，再销毁 Rust handle，并保持 stop/destroy 幂等。
 - 测试命令：`dart analyze`、`dart test`、Cargo format/test/clippy 检查。
+
+## Local development diagnostics
+
+Runtime output and agent queries follow the [local diagnostic contract](../../../docs/agent/runtime-diagnostics.md).
+App composition roots inject `app_diagnostics` through public Core logging
+contracts; Feature dependencies remain unchanged. Development tools own launched
+processes and file queries, and are never imported by runtime packages.
+The optional NativeDiagnosticOptions argument to createRuntime owns local output per native runtime. The additive creation ABI leaves Network Protocol V2 commands/events unchanged.

@@ -10,6 +10,8 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 import 'src/native_operation_status.dart';
+import 'src/native_diagnostic_options.dart';
+export 'src/native_diagnostic_options.dart';
 import 'src/native_realtime_media.dart';
 import 'src/native_realtime_protocol.dart';
 import 'src/network_native_isolate.dart';
@@ -18,6 +20,7 @@ export 'src/native_realtime_media.dart';
 export 'src/native_realtime_protocol.dart';
 
 part 'src/native_realtime_media_bindings.dart';
+part 'src/native_diagnostic_bindings.dart';
 part 'src/native_realtime_media_runtime.dart';
 
 enum _NativeRuntimeLifecycle { running, stopping, stopped, destroyed }
@@ -59,11 +62,13 @@ class SshMobileNetworkNative {
   int getAbiVersion() => _sshNetAbiVersionNative();
 
   /// 创建并启动带事件轮询器的原生运行时。
-  Future<NativeNetworkRuntime> createRuntime() async {
+  Future<NativeNetworkRuntime> createRuntime({
+    NativeDiagnosticOptions? diagnostics,
+  }) async {
     final outHandle = calloc<Pointer<Void>>();
     try {
       final createResult = NativeOperationStatus.fromNativeCode(
-        _sshNetRuntimeCreateNative(outHandle),
+        _createRuntimeHandle(outHandle, diagnostics),
       );
       if (!createResult.isSuccess || outHandle.value == nullptr) {
         throw StateError(

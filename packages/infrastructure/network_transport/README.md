@@ -64,3 +64,10 @@ flutter test --no-pub
   pending command tickets、取消结果超时和释放事件订阅。
 - 测试命令：`flutter analyze --no-pub`、`flutter test --no-pub`；native hook 变更时
   还需运行对应 Rust toolchain 检查。
+
+## Local development diagnostics
+
+Runtime output and agent queries follow the [local diagnostic contract](../../../docs/agent/runtime-diagnostics.md).
+App composition roots inject `app_diagnostics` through public Core logging
+contracts; Feature dependencies remain unchanged. Development tools own launched
+processes and file queries, and are never imported by runtime packages.

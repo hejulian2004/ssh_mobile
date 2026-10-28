@@ -1,3 +1,5 @@
+import 'package:app_diagnostics/app_diagnostics.dart';
+
 // 网络传输 App 的组合根。
 //
 // Runtime 拥有 Logger、NetworkRuntime、LAN 设置、身份和数据保护。
@@ -99,8 +101,19 @@ final class NetworkTransportAppRuntime implements Disposable {
   // coverage:ignore-start
   static Future<NetworkTransportAppRuntime> create() {
     return open(
-      logger: AppLoggerImpl(),
-      networkRuntime: NetworkRuntimeImpl(),
+      logger: AppLoggerImpl(
+        sinks: [?DiagnosticFileSink.fromEnvironment('flutter')],
+      ),
+      networkRuntime: NetworkRuntimeImpl(
+        nativeAdapter: SshMobileNativeNetworkAdapter(
+          diagnosticDirectory: DiagnosticConfig.fromEnvironment().enabled
+              ? DiagnosticConfig.fromEnvironment().directory.path
+              : null,
+          diagnosticRunId: DiagnosticConfig.fromEnvironment().enabled
+              ? DiagnosticConfig.fromEnvironment().runId
+              : null,
+        ),
+      ),
       secrets: FlutterNetworkSecretStore(),
       module: LanShareModule(receiverEnabled: true),
       executor: const NetworkControlExecutor(),

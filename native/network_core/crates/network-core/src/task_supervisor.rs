@@ -12,6 +12,7 @@ use std::sync::{
 };
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
+use tracing::instrument::WithSubscriber;
 
 pub(crate) type TaskId = u64;
 
@@ -233,25 +234,28 @@ impl RuntimeTaskSupervisor {
         let task_token_for_future = task_token.clone();
         let root_token = self.root.clone();
         let session_token = session_group.as_ref().map(|group| group.token.clone());
-        let join = tokio::spawn(async move {
-            match session_token {
-                Some(session_token) => {
-                    tokio::select! {
-                        _ = root_token.cancelled() => {}
-                        _ = session_token.cancelled() => {}
-                        _ = task_token_for_future.cancelled() => {}
-                        _ = future => {}
+        let join = tokio::spawn(
+            (async move {
+                match session_token {
+                    Some(session_token) => {
+                        tokio::select! {
+                            _ = root_token.cancelled() => {}
+                            _ = session_token.cancelled() => {}
+                            _ = task_token_for_future.cancelled() => {}
+                            _ = future => {}
+                        }
+                    }
+                    None => {
+                        tokio::select! {
+                            _ = root_token.cancelled() => {}
+                            _ = task_token_for_future.cancelled() => {}
+                            _ = future => {}
+                        }
                     }
                 }
-                None => {
-                    tokio::select! {
-                        _ = root_token.cancelled() => {}
-                        _ = task_token_for_future.cancelled() => {}
-                        _ = future => {}
-                    }
-                }
-            }
-        });
+            })
+            .with_current_subscriber(),
+        );
         tracing::trace!(task_id, task = %name, "supervised native task started");
         let record = Arc::new(TaskRecord {
             token: task_token,

@@ -1,4 +1,4 @@
-> Last updated: 2026-10-22
+> Last updated: 2026-10-23
 
 # Memory Map
 
@@ -112,6 +112,8 @@ only the precise ADR. Use complete names for [ADR-030 file resume](../../../../d
 and [ADR-033 telemetry](../../../../docs/adr/ADR-033-telemetry-data-tracking-architecture.md).
 
 ## Quick routes
+
+- Local runtime logs / agent-readable diagnostics → [log Skill](../../ssh-mobile-logs/SKILL.md), then the owning Domain/package contracts; tool/output contract is [runtime diagnostics](../../../../docs/agent/runtime-diagnostics.md).
 
 - One named capability or forward-dependency question → [Behavior Boundaries](../../../../docs/architecture/BEHAVIOR_BOUNDARIES.md) only, then that card's first path. Open the next layer only when the card says the symptom crosses it.
 - Flutter UI → Client default + local contract; add Client architecture only for shared ownership/API.
