@@ -110,6 +110,9 @@ final class _AppScreenShareRouteScopeState
             final presenter =
                 widget.presenter ?? const AppTextureRemoteVideoPresenter();
             return AppScreenShareVideoPage(
+              annotation: _operation.annotationInteractive
+                  ? _operation.annotation
+                  : null,
               videoSize: _operation.media!.remoteVideoSize,
               autoEnterFullscreen: operation.role == ScreenShareRole.receiver,
               enableViewerControls:

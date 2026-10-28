@@ -358,7 +358,9 @@ fn event_lane(event: &NetworkEvent) -> EventLane {
         Some(network_event::Payload::TransferProgress(_))
         | Some(network_event::Payload::PeerTransferProgress(_))
         | Some(network_event::Payload::ChannelMessage(_))
-        | Some(network_event::Payload::SshStreamDataReceived(_)) => EventLane::Data,
+        | Some(network_event::Payload::SshStreamDataReceived(_))
+        | Some(network_event::Payload::RealtimeApplicationData(_))
+        | Some(network_event::Payload::RealtimeApplicationChannel(_)) => EventLane::Data,
         _ => EventLane::NormalControl,
     }
 }

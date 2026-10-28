@@ -1,4 +1,4 @@
-最新更新时间：2026-10-13
+最新更新时间：2026-10-23
 
 # network_transport
 
@@ -9,6 +9,7 @@
 Realtime gateway 的 `start(screenVideo: true)` 明确请求在 Offer 前配置原生
 H.264 屏幕视频轨道；默认值保持普通 Realtime 会话的媒体中立行为。此标志不授权
 采集，屏幕共享仍须通过独立邀请、接受与原生 generation 门禁。
+`NetworkRealtimeApplicationGateway` 只发送当前代际的不透明应用字节，不承载视频帧。
 
 ## 边界
 

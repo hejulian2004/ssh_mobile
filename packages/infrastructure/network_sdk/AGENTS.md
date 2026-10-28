@@ -1,4 +1,4 @@
-最新更新时间：2026-10-13
+最新更新时间：2026-10-23
 
 # network_sdk 维护约束
 
@@ -41,6 +41,8 @@ and Native Network V2 remain separate domains.
   `stop()`). Opaque screen-media endpoint/surface
   lifecycle belongs to `realtime_media`; no per-frame Dart API or
   SDP/ICE/PeerConnection/socket/native handle/media resource leaks to Features.
+  `sendApplicationData` carries at most 4096 opaque bytes for the current
+  generation and exposes no WebRTC type. A closed channel fails that send only.
   App adapter maps backend events;
   `start/stop` Futures complete only after a native terminal command result;
   the App adapter correlates `NativeCommandResultV2Event` by command and peer; queue

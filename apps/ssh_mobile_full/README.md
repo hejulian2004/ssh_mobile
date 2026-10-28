@@ -111,6 +111,10 @@ Windows 接收端参数 `verify-window` 会检查原生全屏尺寸、恢复尺�
 Android → Windows，否则验证 Windows → Android。Windows 发送只选择探针自身的
 唯一 `SSH Mobile` 窗口，Android 发送仍需系统整屏录制授权。探针检查真实视频进度、
 关闭页面后继续传帧、重新打开复用端点，以及明确停止和对端停止后的清理。
+增加启动参数 `annotate`，或 `--dart-define=SCREEN_PROBE_ANNOTATE=true` 时，
+接收端在正式操作上画一条公开测试笔迹，发送端确认收到，并在清理前保留约二十五秒供截图；
+探针不记录坐标。方向同样接受 `--dart-define=SCREEN_PROBE_REVERSE=true`。
+Android 上以 dart-define 为准。
 测试期间可将 Android 退到公开的模拟器桌面，验证原生录屏服务继续运行；测试不读取
 或导出帧内容。仅使用公开测试画面，沿用上述模拟器端口映射并在完成后清理映射。
 接收页面还检查默认全屏、重新打开后的全屏及 Windows 页面关闭后的窗口恢复。

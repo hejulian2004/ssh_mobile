@@ -54,6 +54,7 @@ final class AppScreenShareMediaCoordinator {
   Future<void>? _activeMediaOperation;
   AppScreenShareMediaMonitor? _mediaMonitor;
   final ValueNotifier<Size?> _remoteVideoSize = ValueNotifier(null);
+  final ValueNotifier<Size?> _captureFrameSize = ValueNotifier(null);
   bool _prepared = false;
   RealtimeSessionToken? _preparedToken;
   bool _disposed = false;
@@ -66,6 +67,7 @@ final class AppScreenShareMediaCoordinator {
   /// Opaque platform presentation capability for the App-owned route.
   RemoteVideoSurface? get remoteSurface => _remoteSurface;
   ValueListenable<Size?> get remoteVideoSize => _remoteVideoSize;
+  ValueListenable<Size?> get captureFrameSize => _captureFrameSize;
 
   /// Verifies the local native generation and source metadata.
   /// Permission, source enumeration, endpoint creation, and capture remain
@@ -134,6 +136,7 @@ final class AppScreenShareMediaCoordinator {
     }
     await _events.close();
     _remoteVideoSize.dispose();
+    _captureFrameSize.dispose();
   }
 
   Future<void> _startCaptureTracked({
@@ -275,6 +278,17 @@ final class AppScreenShareMediaCoordinator {
       _operationId = operationId;
       try {
         await mediaSession.attachCaptureSource(endpoint, selectedSource);
+        final sourceWidth = selectedSource.width;
+        final sourceHeight = selectedSource.height;
+        if (sourceWidth != null &&
+            sourceHeight != null &&
+            sourceWidth > 0 &&
+            sourceHeight > 0) {
+          _captureFrameSize.value = Size(
+            sourceWidth.toDouble(),
+            sourceHeight.toDouble(),
+          );
+        }
         attachCompleted = true;
         ownsPreparation = false;
         _ensureCurrentOperation(epoch, operationId, realtimeId, generation);
@@ -373,6 +387,7 @@ final class AppScreenShareMediaCoordinator {
     _endpoint = null;
     _remoteSurface = null;
     _remoteVideoSize.value = null;
+    _captureFrameSize.value = null;
   }
 
   Future<void> _releaseEndpointIfNeeded(
@@ -399,13 +414,13 @@ final class AppScreenShareMediaCoordinator {
       logger: resources.logger,
       direction: endpoint.identity.direction,
       onStats: (stats) {
-        if (endpoint.identity.direction == RealtimeMediaDirection.receive &&
-            stats.width > 0 &&
-            stats.height > 0) {
-          _remoteVideoSize.value = Size(
-            stats.width.toDouble(),
-            stats.height.toDouble(),
-          );
+        if (stats.width > 0 && stats.height > 0) {
+          final size = Size(stats.width.toDouble(), stats.height.toDouble());
+          if (endpoint.identity.direction == RealtimeMediaDirection.receive) {
+            _remoteVideoSize.value = size;
+          } else {
+            _captureFrameSize.value = size;
+          }
         }
       },
       isCurrent: () =>

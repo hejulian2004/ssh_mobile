@@ -464,4 +464,116 @@ final class _NativeRealtimeEventDecoder {
       handle: streamHandle,
     );
   }
+
+  static NativeRealtimeApplicationDataEvent _decodeApplicationData(
+    String eventId,
+    int timestampMs,
+    int protocolVersion,
+    Uint8List bytes,
+  ) {
+    final reader = _ProtoReader(bytes);
+    var realtimeId = '';
+    var peerId = '';
+    var generation = 0;
+    var sharedSessionInstanceId = '';
+    var payload = Uint8List(0);
+    while (!reader.isDone) {
+      final field = reader.field();
+      switch (field.number) {
+        case 1:
+          realtimeId = reader.string(field.wireType, _realtimeIdBytes);
+        case 2:
+          peerId = reader.string(field.wireType, _maxPeerIdBytes);
+        case 3:
+          generation = reader.varint(field.wireType);
+        case 4:
+          sharedSessionInstanceId = reader.string(
+            field.wireType,
+            _sharedSessionInstanceIdBytes,
+          );
+        case 5:
+          payload = reader.bytes(
+            field.wireType,
+            _maxRealtimeApplicationDataBytes,
+          );
+        default:
+          reader.skip(field.wireType);
+      }
+    }
+    _values.validateDecodedRealtimeId(realtimeId);
+    _values.validateDecodedPeerId(peerId);
+    if (generation <= 0) {
+      throw const FormatException(
+        'Realtime application generation must be positive.',
+      );
+    }
+    _values.validateDecodedSharedSessionInstanceId(sharedSessionInstanceId);
+    if (payload.isEmpty) {
+      throw const FormatException('Realtime application payload is empty.');
+    }
+    return NativeRealtimeApplicationDataEvent(
+      eventId: eventId,
+      timestampMs: timestampMs,
+      protocolVersion: protocolVersion,
+      realtimeId: realtimeId,
+      peerId: peerId,
+      generation: generation,
+      sharedSessionInstanceId: sharedSessionInstanceId,
+      payload: payload,
+    );
+  }
+
+  static NativeRealtimeApplicationChannelEvent _decodeApplicationChannel(
+    String eventId,
+    int timestampMs,
+    int protocolVersion,
+    Uint8List bytes,
+  ) {
+    final reader = _ProtoReader(bytes);
+    var realtimeId = '';
+    var peerId = '';
+    var generation = 0;
+    var sharedSessionInstanceId = '';
+    var open = false;
+    var sawOpen = false;
+    while (!reader.isDone) {
+      final field = reader.field();
+      switch (field.number) {
+        case 1:
+          realtimeId = reader.string(field.wireType, _realtimeIdBytes);
+        case 2:
+          peerId = reader.string(field.wireType, _maxPeerIdBytes);
+        case 3:
+          generation = reader.varint(field.wireType);
+        case 4:
+          sharedSessionInstanceId = reader.string(
+            field.wireType,
+            _sharedSessionInstanceIdBytes,
+          );
+        case 5:
+          open = reader.varint(field.wireType) != 0;
+          sawOpen = true;
+        default:
+          reader.skip(field.wireType);
+      }
+    }
+    _values.validateDecodedRealtimeId(realtimeId);
+    _values.validateDecodedPeerId(peerId);
+    if (generation <= 0 || !sawOpen) {
+      throw const FormatException(
+        'Realtime application channel event is incomplete.',
+      );
+    }
+    _values.validateDecodedSharedSessionInstanceId(sharedSessionInstanceId);
+    return NativeRealtimeApplicationChannelEvent(
+      eventId: eventId,
+      timestampMs: timestampMs,
+      protocolVersion: protocolVersion,
+      realtimeId: realtimeId,
+      peerId: peerId,
+      generation: generation,
+      sharedSessionInstanceId: sharedSessionInstanceId,
+      open: open,
+    );
+  }
 }

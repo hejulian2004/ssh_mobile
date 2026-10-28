@@ -35,6 +35,7 @@ class RealtimeMediaAndroidPlugin :
     private val owners = HashMap<Long, AndroidMediaOwner>()
     private val rendererVisibility = AndroidRendererVisibility()
     private val playbackObserver = screenPlaybackServiceObserver { owners.values.toList() }
+    private val guidance = GuidanceOverlayChannel { context }
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
@@ -48,6 +49,7 @@ class RealtimeMediaAndroidPlugin :
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        guidance.close()
         rendererVisibility.detach()
         disposeOwners()
         channel?.setMethodCallHandler(null)
@@ -215,7 +217,7 @@ class RealtimeMediaAndroidPlugin :
                     "Android H.264 encoder rejected the adaptation target.",
                 )
             }
-            else -> result.notImplemented()
+            else -> guidance.handle(call, result)
         }
     }
 

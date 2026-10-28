@@ -58,6 +58,7 @@ import 'ssh_native_stream_adapters.dart';
 import 'rag_feature_adapters.dart';
 import 'realtime_feature_adapters.dart';
 import 'realtime_media_feature_adapters.dart';
+import 'screen_share_guidance_android.dart';
 import 'terminal_ssh_capability_adapter.dart';
 import 'webview_feature_adapters.dart';
 

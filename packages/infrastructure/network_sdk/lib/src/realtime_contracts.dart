@@ -181,6 +181,53 @@ abstract interface class RealtimeIncomingSessionBackend {
   Future<void> discardIncomingOffer(RealtimeIncomingSessionOffer offer);
 }
 
+/// Opaque application bytes for one realtime generation.
+///
+/// The SDK does not interpret the payload. Screen-share marks are one user.
+final class RealtimeApplicationDataBackendEvent extends RealtimeBackendEvent {
+  const RealtimeApplicationDataBackendEvent({
+    required this.realtimeId,
+    required this.peerId,
+    required this.generation,
+    required this.sharedSessionInstanceId,
+    required this.payload,
+  });
+
+  final String realtimeId;
+  final String peerId;
+  final int generation;
+  final String sharedSessionInstanceId;
+  final Uint8List payload;
+}
+
+/// Open or closed state of the session application channel.
+final class RealtimeApplicationChannelBackendEvent
+    extends RealtimeBackendEvent {
+  const RealtimeApplicationChannelBackendEvent({
+    required this.realtimeId,
+    required this.peerId,
+    required this.generation,
+    required this.sharedSessionInstanceId,
+    required this.open,
+  });
+
+  final String realtimeId;
+  final String peerId;
+  final int generation;
+  final String sharedSessionInstanceId;
+  final bool open;
+}
+
+/// Optional backend that can send opaque session application bytes.
+abstract interface class RealtimeApplicationDataBackend {
+  Future<SdkResult<void>> sendApplicationData({
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required Uint8List payload,
+  });
+}
+
 /// A backend audio state event consumed by the SDK session coordinator.
 final class RealtimeAudioStateChangedEvent extends RealtimeBackendEvent {
   const RealtimeAudioStateChangedEvent({
@@ -247,6 +294,25 @@ abstract interface class RealtimeSession {
   /// Low-frequency typed consent events for this session. The stream carries
   /// metadata only and is generation-filtered by the SDK coordinator.
   Stream<RealtimeConsent> get consentEvents;
+
+  /// Whether the session application channel is currently open.
+  bool get applicationChannelOpen => false;
+
+  /// Emits when the application channel opens or closes for this generation.
+  Stream<bool> get applicationChannelEvents => const Stream<bool>.empty();
+
+  /// Opaque application bytes for this generation. Marks are not media frames.
+  Stream<Uint8List> get applicationData => const Stream<Uint8List>.empty();
+
+  /// Sends opaque application bytes on the current generation's channel.
+  Future<SdkResult<void>> sendApplicationData(Uint8List payload) async =>
+      SdkFailure(
+        NetworkError(
+          code: NetworkErrorCode.invalidArgument,
+          message: 'Realtime application data is unavailable on this session.',
+          operation: NetworkOperation.send,
+        ),
+      );
 
   /// Sends a typed request/decision through the authenticated native control
   /// route. It never starts capture or touches WebRTC resources directly.

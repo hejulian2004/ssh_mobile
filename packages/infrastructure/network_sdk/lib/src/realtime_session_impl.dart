@@ -24,6 +24,11 @@ final class _RealtimeSession implements RealtimeSession {
       StreamController<RealtimeConsent>.broadcast();
   final StreamController<RealtimeSnapshot> _snapshots =
       StreamController<RealtimeSnapshot>.broadcast();
+  final StreamController<bool> _applicationChannel =
+      StreamController<bool>.broadcast();
+  final StreamController<Uint8List> _applicationData =
+      StreamController<Uint8List>.broadcast();
+  bool _applicationChannelOpen = false;
   RealtimeSnapshot? _currentSnapshot;
 
   @override
@@ -66,6 +71,21 @@ final class _RealtimeSession implements RealtimeSession {
 
   @override
   Stream<RealtimeConsent> get consentEvents => _consents.stream;
+
+  @override
+  bool get applicationChannelOpen => _applicationChannelOpen;
+
+  @override
+  Stream<bool> get applicationChannelEvents => _applicationChannel.stream;
+
+  @override
+  Stream<Uint8List> get applicationData => _applicationData.stream;
+
+  @override
+  Future<SdkResult<void>> sendApplicationData(Uint8List payload) {
+    _ensureUsable();
+    return _client._sendApplicationData(this, payload);
+  }
 
   @override
   Future<SdkResult<void>> sendConsent(RealtimeConsent consent) {
@@ -239,6 +259,7 @@ final class _RealtimeSession implements RealtimeSession {
         _generation = generation;
         _revision = 0;
         _awaitingGenerationAdvance = false;
+        _setApplicationChannelOpen(false);
       }
     }
     // Revision reconciliation (ADR-029): a strictly lower revision is a stale
@@ -265,6 +286,7 @@ final class _RealtimeSession implements RealtimeSession {
         _state == RealtimeSessionState.failed) {
       _stopCommandCompleted = false;
       _sharedSessionInstanceId = null;
+      _setApplicationChannelOpen(false);
     }
     final snapshot = RealtimeSnapshot(
       realtimeId: realtimeId,
@@ -299,6 +321,33 @@ final class _RealtimeSession implements RealtimeSession {
     _audioState = state;
   }
 
+  void _setApplicationChannelOpen(bool open) {
+    if (_disposed || _applicationChannelOpen == open) return;
+    _applicationChannelOpen = open;
+    if (!_applicationChannel.isClosed) _applicationChannel.add(open);
+  }
+
+  void _applyApplicationChannel({
+    required int generation,
+    required String sharedSessionInstanceId,
+    required bool open,
+  }) {
+    if (_disposed || generation != _generation) return;
+    if (sharedSessionInstanceId != _sharedSessionInstanceId) return;
+    _setApplicationChannelOpen(open);
+  }
+
+  void _applyApplicationData(
+    Uint8List payload, {
+    required int generation,
+    required String sharedSessionInstanceId,
+  }) {
+    if (_disposed || _applicationData.isClosed) return;
+    if (generation != _generation) return;
+    if (sharedSessionInstanceId != _sharedSessionInstanceId) return;
+    _applicationData.add(Uint8List.fromList(payload));
+  }
+
   void _applyConsent(RealtimeConsent consent) {
     if (_disposed || !consent.isFresh(DateTime.now())) return;
     if (consent.realtimeId != realtimeId) return;
@@ -329,6 +378,8 @@ final class _RealtimeSession implements RealtimeSession {
     _state = RealtimeSessionState.stopped;
     await _consents.close();
     await _snapshots.close();
+    await _applicationChannel.close();
+    await _applicationData.close();
   }
 
   Future<void> _finalizeRelease() => _dispose(force: true);

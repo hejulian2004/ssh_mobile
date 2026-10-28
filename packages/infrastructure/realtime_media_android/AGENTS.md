@@ -10,7 +10,8 @@ Last updated: 2026-10-23
   push/pull port. Keep capture, codec, encoded access units, decoded pixels,
   and surfaces in the Android/native owner.
 - Carry only bounded identity/source metadata, lifecycle commands, opaque
-  surface IDs, and payload-free statistics over the Flutter channel.
+  surface IDs, payload-free statistics, and normalized guidance-path snapshots
+  over the Flutter channel. The guidance window is not a media surface.
 
 ## Forbidden changes
 
@@ -20,6 +21,9 @@ Last updated: 2026-10-23
   endpoint registry. Phase 2 endpoint/generation/release semantics are fixed.
 - Automatic policy may fall back only to software H.264 after confirmed failed-attempt cleanup; never fall back to VP8/AV1 or an unbounded queue.
 - Do not add consent, TURN credentials, business state, or QoS policy here.
+  The guidance overlay may display path snapshots only. It must stay
+  non-focusable and non-touchable. Denying overlay permission must not stop
+  capture or the share. Remove it when the capture service or plugin detaches.
 
 Automatic policy tries hardware codecs before software H.264. Explicit CPU mode selects only software
 H.264 MediaCodec instances within the synchronous owner operation. Nested and

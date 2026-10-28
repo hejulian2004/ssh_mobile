@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:app_core/app_core.dart';
 import 'package:network_sdk/network_sdk.dart';
@@ -20,7 +21,8 @@ final class AppRealtimeSessionBackend
     implements
         RealtimeSessionBackend,
         RealtimeConsentBackend,
-        RealtimeIncomingSessionBackend {
+        RealtimeIncomingSessionBackend,
+        RealtimeApplicationDataBackend {
   AppRealtimeSessionBackend({
     required this._networkRuntime,
     this.logger,
@@ -197,6 +199,35 @@ final class AppRealtimeSessionBackend
       screenVideo: screenVideo,
     ),
   );
+
+  @override
+  Future<SdkResult<void>> sendApplicationData({
+    required String realtimeId,
+    required String peerId,
+    required int generation,
+    required Uint8List payload,
+  }) async {
+    _ensureUsable();
+    final gateway = await _ensureGateway();
+    if (gateway is! NetworkRealtimeApplicationGateway) {
+      return _failure(
+        code: NetworkErrorCode.invalidArgument,
+        message: 'Native gateway does not support application data.',
+        operation: NetworkOperation.send,
+        peerId: peerId,
+      );
+    }
+    final applicationGateway = gateway as NetworkRealtimeApplicationGateway;
+    return _sendCommand(
+      operation: NetworkOperation.send,
+      peerId: peerId,
+      send: (_) => applicationGateway.sendApplicationData(
+        realtimeId: realtimeId,
+        generation: generation,
+        payload: payload,
+      ),
+    );
+  }
 
   @override
   Future<SdkResult<void>> stop({required String realtimeId}) => _sendCommand(

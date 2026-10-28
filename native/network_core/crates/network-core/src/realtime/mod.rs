@@ -36,6 +36,7 @@ use tokio::time::Instant;
 use crate::connect::PathLease;
 use crate::session::SessionId;
 
+mod application;
 mod claim;
 mod claim_commit;
 mod claim_reject;
@@ -49,6 +50,7 @@ mod signal_apply;
 mod signal_control;
 mod wire;
 
+pub(crate) use application::send_application_data;
 pub(crate) use claim::{
     commit_incoming_claim, exact_claim_responder, exact_claiming_binding, next_claim_close_signal,
     take_provisional_claim,
@@ -273,6 +275,10 @@ pub(crate) struct ClaimingControlSignal<'a> {
     shared_session_instance_id: &'a str,
     payload: &'a [u8],
 }
+
+#[cfg(test)]
+#[path = "../tests/realtime_application.rs"]
+mod realtime_application_tests;
 
 #[cfg(test)]
 #[path = "../tests/realtime.rs"]

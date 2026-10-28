@@ -290,6 +290,36 @@ pub struct RealtimeIncomingSessionOfferEvent {
     pub request: Vec<u8>,
 }
 
+/// Opaque DataChannel payload bound to one realtime generation.
+#[derive(Clone, PartialEq, Message)]
+pub struct RealtimeApplicationDataEvent {
+    #[prost(string, tag = "1")]
+    pub realtime_id: String,
+    #[prost(string, tag = "2")]
+    pub peer_id: String,
+    #[prost(uint64, tag = "3")]
+    pub generation: u64,
+    #[prost(string, tag = "4")]
+    pub shared_session_instance_id: String,
+    #[prost(bytes = "vec", tag = "5")]
+    pub payload: Vec<u8>,
+}
+
+/// Open or closed state of the session application DataChannel.
+#[derive(Clone, PartialEq, Message)]
+pub struct RealtimeApplicationChannelEvent {
+    #[prost(string, tag = "1")]
+    pub realtime_id: String,
+    #[prost(string, tag = "2")]
+    pub peer_id: String,
+    #[prost(uint64, tag = "3")]
+    pub generation: u64,
+    #[prost(string, tag = "4")]
+    pub shared_session_instance_id: String,
+    #[prost(bool, tag = "5")]
+    pub open: bool,
+}
+
 #[derive(Clone, PartialEq, Message)]
 pub struct ChannelMessageEvent {
     #[prost(string, tag = "1")]
@@ -350,7 +380,7 @@ pub struct NetworkEvent {
     pub protocol_version: u32,
     #[prost(
         oneof = "network_event::Payload",
-        tags = "10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33"
+        tags = "10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 37, 38"
     )]
     pub payload: Option<network_event::Payload>,
 }
@@ -388,6 +418,10 @@ pub mod network_event {
         RealtimeSnapshot(RealtimeSnapshotEvent),
         #[prost(message, tag = "34")]
         RealtimeIncomingSessionOffer(RealtimeIncomingSessionOfferEvent),
+        #[prost(message, tag = "37")]
+        RealtimeApplicationData(RealtimeApplicationDataEvent),
+        #[prost(message, tag = "38")]
+        RealtimeApplicationChannel(RealtimeApplicationChannelEvent),
         #[prost(message, tag = "24")]
         PeerPresenceChanged(PeerPresenceChangedEvent),
         #[prost(message, tag = "25")]

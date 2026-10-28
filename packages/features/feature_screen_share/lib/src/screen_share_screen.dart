@@ -22,22 +22,38 @@ final class ScreenShareConsentView extends StatelessWidget {
       final snapshot = controller.snapshot;
       if (snapshot.state == ScreenShareOperationState.incomingPending &&
           showIncomingActions) {
-        return Row(
+        return Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            FilledButton(
-              onPressed: controller.acceptIncoming,
-              child: const Text('Accept screen share'),
-            ),
-            const SizedBox(width: 8),
-            OutlinedButton(
-              onPressed: controller.rejectIncoming,
-              child: const Text('Reject'),
+            Text(screenShareMarkConsent(context, drawing: true)),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                FilledButton(
+                  onPressed: controller.acceptIncoming,
+                  child: const Text('Accept screen share'),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  onPressed: controller.rejectIncoming,
+                  child: const Text('Reject'),
+                ),
+              ],
             ),
           ],
         );
       }
-      return Text(_label(snapshot.state));
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(_label(snapshot.state)),
+          if (snapshot.role == ScreenShareRole.sender) ...[
+            const SizedBox(height: 8),
+            Text(screenShareMarkConsent(context, drawing: false)),
+          ],
+        ],
+      );
     },
   );
 }
@@ -85,6 +101,19 @@ final class ScreenShareSourcePicker extends StatelessWidget {
 String _sourceDimensions(ScreenShareSourceOption option) {
   if (option.width == 0 || option.height == 0) return 'Screen source';
   return '${option.width} × ${option.height}';
+}
+
+/// Consent copy for marks. Drawing is allowed; tapping for the other person is not.
+String screenShareMarkConsent(BuildContext context, {required bool drawing}) {
+  final chinese = Localizations.localeOf(context).languageCode == 'zh';
+  if (drawing) {
+    return chinese
+        ? '你可以在对方屏幕上画标记，不能代替对方点击。'
+        : 'You can draw marks on their screen. You cannot tap for them.';
+  }
+  return chinese
+      ? '对方可以在屏幕上画标记，不能代替你点击。'
+      : 'The other person can draw marks on your screen. They cannot tap for you.';
 }
 
 String _label(ScreenShareOperationState state) => switch (state) {

@@ -281,6 +281,26 @@ class NativeNetworkRuntime {
     }
   }
 
+  /// Sends opaque bytes on the session DataChannel.
+  NativeOperationStatus sendRealtimeApplicationData({
+    required String realtimeId,
+    required int generation,
+    required Uint8List payload,
+  }) {
+    try {
+      return sendCommand(
+        NativeNetworkProtocol.sendRealtimeApplicationDataCommand(
+          commandId: _nextCommandId('realtime-application'),
+          realtimeId: realtimeId,
+          generation: generation,
+          payload: payload,
+        ),
+      );
+    } on ArgumentError {
+      return NativeOperationStatus.invalidArgument;
+    }
+  }
+
   /// Sends a bounded SDP/ICE/close signal through the native control plane.
   NativeOperationStatus sendRealtimeSignal({
     required String realtimeId,
