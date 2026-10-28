@@ -13,8 +13,8 @@ pub use manager::{
     TransferState,
 };
 pub use manifest::{
-    FileManifest, ResumeRequest, TransferAccept, TransferOffer, TransferReject,
-    DEFAULT_TRANSFER_BUFFER, NETWORK_TRANSFER_PROTOCOL_VERSION,
+    single_safe_file_name, FileManifest, ResumeRequest, TransferAccept, TransferOffer,
+    TransferReject, DEFAULT_TRANSFER_BUFFER, NETWORK_TRANSFER_PROTOCOL_VERSION,
 };
 pub use receiver::{
     existing_completed_file, existing_partial_offset, stream_receive_file,

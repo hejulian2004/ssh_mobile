@@ -1,4 +1,4 @@
-> Last updated: 2026-09-12
+> Last updated: 2026-10-28
 
 # SDK Current State
 
@@ -39,7 +39,13 @@ and one Facade; Feature lifecycle cannot reconfigure them.
   framing/preamble/token codec, stream manager (registry/sequence/bounded buffer/
   tombstones/one lease), and SSH gateway/FFI byte pump are separate owners. The
   gateway does not interpret SSH protocol. Queue acceptance, native completion,
-  transport ACK, and application ACK are distinct.
+  transport ACK, and application ACK are distinct. `SendFile` and the v2
+  `Transfer` wrapper accept after identity, regular-file, safe-name, and
+  registered-peer checks. Full-file SHA-256 and route selection run after that
+  acceptance and must not block the command worker. A later failure is
+  `TransferFailed` with the protocol code. Missing files, unsafe names, and
+  unregistered peers stay command errors. Direct `start_file_send` still
+  returns those results synchronously.
 - Native results use a bounded Result lane with async worker backpressure ahead
   of Control/Data; only a rolling completed-command window is retained. Dart
   drops duplicate/unknown terminal results, coalesces peer connect intents, and

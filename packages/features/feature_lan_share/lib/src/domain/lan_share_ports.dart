@@ -236,6 +236,7 @@ abstract interface class LanShareStrings {
   String get lanShareDeviceOfflineHint;
   String get lanShareDragDropHint;
   String get lanShareExport;
+  String get lanShareFailed;
   String get lanShareFileExpired;
   String get lanShareForgetConfirm;
   String get lanShareForgetConfirmMessage;

@@ -212,6 +212,8 @@ final class NetworkLanStrings implements LanShareStrings {
   @override
   String get lanShareOpenBrowser => _en ? 'Open Link' : '打开链接';
   @override
+  String get lanShareFailed => _en ? 'Failed' : '失败';
+  @override
   String get lanSharePinMismatch => _en ? 'Incorrect PIN code' : 'PIN 码不正确';
   @override
   String get lanSharePinPairing => _en ? 'PIN Verification' : 'PIN 码安全配对';

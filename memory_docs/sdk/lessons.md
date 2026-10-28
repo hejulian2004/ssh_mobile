@@ -1,11 +1,14 @@
-> Last updated: 2026-08-30
+> Last updated: 2026-10-28
 
 # SDK Lessons
 
 - ConnectionSession is 1:1 with a transport Connection; new connection means new
   SessionId/Noise root and loss destroys the session. See [lifecycle ADR](../../docs/adr/ADR-CONNECTION-LIFECYCLE-V2.md).
 - Queue acceptance, native completion, transport ACK, and application ACK prove
-  different facts. See [Delivery ADR](../../docs/adr/ADR-010-delivery-recovery-layer.md)
+  different facts. `SendFile` acceptance is not transfer dispatch: hashing the
+  whole file or selecting a route inside the command worker makes a short
+  client acceptance timeout mark media failed before any `TransferFailed`
+  exists. See [Delivery ADR](../../docs/adr/ADR-010-delivery-recovery-layer.md)
   and [Realtime correlation ADR](../../docs/adr/ADR-026-realtime-command-completion-correlation.md).
 - Active receive state is not processed dedup history; TTL/LRU must not prune
   in-flight or ordered-buffered work ([active delivery ADR](../../docs/adr/ADR-025-active-delivery-state-lifetime.md)).

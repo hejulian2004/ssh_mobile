@@ -163,6 +163,7 @@ extension LanShareViewModelCommands on LanShareViewModel {
       payloadType: payloadType,
       fileName: fileName,
       fileSize: stat.size,
+      localPath: filePath,
       status: LanTransferStatus.transferring,
       createdAt: DateTime.now(),
       isIncoming: false,
@@ -196,6 +197,70 @@ extension LanShareViewModelCommands on LanShareViewModel {
     if (result is NetworkFailure<TransferSession>) {
       await historyDao.updateRecordStatus(
         transferId,
+        LanTransferStatus.failed.toJson(),
+        failureReason: result.error.code.name,
+      );
+    }
+    return result;
+  }
+
+  /// 用同一条历史记录重发已经结束的本机媒体文件。
+  Future<NetworkResult<TransferSession>> _retryOutgoingFile(
+    LanMessage message, {
+    LanDiscoveredPeer? discovery,
+  }) async {
+    final record = await historyDao.getRecord(message.id);
+    if (record == null) {
+      return _networkFailure(
+        code: NetworkErrorCode.invalidState,
+        message: 'Outgoing file cannot be retried.',
+        operation: NetworkOperation.sendFile,
+        peerId: message.receiverId,
+      );
+    }
+    final current = await _mapRecordToMessage(record);
+    final path = current.localPath;
+    final sourceExists =
+        path != null && path.isNotEmpty && File(path).existsSync();
+    if (!canRetryOutgoingLanFile(current, sourceExists: sourceExists)) {
+      return _networkFailure(
+        code: NetworkErrorCode.invalidState,
+        message: 'Outgoing file cannot be retried.',
+        operation: NetworkOperation.sendFile,
+        peerId: current.receiverId,
+      );
+    }
+    final coordinator = nativeTransferCoordinator;
+    if (coordinator == null) {
+      final error = NetworkError(
+        code: NetworkErrorCode.noRoute,
+        message: 'Native transfer coordinator is unavailable.',
+        operation: NetworkOperation.sendFile,
+        peerId: current.receiverId,
+      );
+      await historyDao.updateRecordStatus(
+        current.id,
+        LanTransferStatus.failed.toJson(),
+        failureReason: error.code.name,
+      );
+      return NetworkFailure<TransferSession>(error);
+    }
+
+    await historyDao.updateRecordStatus(
+      current.id,
+      LanTransferStatus.transferring.toJson(),
+      bytesTransferred: 0,
+      clearFailureReason: true,
+    );
+    final result = await coordinator.sendFile(
+      peerId: current.receiverId,
+      transferId: current.id,
+      filePath: path!,
+      discovery: discovery,
+    );
+    if (result is NetworkFailure<TransferSession>) {
+      await historyDao.updateRecordStatus(
+        current.id,
         LanTransferStatus.failed.toJson(),
         failureReason: result.error.code.name,
       );

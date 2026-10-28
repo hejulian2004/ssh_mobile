@@ -426,6 +426,10 @@ class LanShareViewModel extends ChangeNotifier {
     LanDiscoveredPeer peer,
     String path,
   ) => _sendFileToDiscoveredPeer(peer, path);
+  Future<NetworkResult<TransferSession>> retryOutgoingFile(
+    LanMessage message, {
+    LanDiscoveredPeer? discovery,
+  }) => _retryOutgoingFile(message, discovery: discovery);
   Future<NetworkResult<void>> recallMessage(
     LanMessage message,
     LanDiscoveredPeer? peer,

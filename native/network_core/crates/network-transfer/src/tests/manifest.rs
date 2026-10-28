@@ -12,6 +12,18 @@ fn valid_manifest() -> FileManifest {
 }
 
 #[test]
+fn single_safe_file_name_matches_manifest_component_rules() {
+    assert!(single_safe_file_name("payload.bin"));
+    assert!(single_safe_file_name(&"b".repeat(255)));
+    assert!(!single_safe_file_name(""));
+    assert!(!single_safe_file_name("dir/file"));
+    assert!(!single_safe_file_name(r"dir\file"));
+    assert!(!single_safe_file_name(".."));
+    assert!(!single_safe_file_name("."));
+    assert!(!single_safe_file_name(&"x".repeat(256)));
+}
+
+#[test]
 fn manifest_validation_accepts_safe_boundary_values() {
     let mut manifest = valid_manifest();
     manifest.transfer_id = "a".repeat(128);
