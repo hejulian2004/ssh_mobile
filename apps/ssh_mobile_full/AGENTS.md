@@ -1,4 +1,4 @@
-最新更新时间：2026-10-23
+最新更新时间：2026-10-28
 
 # ssh_mobile_full 维护约束
 
@@ -64,6 +64,16 @@ the original placement/styles, Android restores the prior system-bar visibility
 and behavior. Stale lease release cannot affect a newer owner. Retain a failed
 restore for retry, surface a bounded error, and never guess a default window
 state or create/restart a media endpoint to change presentation.
+
+Android receiver picture-in-picture uses this same activity and Flutter texture.
+It becomes eligible only while the receiver has a live remote surface and the
+operation is not terminal. Leaving the app enters the system PiP window on API
+26+, and API 31+ uses auto-enter. The fullscreen lease is suspended for that
+transition and reapplied when the window expands. The small window hides viewer
+controls and annotation chrome; it does not release the operation, media
+endpoint, or annotation session. Closing the system window moves the task back
+instead of finishing the activity. Stopping the share expands back to the same
+route. Senders and Windows do not enter picture-in-picture.
 
 `BackgroundServiceManager` owns UI-isolate notifications/permissions/power lock/
 platform service. Background entry points create `_BackgroundSshRuntime`, which

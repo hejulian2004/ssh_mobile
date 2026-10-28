@@ -3,6 +3,7 @@ package com.example.ssh_mobile
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.Configuration
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -21,6 +22,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private var windowPresentation: WindowPresentation? = null
+    private var pictureInPicture: ScreenSharePictureInPicture? = null
     private val channelName = "ssh_mobile/power"
     private val systemChannelName = "ssh_mobile/client_system"
     private val lanDiscoveryChannelName = "ssh_mobile/lan_discovery"
@@ -35,6 +37,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        pictureInPicture?.dispose()
+        pictureInPicture = null
         windowPresentation?.dispose()
         windowPresentation = null
         releaseMulticastLock()
@@ -42,10 +46,38 @@ class MainActivity : FlutterActivity() {
         super.onDestroy()
     }
 
+    override fun onUserLeaveHint() {
+        pictureInPicture?.onUserLeaveHint()
+        super.onUserLeaveHint()
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        pictureInPicture?.onModeChanged(isInPictureInPictureMode)
+    }
+
+    override fun finish() {
+        if (pictureInPicture?.shouldMoveTaskBack() == true) {
+            moveTaskToBack(true)
+            return
+        }
+        super.finish()
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        pictureInPicture?.dispose()
+        pictureInPicture = null
         windowPresentation?.dispose()
         windowPresentation = WindowPresentation(window, flutterEngine.dartExecutor.binaryMessenger)
+        pictureInPicture = ScreenSharePictureInPicture(
+            this,
+            flutterEngine.dartExecutor.binaryMessenger,
+            windowPresentation!!,
+        )
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
             when (call.method) {

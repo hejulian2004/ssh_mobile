@@ -31,6 +31,32 @@ class WindowSnapshotLeaseTest {
     }
 
     @Test
+    fun suspendShowsTheSavedStateWithoutReleasingTheLease() {
+        var flags = 17
+        val owner = WindowSnapshotLease(read = { flags }, enter = { flags = 99 },
+            restore = { flags = it })
+        assertTrue(owner.suspend())
+        assertEquals(17, flags)
+        assertTrue(owner.setFullscreen(1, true))
+        assertTrue(owner.suspend())
+        assertEquals(17, flags)
+        assertTrue(owner.refresh())
+        assertEquals(99, flags)
+        assertTrue(owner.setFullscreen(1, false))
+        assertEquals(17, flags)
+        var fail = true
+        val failing = WindowSnapshotLease(read = { flags }, enter = { flags = 99 },
+            restore = { if (fail) throw IllegalStateException(); flags = it })
+        assertTrue(failing.setFullscreen(4, true))
+        assertFalse(failing.suspend())
+        assertEquals(99, flags)
+        fail = false
+        assertTrue(failing.refresh())
+        assertTrue(failing.setFullscreen(4, false))
+        assertEquals(17, flags)
+    }
+
+    @Test
     fun failedRestoreKeepsOriginalSnapshotForRetry() {
         var flags = 17
         var failRestore = true
