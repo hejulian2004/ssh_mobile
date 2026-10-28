@@ -14,6 +14,8 @@ import 'package:ssh_mobile/app/navigation/app_route_contributions.dart';
 import 'package:ssh_mobile/app/realtime_feature_adapters.dart';
 import 'package:ssh_mobile/app/realtime_media_feature_adapters.dart';
 import 'package:ssh_mobile/app/screen_share_background_host.dart';
+import 'package:ssh_mobile/app/screen_share_guidance_android.dart';
+import 'package:ssh_mobile/app/screen_share_operation.dart';
 import 'package:ssh_mobile/app/screen_share_route_scope.dart';
 import 'package:ssh_mobile/app/screen_share_session_lease.dart';
 import 'package:ssh_mobile/services/network/network_service.dart';
@@ -57,7 +59,16 @@ void main(List<String> args) {
       ),
     ),
   );
-  unawaited(_probe(args.contains('reverse')));
+  unawaited(
+    _probe(
+      reverse:
+          const bool.fromEnvironment('SCREEN_PROBE_REVERSE') ||
+          args.contains('reverse'),
+      annotate:
+          const bool.fromEnvironment('SCREEN_PROBE_ANNOTATE') ||
+          args.contains('annotate'),
+    ),
+  );
 }
 
 void _report(String message) {
@@ -98,9 +109,61 @@ bool _hasFullscreenExit() {
 bool _sameSize(Size a, Size b) =>
     (a.width - b.width).abs() <= 1 && (a.height - b.height).abs() <= 1;
 
-Future<void> _probe(bool reverse) async {
+Future<void> _exerciseAnnotation({
+  required bool sender,
+  required AppScreenShareOperation operation,
+}) async {
+  if (!sender) {
+    await _until(() => operation.annotation?.canPaint == true, seconds: 30);
+    final session = operation.annotation!;
+    final points = <ScreenShareAnnotationPoint>[
+      const ScreenShareAnnotationPoint(4000, 8000),
+      const ScreenShareAnnotationPoint(20000, 20000),
+      const ScreenShareAnnotationPoint(36000, 32000),
+      const ScreenShareAnnotationPoint(52000, 44000),
+      const ScreenShareAnnotationPoint(62000, 56000),
+    ];
+    if (!session.beginStroke(points.first, width: 80)) {
+      throw StateError('Annotation pen refused the stroke');
+    }
+    for (final point in points.skip(1)) {
+      if (!session.extendStroke(point)) {
+        throw StateError('Annotation pen refused the stroke');
+      }
+    }
+    if (!session.endStroke()) {
+      throw StateError('Annotation pen refused the stroke');
+    }
+    _report('annotation_sent points=${session.strokes.single.points.length}');
+    final ready = Stopwatch()..start();
+    while (operation.annotation?.remoteDisplayReady == null &&
+        ready.elapsed.inSeconds < 20) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    _report(
+      'annotation_display_ready=${operation.annotation?.remoteDisplayReady}',
+    );
+  } else {
+    await _until(() {
+      final strokes = operation.annotation?.strokes;
+      return strokes != null &&
+          strokes.any((stroke) => stroke.complete && stroke.points.length >= 5);
+    }, seconds: 45);
+    final stroke = operation.annotation!.strokes.firstWhere(
+      (item) => item.complete && item.points.length >= 5,
+    );
+    _report(
+      'annotation_visible points=${stroke.points.length} width=${stroke.width}',
+    );
+  }
+  await Future<void>.delayed(const Duration(seconds: 25));
+  _report('annotation_hold_finished');
+}
+
+Future<void> _probe({required bool reverse, required bool annotate}) async {
   final windows = Platform.isWindows;
   final sender = reverse ? !windows : windows;
+  _report('role sender=$sender annotate=$annotate');
   final local = windows ? 'probe-windows' : 'probe-android';
   final remote = windows ? 'probe-android' : 'probe-windows';
   final temporary = await Directory.systemTemp.createTemp(
@@ -170,6 +233,11 @@ Future<void> _probe(bool reverse) async {
     _resources = AppRealtimeMediaResources(
       backend: media,
       sessionFactory: AppRealtimeMediaSessionFactory(backend: media),
+      guidanceOverlay: windows
+          ? null
+          : const AndroidScreenShareGuidanceDisplay(
+              MethodChannelAndroidGuidanceOverlay(),
+            ),
     );
     final capabilities = appScreenSharePlatformCapabilitiesFor(media);
     _report('ready');
@@ -196,12 +264,18 @@ Future<void> _probe(bool reverse) async {
           communicationClass: CommunicationClass.reliableMessage,
         ),
       );
+      _report('peer_connected');
       session = client.createSession(realtimeId: _id, peerId: remote);
       _require(await session.start());
+      _report(
+        'session_started state=${session.state.name} '
+        'generation=${session.generation} '
+        'shared=${session.sharedSessionInstanceId != null}',
+      );
       await waitForScreenShareSessionIdentity(session);
     } else {
       final offer = await client.incomingOffers.first.timeout(
-        const Duration(minutes: 2),
+        Duration(minutes: annotate ? 10 : 2),
       );
       final claimed = await client.claimIncomingSession(offer);
       _require(claimed);
@@ -283,6 +357,9 @@ Future<void> _probe(bool reverse) async {
     } else if (_hasFullscreenExit()) {
       throw StateError('Sender entered viewer fullscreen');
     }
+    if (annotate) {
+      await _exerciseAnnotation(sender: sender, operation: operation);
+    }
     _navigator.currentState!.pop();
     await Future<void>.delayed(const Duration(seconds: 15));
     final hidden = await stats();
@@ -329,8 +406,8 @@ Future<void> _probe(bool reverse) async {
     _report('PASS');
   } on RealtimeMediaException catch (error) {
     _report('FAIL ${error.code.name}');
-  } on TimeoutException {
-    _report('FAIL timeout');
+  } on TimeoutException catch (error) {
+    _report('FAIL timeout where=${error.message}');
   } catch (error, stack) {
     _report('FAIL lifecycle type=${error.runtimeType}');
     for (final line in stack.toString().split('\n').take(6)) {

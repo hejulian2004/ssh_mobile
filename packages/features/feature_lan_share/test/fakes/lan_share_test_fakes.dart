@@ -685,5 +685,6 @@ final class FakeLanHistoryDao extends Fake implements LanHistoryDao {
     int? avgRtt,
     int? bytesTotal,
     String? failureReason,
+    bool clearFailureReason = false,
   }) async => true;
 }

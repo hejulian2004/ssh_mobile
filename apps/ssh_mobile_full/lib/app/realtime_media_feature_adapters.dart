@@ -6,6 +6,8 @@ import 'package:network_transport/network_transport.dart';
 import 'package:realtime_media/realtime_media.dart';
 import 'package:ssh_mobile_network_native/ssh_mobile_network_native.dart';
 
+import 'screen_share_annotation_binding.dart';
+
 /// App-owned bridge from the opaque native media endpoint ABI to the
 /// `realtime_media` lifecycle contract.
 ///
@@ -235,11 +237,13 @@ final class AppRealtimeMediaResources {
     required this.backend,
     required this.sessionFactory,
     this.logger,
+    this.guidanceOverlay,
   });
 
   final AppLogger? logger;
   final RealtimeMediaBackend backend;
   final AppRealtimeMediaSessionFactory sessionFactory;
+  final ScreenShareGuidanceDisplay? guidanceOverlay;
 }
 
 typedef AppScreenShareOperationGuard = bool Function();

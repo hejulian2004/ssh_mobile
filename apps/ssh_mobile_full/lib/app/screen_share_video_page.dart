@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +16,7 @@ final class AppScreenShareVideoPage extends StatefulWidget {
     this.enableViewerControls = true,
     this.autoEnterFullscreen = false,
     this.onStop,
+    this.annotation,
     this.windowPlatform = const MethodChannelAppWindowPresentation(),
     super.key,
   });
@@ -25,6 +27,7 @@ final class AppScreenShareVideoPage extends StatefulWidget {
   final bool enableViewerControls;
   final bool autoEnterFullscreen;
   final VoidCallback? onStop;
+  final ScreenShareAnnotationSession? annotation;
   final AppWindowPresentationPlatform windowPlatform;
 
   @override
@@ -38,6 +41,9 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
   bool get _fullscreen => _window.fullscreen;
   int _quarterTurns = 0;
   bool _defaultFullscreenRequested = false;
+  bool _painting = false;
+  ScreenShareAnnotationTool _tool = ScreenShareAnnotationTool.pen;
+  ScreenShareAnnotationColor _color = ScreenShareAnnotationColor.red;
 
   @override
   void initState() {
@@ -116,9 +122,23 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
                         child: ValueListenableBuilder<Size?>(
                           valueListenable: widget.videoSize,
                           builder: (context, size, _) {
+                            final annotation = widget.annotation;
                             final rotated = RotatedBox(
                               quarterTurns: _quarterTurns,
-                              child: widget.video,
+                              child: annotation == null
+                                  ? widget.video
+                                  : Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        widget.video,
+                                        ScreenShareAnnotationCanvas(
+                                          session: annotation,
+                                          painting: _painting,
+                                          tool: _tool,
+                                          color: _color,
+                                        ),
+                                      ],
+                                    ),
                             );
                             final validSize =
                                 size != null &&
@@ -184,6 +204,23 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
                             ],
                           ),
                         ),
+                      ),
+                    ),
+                  ),
+                if (widget.annotation != null && widget.enableViewerControls)
+                  Positioned(
+                    top: 16,
+                    left: 16,
+                    child: SafeArea(
+                      child: ScreenShareAnnotationToolbar(
+                        session: widget.annotation!,
+                        painting: _painting,
+                        tool: _tool,
+                        color: _color,
+                        onPainting: (value) =>
+                            setState(() => _painting = value),
+                        onTool: (value) => setState(() => _tool = value),
+                        onColor: (value) => setState(() => _color = value),
                       ),
                     ),
                   ),

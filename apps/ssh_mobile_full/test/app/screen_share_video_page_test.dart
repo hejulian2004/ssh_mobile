@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:typed_data';
 
+import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +22,7 @@ void main() {
     bool enabled = true,
     bool automatic = false,
     Locale? locale,
+    ScreenShareAnnotationSession? annotation,
   }) => MaterialApp(
     locale: locale,
     home: AppScreenShareVideoPage(
@@ -29,6 +32,7 @@ void main() {
       enableViewerControls: enabled,
       autoEnterFullscreen: automatic,
       onStop: onStop,
+      annotation: annotation,
       windowPlatform: platform,
     ),
   );
@@ -261,6 +265,55 @@ void main() {
       expect(platform.calls.map((call) => call.$1).toSet().length, 1);
     },
   );
+
+  testWidgets('annotation is drawn inside the frame and escape still exits', (
+    tester,
+  ) async {
+    final transport = _AnnotationTransport()..open = true;
+    final session = ScreenShareAnnotationSession(
+      operationId: 'operation-a',
+      generation: 4,
+      transport: transport,
+    )..start();
+    addTearDown(session.dispose);
+    await tester.pumpWidget(page(annotation: session, onStop: () {}));
+    expect(find.byTooltip('Annotate'), findsOneWidget);
+    await tester.tap(find.byTooltip('Annotate'));
+    await tester.pump();
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(ScreenShareAnnotationCanvas)),
+    );
+    await gesture.moveBy(const Offset(8, 4));
+    await gesture.up();
+    await tester.pump();
+    expect(session.strokes, hasLength(1));
+    await tester.tap(find.byTooltip('Enter fullscreen'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byType(AppBar), findsOneWidget);
+    expect(find.byTooltip('Stop screen share'), findsNothing);
+    expect(session.strokes, hasLength(1));
+  });
+}
+
+class _AnnotationTransport implements ScreenShareAnnotationTransport {
+  bool open = false;
+  final StreamController<bool> _channel = StreamController<bool>.broadcast();
+  final StreamController<Uint8List> _incoming =
+      StreamController<Uint8List>.broadcast();
+
+  @override
+  bool get channelOpen => open;
+
+  @override
+  Stream<bool> get channelEvents => _channel.stream;
+
+  @override
+  Stream<Uint8List> get incoming => _incoming.stream;
+
+  @override
+  Future<void> send(Uint8List bytes) async {}
 }
 
 class _WindowPlatform implements AppWindowPresentationPlatform {

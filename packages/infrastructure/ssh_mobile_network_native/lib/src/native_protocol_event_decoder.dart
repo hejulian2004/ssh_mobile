@@ -46,6 +46,8 @@ final class _NativeProtocolEventDecoder {
         case 32:
         case 33:
         case 34:
+        case 37:
+        case 38:
           payloadField = field.number;
           payload = reader.bytes(field.wireType);
         default:
@@ -143,6 +145,18 @@ final class _NativeProtocolEventDecoder {
         eventPayload,
       ),
       23 => _NativeRealtimeEventDecoder._decodeRealtimeSnapshot(
+        eventId,
+        timestampMs,
+        protocolVersion,
+        eventPayload,
+      ),
+      37 => _NativeRealtimeEventDecoder._decodeApplicationData(
+        eventId,
+        timestampMs,
+        protocolVersion,
+        eventPayload,
+      ),
+      38 => _NativeRealtimeEventDecoder._decodeApplicationChannel(
         eventId,
         timestampMs,
         protocolVersion,

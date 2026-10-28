@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ApiRequestError, parseApiError } from './errors';
+import { emitDiagnostic } from '../diagnostics/browser';
 
 export const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -32,6 +33,8 @@ export async function request<T>(
   init?: RequestInit,
 ): Promise<T> {
   const requestController = new AbortController();
+  const diagnosticStart = performance.now();
+  let diagnosticStatus = 0;
   const callerSignal = init?.signal;
   let timedOut = false;
 
@@ -63,6 +66,7 @@ export async function request<T>(
         ...init?.headers,
       },
     });
+    diagnosticStatus = response.status;
     throwIfAborted(requestController.signal);
 
     const body = await parseResponse(response);
@@ -98,6 +102,10 @@ export async function request<T>(
     }
     throw new ApiRequestError('无法连接 Relay 服务。', 0);
   } finally {
+    emitDiagnostic('api_completed', {
+      duration_ms: performance.now() - diagnosticStart,
+      status_code: diagnosticStatus, method: init?.method ?? 'GET',
+    });
     clearTimeout(timeoutId);
     callerSignal?.removeEventListener('abort', abortRequest);
   }

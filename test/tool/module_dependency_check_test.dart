@@ -14,7 +14,15 @@ void _testCurrentRepositoryPasses() {
     repositoryRoot: Directory.current,
   ).audit();
   _expect(report.isValid, '当前 workspace 不应有依赖违规：${report.violations}');
-  _expect(report.packages.length == 27, '应审计根 workspace 的 27 个成员。');
+  _expect(report.packages.length == 28, '应审计根 workspace 的 28 个成员。');
+  final diagnostics = report.packages.singleWhere(
+    (package) => package.name == 'app_diagnostics',
+  );
+  _expect(
+    diagnostics.productionDependencies.length == 1 &&
+        diagnostics.productionDependencies.contains('app_core'),
+    '日志 Infrastructure 仅向前依赖 Core，不依赖 App、Feature 或工具。',
+  );
   _expect(
     report.edges.any(
       (edge) =>

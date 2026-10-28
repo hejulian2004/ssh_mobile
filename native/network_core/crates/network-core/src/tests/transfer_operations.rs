@@ -181,6 +181,119 @@ async fn start_file_send_rejects_invalid_source_and_missing_route_before_dispatc
 }
 
 #[tokio::test]
+async fn send_file_command_accepts_before_hash_and_route_selection() {
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let state = Arc::new(RuntimeState::new(event_tx, Arc::new(AtomicU16::new(0))));
+    let root = std::env::temp_dir().join(format!("ssh-mobile-send-accept-{}", std::process::id()));
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    let source = root.join("payload.bin");
+    tokio::fs::write(&source, b"data").await.unwrap();
+
+    let missing = dispatch_send(&state, "transfer-missing", &root.join("missing.bin")).await;
+    assert_eq!(missing.unwrap_err().code, NetworkErrorCode::IoError as i32);
+    assert_no_transfer_event(&mut event_rx).await;
+
+    let directory = dispatch_send(&state, "transfer-dir", &root).await;
+    assert_eq!(
+        directory.unwrap_err().code,
+        NetworkErrorCode::InvalidArgument as i32
+    );
+    assert_no_transfer_event(&mut event_rx).await;
+
+    let long_name = "n".repeat(256);
+    let long_path = root.join(&long_name);
+    if tokio::fs::write(&long_path, b"x").await.is_ok() {
+        let long_name_error = dispatch_send(&state, "transfer-long-name", &long_path).await;
+        assert_eq!(
+            long_name_error.unwrap_err().code,
+            NetworkErrorCode::InvalidArgument as i32
+        );
+        assert_no_transfer_event(&mut event_rx).await;
+    } else {
+        assert!(!network_transfer::single_safe_file_name(&long_name));
+    }
+
+    let unregistered = dispatch_send(&state, "transfer-unregistered", &source).await;
+    assert_eq!(
+        unregistered.unwrap_err().code,
+        NetworkErrorCode::NoRoute as i32
+    );
+    assert_no_transfer_event(&mut event_rx).await;
+
+    state.peers.write().await.insert(
+        "peer-a".into(),
+        crate::runtime::PeerConfig {
+            endpoint: None,
+            identity_public_key: [1; 32],
+            e2e_public_key: [2; 32],
+            e2ee_policy: network_protocol::E2eePolicy::Required,
+        },
+    );
+    state.allow_routes_for_test("peer-a").await;
+    let _lease = ready_stream_lease(&state).await;
+    let started = std::time::Instant::now();
+    let accepted = dispatch_send(&state, "transfer-accepted", &source).await;
+    assert!(
+        accepted.is_ok(),
+        "SendFile acceptance must return before hashing and route selection: {accepted:?}"
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(1));
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), event_rx.recv())
+        .await
+        .expect("post-accept route failure must emit TransferFailed")
+        .expect("transfer event");
+    match event.payload {
+        Some(network_event::Payload::TransferFailed(failed)) => {
+            assert_eq!(failed.transfer_id, "transfer-accepted");
+            assert_eq!(failed.peer_id, "peer-a");
+            assert_eq!(
+                failed.error.expect("protocol error").code,
+                NetworkErrorCode::NoRoute as i32
+            );
+        }
+        other => panic!("unexpected event {other:?}"),
+    }
+    assert!(state
+        .transfer
+        .manager
+        .snapshot("transfer-accepted")
+        .await
+        .is_none());
+    tokio::fs::remove_dir_all(&root).await.unwrap();
+}
+
+async fn dispatch_send(
+    state: &Arc<RuntimeState>,
+    transfer_id: &str,
+    path: &std::path::Path,
+) -> Result<(), network_protocol::NetworkError> {
+    dispatch_transfer_command(
+        Arc::clone(state),
+        NetworkCommand {
+            command_id: transfer_id.into(),
+            protocol_version: NETWORK_PROTOCOL_VERSION,
+            payload: Some(network_protocol::network_command::Payload::SendFile(
+                SendFileCommand {
+                    transfer_id: transfer_id.into(),
+                    peer_id: "peer-a".into(),
+                    file_path: path.to_string_lossy().into_owned(),
+                },
+            )),
+        },
+    )
+    .await
+}
+
+async fn assert_no_transfer_event(event_rx: &mut mpsc::UnboundedReceiver<NetworkEvent>) {
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(
+        event_rx.try_recv().is_err(),
+        "cheap SendFile rejection must not emit TransferFailed"
+    );
+}
+
+#[tokio::test]
 async fn business_path_fallback_returns_a_typed_no_route_error() {
     let state = self::state();
     let error = ensure_business_path(

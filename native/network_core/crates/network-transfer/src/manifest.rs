@@ -1,6 +1,18 @@
 pub const DEFAULT_TRANSFER_BUFFER: usize = 512 * 1024; // 512 KiB
 pub const NETWORK_TRANSFER_PROTOCOL_VERSION: u32 = 1;
 
+/// A transfer file name is one UTF-8 path component, at most 255 bytes.
+pub fn single_safe_file_name(file_name: &str) -> bool {
+    !file_name.is_empty()
+        && file_name.len() <= 255
+        && !file_name.contains(['/', '\\'])
+        && std::path::Path::new(file_name).components().count() == 1
+        && !matches!(
+            std::path::Path::new(file_name).components().next(),
+            Some(std::path::Component::ParentDir | std::path::Component::CurDir)
+        )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileManifest {
     pub transfer_id: String,
@@ -22,15 +34,7 @@ impl FileManifest {
         {
             return Err("transfer_id contains unsafe characters".into());
         }
-        if self.file_name.is_empty()
-            || self.file_name.len() > 255
-            || self.file_name.contains(['/', '\\'])
-            || std::path::Path::new(&self.file_name).components().count() != 1
-            || matches!(
-                std::path::Path::new(&self.file_name).components().next(),
-                Some(std::path::Component::ParentDir | std::path::Component::CurDir)
-            )
-        {
+        if !single_safe_file_name(&self.file_name) {
             return Err("file_name must be a single safe path component".into());
         }
         if self.content_hash.len() != 64

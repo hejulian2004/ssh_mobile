@@ -46,7 +46,8 @@ Debug assertions verify observable Timer/Subscription/Lease/native-handle releas
 Shell. It owns operation controllers, readiness subscriptions, media and session
 leases independently of presentation routes. Closing a screen-share page only
 detaches its view and restores its window presentation; it never sends CANCEL
-or releases a running operation. Explicit local Stop, authenticated peer stop,
+or releases a running operation. Annotation state stays on that operation.
+Page pop does not clear marks; stop, generation change, and transport loss do. Explicit local Stop, authenticated peer stop,
 transport/source failure or App shutdown performs operation cleanup. Keep global
 admission until media release is confirmed; failed cleanup stays owned and can
 be retried. The background host may reopen the same operation or stop it, never

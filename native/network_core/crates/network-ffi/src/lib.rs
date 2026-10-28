@@ -16,6 +16,9 @@ use std::slice;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod diagnostics;
+#[cfg(test)]
+mod diagnostics_tests;
 mod realtime_media;
 
 pub const SSH_NET_ABI_VERSION: u32 = 1;
@@ -222,6 +225,7 @@ impl BoundedCommandHistory {
 
 struct SshNetRuntime {
     runtime: NetworkRuntime,
+    diagnostics: Option<network_core::diagnostics::DiagnosticOutput>,
     pending_commands: Mutex<HashSet<String>>,
     terminal_commands: Mutex<BoundedCommandHistory>,
     synthetic_events: Mutex<EventMux<NetworkEvent>>,
@@ -232,6 +236,7 @@ impl SshNetRuntime {
     fn new() -> Result<Self, network_core::NetworkError> {
         Ok(Self {
             runtime: NetworkRuntime::new()?,
+            diagnostics: None,
             pending_commands: Mutex::new(HashSet::new()),
             terminal_commands: Mutex::new(BoundedCommandHistory::new()),
             synthetic_events: Mutex::new(EventMux::new()),
@@ -358,7 +363,9 @@ fn event_lane(event: &NetworkEvent) -> EventLane {
         Some(network_event::Payload::TransferProgress(_))
         | Some(network_event::Payload::PeerTransferProgress(_))
         | Some(network_event::Payload::ChannelMessage(_))
-        | Some(network_event::Payload::SshStreamDataReceived(_)) => EventLane::Data,
+        | Some(network_event::Payload::SshStreamDataReceived(_))
+        | Some(network_event::Payload::RealtimeApplicationData(_))
+        | Some(network_event::Payload::RealtimeApplicationChannel(_)) => EventLane::Data,
         _ => EventLane::NormalControl,
     }
 }
@@ -416,6 +423,10 @@ pub unsafe extern "C" fn ssh_net_runtime_start(handle: SshNetRuntimeHandle) -> i
 
     let result = catch_unwind(|| {
         let runtime = unsafe { &*(handle as *const SshNetRuntime) };
+        let _diagnostic_guard = runtime
+            .diagnostics
+            .as_ref()
+            .map(|output| tracing::dispatcher::set_default(output.dispatch()));
         match runtime.runtime.start() {
             Ok(()) => 0,
             Err(_) => -3,
@@ -440,6 +451,10 @@ pub unsafe extern "C" fn ssh_net_runtime_local_port(handle: SshNetRuntimeHandle)
 
     let result = catch_unwind(|| {
         let runtime = unsafe { &*(handle as *const SshNetRuntime) };
+        let _diagnostic_guard = runtime
+            .diagnostics
+            .as_ref()
+            .map(|output| tracing::dispatcher::set_default(output.dispatch()));
         runtime.runtime.bound_local_port().map_or(0, i32::from)
     });
 
@@ -458,6 +473,10 @@ pub unsafe extern "C" fn ssh_net_runtime_stop(handle: SshNetRuntimeHandle) -> i3
 
     let result = catch_unwind(|| {
         let runtime = unsafe { &*(handle as *const SshNetRuntime) };
+        let _diagnostic_guard = runtime
+            .diagnostics
+            .as_ref()
+            .map(|output| tracing::dispatcher::set_default(output.dispatch()));
         realtime_media::invalidate_media_owners(handle as *mut SshNetRuntime);
         match runtime.stop() {
             Ok(()) => 0,
@@ -490,6 +509,10 @@ pub unsafe extern "C" fn ssh_net_runtime_command(
 
     let result = catch_unwind(|| {
         let runtime = unsafe { &*(handle as *const SshNetRuntime) };
+        let _diagnostic_guard = runtime
+            .diagnostics
+            .as_ref()
+            .map(|output| tracing::dispatcher::set_default(output.dispatch()));
         let slice = unsafe { slice::from_raw_parts(command_ptr, command_len) };
 
         match NetworkCommand::decode(slice) {
@@ -542,6 +565,10 @@ pub unsafe extern "C" fn ssh_net_runtime_poll_event(
 
     let result = catch_unwind(|| {
         let runtime = unsafe { &*(handle as *const SshNetRuntime) };
+        let _diagnostic_guard = runtime
+            .diagnostics
+            .as_ref()
+            .map(|output| tracing::dispatcher::set_default(output.dispatch()));
         unsafe {
             (*out_event).ptr = std::ptr::null_mut();
             (*out_event).len = 0;
@@ -627,6 +654,10 @@ pub unsafe extern "C" fn ssh_net_runtime_destroy(handle: SshNetRuntimeHandle) ->
 
     let result = catch_unwind(|| {
         let runtime = unsafe { &*(handle as *const SshNetRuntime) };
+        let _diagnostic_guard = runtime
+            .diagnostics
+            .as_ref()
+            .map(|output| tracing::dispatcher::set_default(output.dispatch()));
         // Destroy calls the internal stop path directly, so invalidate the
         // process-local platform-owner registry here as well as in the public
         // stop ABI. No late native callback may retain this runtime pointer

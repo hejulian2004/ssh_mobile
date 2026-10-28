@@ -24,7 +24,18 @@ extension _AppRuntimeFactoryCore on _AppRuntimeFactoryContext {
     runtimeNetworkIdentityService =
         networkIdentityService ?? NetworkIdentityService();
     final resources = AppNetworkResources(
-      nativeRuntime: networkRuntime ?? NetworkRuntimeImpl(),
+      nativeRuntime:
+          networkRuntime ??
+          NetworkRuntimeImpl(
+            nativeAdapter: SshMobileNativeNetworkAdapter(
+              diagnosticDirectory: DiagnosticConfig.fromEnvironment().enabled
+                  ? DiagnosticConfig.fromEnvironment().directory.path
+                  : null,
+              diagnosticRunId: DiagnosticConfig.fromEnvironment().enabled
+                  ? DiagnosticConfig.fromEnvironment().runId
+                  : null,
+            ),
+          ),
       initialize: _configureSharedNetwork,
       createRealtimeSession: ({required realtimeId, required peerId}) =>
           runtimeRealtimeClient.createSession(

@@ -86,6 +86,38 @@ extension on AppRealtimeSessionBackend {
           // future decoder returns an unknown enum value.
           return;
         }
+      case NativeRealtimeApplicationChannelEvent(
+        :final realtimeId,
+        :final peerId,
+        :final generation,
+        :final sharedSessionInstanceId,
+        :final open,
+      ):
+        _events.add(
+          RealtimeApplicationChannelBackendEvent(
+            realtimeId: realtimeId,
+            peerId: peerId,
+            generation: generation,
+            sharedSessionInstanceId: sharedSessionInstanceId,
+            open: open,
+          ),
+        );
+      case NativeRealtimeApplicationDataEvent(
+        :final realtimeId,
+        :final peerId,
+        :final generation,
+        :final sharedSessionInstanceId,
+        :final payload,
+      ):
+        _events.add(
+          RealtimeApplicationDataBackendEvent(
+            realtimeId: realtimeId,
+            peerId: peerId,
+            generation: generation,
+            sharedSessionInstanceId: sharedSessionInstanceId,
+            payload: payload,
+          ),
+        );
       case NativeRealtimeIncomingSessionOfferEvent event:
         try {
           _events.add(

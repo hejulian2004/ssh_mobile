@@ -1,4 +1,4 @@
-最新更新时间：2026-10-13
+最新更新时间：2026-10-23
 
 # network_transport
 
@@ -9,6 +9,7 @@
 Realtime gateway 的 `start(screenVideo: true)` 明确请求在 Offer 前配置原生
 H.264 屏幕视频轨道；默认值保持普通 Realtime 会话的媒体中立行为。此标志不授权
 采集，屏幕共享仍须通过独立邀请、接受与原生 generation 门禁。
+`NetworkRealtimeApplicationGateway` 只发送当前代际的不透明应用字节，不承载视频帧。
 
 ## 边界
 
@@ -63,3 +64,10 @@ flutter test --no-pub
   pending command tickets、取消结果超时和释放事件订阅。
 - 测试命令：`flutter analyze --no-pub`、`flutter test --no-pub`；native hook 变更时
   还需运行对应 Rust toolchain 检查。
+
+## Local development diagnostics
+
+Runtime output and agent queries follow the [local diagnostic contract](../../../docs/agent/runtime-diagnostics.md).
+App composition roots inject `app_diagnostics` through public Core logging
+contracts; Feature dependencies remain unchanged. Development tools own launched
+processes and file queries, and are never imported by runtime packages.

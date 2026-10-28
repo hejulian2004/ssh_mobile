@@ -236,6 +236,7 @@ job_architecture() {
   need dart || return "$SKIP_STATUS"
   step 'Check agent documentation' dart run tool/check_agent_docs.dart
   step 'Test agent documentation checker' dart run test/tool/agent_docs_check_test.dart
+  step 'Test runtime diagnostic tools' dart test test/tool/agent_logs_cli_test.dart test/tool/agent_log_store_test.dart test/tool/agent_log_launcher_test.dart test/tool/android_log_collector_test.dart
   step 'Test CI workflow contract' dart run test/tool/ci_workflow_test.dart
   step 'Test CI production configuration' dart run test/tool/ci_production_config_test.dart
   step 'Check Dart file sizes and test roots' dart run tool/check_file_sizes.dart
@@ -358,16 +359,19 @@ job_core() {
   need dart || return "$SKIP_STATUS"
   step 'Format core packages' melos_exec 'dart format --output=none --set-exit-if-changed lib test' \
     --scope=app_core \
+    --scope=app_diagnostics \
     --scope=app_ui \
     --scope=connection_core \
     --scope=ssh_core
   step 'Analyze core packages' melos_exec 'flutter analyze --no-fatal-infos --no-pub' \
     --scope=app_core \
+    --scope=app_diagnostics \
     --scope=app_ui \
     --scope=connection_core \
     --scope=ssh_core
   step 'Test core packages' melos_exec "flutter test --no-pub --concurrency $MELOS_TEST_CONCURRENCY" \
     --scope=app_core \
+    --scope=app_diagnostics \
     --scope=app_ui \
     --scope=connection_core \
     --scope=ssh_core

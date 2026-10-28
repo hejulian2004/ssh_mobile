@@ -4,6 +4,7 @@ import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:network_sdk/network_sdk.dart';
 import 'package:realtime_media/realtime_media.dart';
 import 'realtime_media_feature_adapters.dart';
+import 'screen_share_annotation_binding.dart';
 import 'screen_share_media_coordinator.dart';
 import 'screen_share_feature_adapters.dart';
 import 'screen_share_route_arguments.dart';
@@ -16,6 +17,7 @@ final class AppScreenShareOperation extends ChangeNotifier {
   AppScreenShareMediaCoordinator? _mediaCoordinator;
   late final Future<void> _initialization;
   ScreenShareController? _controller;
+  AppScreenShareAnnotationBinding? _annotation;
   StreamSubscription<RealtimeSnapshot>? _readinessSubscription;
   Future<void> _readinessUpdate = Future<void>.value();
   bool? _appliedMediaReadiness;
@@ -29,6 +31,8 @@ final class AppScreenShareOperation extends ChangeNotifier {
 
   Future<void> get initialization => _initialization;
   ScreenShareController? get controller => _controller;
+  ScreenShareAnnotationSession? get annotation => _annotation?.session;
+  bool get annotationInteractive => _annotation?.interactive ?? false;
   AppScreenShareMediaCoordinator? get media => _mediaCoordinator;
   bool get finished => _finished;
   bool get stopping => _stopFuture != null;
@@ -112,6 +116,21 @@ final class AppScreenShareOperation extends ChangeNotifier {
       _controller!.dispose();
       return;
     }
+    _annotation = AppScreenShareAnnotationBinding(
+      realtime: arguments.session,
+      operation: _controller!,
+      snapshot: () => _controller!.snapshot,
+      frameSize: arguments.mode == AppScreenShareRouteMode.send
+          ? _mediaCoordinator!.captureFrameSize
+          : _mediaCoordinator!.remoteVideoSize,
+      overlay: arguments.mode == AppScreenShareRouteMode.send
+          ? resources.guidanceOverlay
+          : null,
+      onChanged: () {
+        if (!_notifierDisposed && !_closed) notifyListeners();
+      },
+    );
+    _annotation!.start();
     await _mediaCoordinator!.prepare(
       capture: arguments.mode == AppScreenShareRouteMode.send,
     );
@@ -184,6 +203,8 @@ final class AppScreenShareOperation extends ChangeNotifier {
   }
 
   Future<void> _disposeOwnedResources() async {
+    _annotation?.dispose();
+    _annotation = null;
     await _readinessSubscription?.cancel();
     _readinessSubscription = null;
     try {

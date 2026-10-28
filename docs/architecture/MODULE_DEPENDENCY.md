@@ -1,9 +1,9 @@
-最新更新时间：2026-10-22
+最新更新时间：2026-10-23
 
 # 模块依赖审计
 
 本文件记录 Step 32 的最终依赖审计结果。审计对象是根 `pubspec.yaml` 明确列出的
-27 个 workspace 成员，依赖边只统计各 Package `dependencies` 中指向另一个
+28 个 workspace 成员，依赖边只统计各 Package `dependencies` 中指向另一个
 workspace 成员的直接生产依赖。
 
 ## 审计命令
@@ -94,3 +94,7 @@ capability 和 App coordinator 通过公开 `LanShareScreenSharePort` 组合。
 新增或移动 Package 时，必须先更新根 workspace，再运行本文件顶部的三个命令；
 如果新增 Feature 之间的公共能力，优先新增 Core/Capability 边界，只有经过架构
 评审后才能加入 Allowlist。
+
+## Local diagnostics dependency
+
+App composition roots and development tools depend on app_diagnostics (Infrastructure), which depends only on public app_core contracts. Features keep their existing AppLogger injection and do not import the output package. No runtime depends on query tools or Skill files.

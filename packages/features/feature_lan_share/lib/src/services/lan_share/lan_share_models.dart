@@ -93,6 +93,33 @@ bool isRetryableNetworkError(NetworkErrorCode code) => switch (code) {
   _ => false,
 };
 
+/// 本机发出的图片、视频、音频或文件已经失败或取消。
+bool showsOutgoingFileFailure(LanMessage message) {
+  if (message.isIncoming || message.isRecalled) return false;
+  if (message.status != LanTransferStatus.failed &&
+      message.status != LanTransferStatus.cancelled) {
+    return false;
+  }
+  return switch (message.payloadType) {
+    LanPayloadType.image ||
+    LanPayloadType.video ||
+    LanPayloadType.audio ||
+    LanPayloadType.file => true,
+    _ => false,
+  };
+}
+
+/// 失败原因可重试，或历史里没有可识别的原因，并且源文件仍在。
+bool canRetryOutgoingLanFile(LanMessage message, {required bool sourceExists}) {
+  if (!showsOutgoingFileFailure(message) || !sourceExists) return false;
+  final reason = message.failureReason;
+  if (reason == null || reason.isEmpty) return true;
+  for (final code in NetworkErrorCode.values) {
+    if (code.name == reason) return isRetryableNetworkError(code);
+  }
+  return true;
+}
+
 /// Transfer status state
 enum LanTransferStatus {
   pending,
@@ -196,6 +223,7 @@ class LanMessage {
   final bool isRecalled;
   final String? sftpServerId;
   final String? sftpRemotePath;
+  final String? failureReason;
 
   const LanMessage({
     required this.id,
@@ -216,6 +244,7 @@ class LanMessage {
     this.isRecalled = false,
     this.sftpServerId,
     this.sftpRemotePath,
+    this.failureReason,
   });
 
   double get progress =>
@@ -261,6 +290,7 @@ class LanMessage {
     bool? isRecalled,
     String? sftpServerId,
     String? sftpRemotePath,
+    String? failureReason,
   }) {
     return LanMessage(
       id: id ?? this.id,
@@ -281,6 +311,7 @@ class LanMessage {
       isRecalled: isRecalled ?? this.isRecalled,
       sftpServerId: sftpServerId ?? this.sftpServerId,
       sftpRemotePath: sftpRemotePath ?? this.sftpRemotePath,
+      failureReason: failureReason ?? this.failureReason,
     );
   }
 
@@ -303,6 +334,7 @@ class LanMessage {
     'isRecalled': isRecalled,
     'sftpServerId': sftpServerId,
     'sftpRemotePath': sftpRemotePath,
+    'failureReason': failureReason,
   };
 
   factory LanMessage.fromJson(Map<String, dynamic> json) {
@@ -331,6 +363,7 @@ class LanMessage {
       isRecalled: json['isRecalled'] as bool? ?? false,
       sftpServerId: json['sftpServerId'] as String?,
       sftpRemotePath: json['sftpRemotePath'] as String?,
+      failureReason: json['failureReason'] as String?,
     );
   }
 }

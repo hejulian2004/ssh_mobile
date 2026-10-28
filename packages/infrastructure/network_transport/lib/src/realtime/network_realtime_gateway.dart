@@ -59,6 +59,18 @@ abstract interface class NetworkRealtimeGateway {
   NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token);
 }
 
+/// Optional extension for opaque session application bytes.
+///
+/// The bytes are not SDP, media frames, or consent. Screen-share marks use
+/// this path and stay off the signaling route.
+abstract interface class NetworkRealtimeApplicationGateway {
+  NativeCommandTicket sendApplicationData({
+    required String realtimeId,
+    required int generation,
+    required Uint8List payload,
+  });
+}
+
 /// Optional extension for authenticated, typed screen-share consent. Keeping
 /// it separate means older/synthetic gateways remain valid while production
 /// gateways can add the new signal kind without exposing protocol bytes to a
@@ -117,7 +129,8 @@ final class RuntimeNetworkRealtimeGateway
     implements
         NetworkRealtimeGateway,
         NetworkRealtimeConsentGateway,
-        NetworkRealtimeIncomingOfferGateway {
+        NetworkRealtimeIncomingOfferGateway,
+        NetworkRealtimeApplicationGateway {
   RuntimeNetworkRealtimeGateway(this._gateway, [this._media]);
 
   final NetworkCommandGateway _gateway;
@@ -225,6 +238,31 @@ final class RuntimeNetworkRealtimeGateway
   @override
   NativeOperationStatus closeMediaOwner(NativeRealtimeMediaOwnerToken token) =>
       _media?.closeMediaOwner(token) ?? NativeOperationStatus.driverUnavailable;
+
+  @override
+  NativeCommandTicket sendApplicationData({
+    required String realtimeId,
+    required int generation,
+    required Uint8List payload,
+  }) {
+    final commandId = _nextCommandId('realtime-application');
+    try {
+      return _send(
+        commandId: commandId,
+        command: NativeNetworkProtocol.sendRealtimeApplicationDataCommand(
+          commandId: commandId,
+          realtimeId: realtimeId,
+          generation: generation,
+          payload: payload,
+        ),
+      );
+    } on ArgumentError {
+      return NativeCommandTicket(
+        commandId: commandId,
+        queueStatus: NativeOperationStatus.invalidArgument,
+      );
+    }
+  }
 
   @override
   NativeCommandTicket sendScreenShareConsent({

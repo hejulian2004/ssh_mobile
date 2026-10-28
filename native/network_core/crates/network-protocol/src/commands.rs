@@ -247,6 +247,17 @@ pub struct DiscardIncomingRealtimeOfferCommand {
     pub claim_token: String,
 }
 
+/// Opaque bytes for the session DataChannel. The runtime does not parse them.
+#[derive(Clone, PartialEq, Message)]
+pub struct SendRealtimeApplicationDataCommand {
+    #[prost(string, tag = "1")]
+    pub realtime_id: String,
+    #[prost(uint64, tag = "2")]
+    pub generation: u64,
+    #[prost(bytes = "vec", tag = "3")]
+    pub payload: Vec<u8>,
+}
+
 /// 逻辑 ReliableStream 的稳定业务身份。
 ///
 /// `stream_id` 只在同一个 opener 的命名空间内唯一；opener 必须贯穿
@@ -300,7 +311,7 @@ pub struct NetworkCommand {
     pub protocol_version: u32,
     #[prost(
         oneof = "network_command::Payload",
-        tags = "10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36"
+        tags = "10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37"
     )]
     pub payload: Option<network_command::Payload>,
 }
@@ -344,6 +355,8 @@ pub mod network_command {
         RejectIncomingRealtimeOffer(RejectIncomingRealtimeOfferCommand),
         #[prost(message, tag = "36")]
         DiscardIncomingRealtimeOffer(DiscardIncomingRealtimeOfferCommand),
+        #[prost(message, tag = "37")]
+        SendRealtimeApplicationData(SendRealtimeApplicationDataCommand),
         #[prost(message, tag = "25")]
         SshStreamOpen(SshStreamOpenCommand),
         #[prost(message, tag = "26")]

@@ -1,4 +1,4 @@
-最新更新时间：2026-08-30
+最新更新时间：2026-10-23
 
 # network_transport 维护约束
 
@@ -13,7 +13,9 @@
   connections; `boundLocalPort` is read-only projection, not ownership transfer.
 - `openCommandGateway()`/`openRealtimeGateway()` return gateways that borrow the
   Runtime handle; they copy/close neither it nor business protocol. Realtime only
-  maps typed native commands/events; `start/stop` return `NativeCommandTicket`,
+  maps typed native commands/events. `NetworkRealtimeApplicationGateway` is an
+  optional byte send for one realtime generation; payloads stay opaque.
+  `start/stop` return `NativeCommandTicket`,
   separating queue
   acceptance from `NativeCommandResultEvent`; App adapter owns result correlation,
   timeout, pending map, and subscriptions.

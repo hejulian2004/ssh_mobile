@@ -12,9 +12,13 @@ import (
 	"time"
 
 	"github.com/ssh-mobile/relay/internal/admin"
+	"github.com/ssh-mobile/relay/internal/diagnostics"
 )
 
 func main() {
+	if err := diagnostics.InstallFromEnvironment("admin"); err != nil {
+		log.Fatal("invalid development diagnostic configuration")
+	}
 	config, err := admin.ConfigFromEnvironment()
 	if err != nil {
 		log.Fatalf("admin config error: %v", err)

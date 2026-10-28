@@ -66,6 +66,7 @@ class LanHistoryDao extends DatabaseAccessor<LanShareDatabase>
     int? avgRtt,
     int? bytesTotal,
     String? failureReason,
+    bool clearFailureReason = false,
   }) async {
     final count =
         await (update(lanTransferRecords)..where((t) => t.id.equals(id))).write(
@@ -92,6 +93,8 @@ class LanHistoryDao extends DatabaseAccessor<LanShareDatabase>
                 : const Value.absent(),
             failureReason: failureReason != null
                 ? Value(failureReason)
+                : clearFailureReason
+                ? const Value<String?>(null)
                 : const Value.absent(),
           ),
         );

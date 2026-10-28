@@ -28,6 +28,7 @@ const _maxErrorMessageBytes = 8 * 1024;
 const _realtimeIdBytes = 32;
 const _sharedSessionInstanceIdBytes = 32;
 const _maxRealtimePayloadBytes = 256 * 1024;
+const _maxRealtimeApplicationDataBytes = 4 * 1024;
 const _maxScreenShareConsentPayloadBytes = 4 * 1024;
 const _maxScreenShareOperationIdBytes = 128;
 const _maxIceCandidateBytes = 8 * 1024;

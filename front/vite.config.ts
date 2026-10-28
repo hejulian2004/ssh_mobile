@@ -1,6 +1,7 @@
 import { loadEnv } from 'vite';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import { diagnosticsPlugin } from './diagnostics-plugin';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
@@ -9,8 +10,9 @@ export default defineConfig(({ mode }) => {
   const devPort = Number(env.FRONT_DEV_PORT);
 
   return {
-    plugins: [react()],
+    plugins: [react(), diagnosticsPlugin(env.VITE_SSH_MOBILE_LOG_RUN_ID)],
     server: {
+      ...(env.VITE_SSH_MOBILE_LOG_RUN_ID ? { host: '127.0.0.1', strictPort: true } : {}),
       ...(Number.isInteger(devPort) && devPort > 0 ? { port: devPort } : {}),
       proxy: {
         ...(adminApiOrigin ? { '/api/admin/v1': adminApiOrigin } : {}),
@@ -30,7 +32,7 @@ export default defineConfig(({ mode }) => {
         provider: 'v8',
         reporter: ['text', 'json-summary', 'lcov'],
         reportsDirectory: './coverage',
-        include: ['src/**/*.{ts,tsx}'],
+        include: ['src/**/*.{ts,tsx}', 'diagnostics-plugin.ts'],
         exclude: [
           'src/**/*.test.{ts,tsx}',
           'src/test/**',

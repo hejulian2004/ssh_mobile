@@ -332,6 +332,36 @@ final class _NativeProtocolCommandEncoder {
     );
   }
 
+  /// Encodes opaque session DataChannel bytes. The payload is not parsed here.
+  static Uint8List sendRealtimeApplicationDataCommand({
+    required String commandId,
+    required String realtimeId,
+    required int generation,
+    required Uint8List payload,
+  }) {
+    _values.validateCommandId(commandId);
+    _values.validateRealtimeId(realtimeId);
+    if (generation <= 0) {
+      throw ArgumentError.value(generation, 'generation', 'Must be positive.');
+    }
+    if (payload.isEmpty || payload.length > _maxRealtimeApplicationDataBytes) {
+      throw ArgumentError.value(
+        payload.length,
+        'payload',
+        'Application payload must contain 1-4096 bytes.',
+      );
+    }
+    return _command(
+      commandId,
+      37,
+      (_ProtoWriter()
+            ..string(1, realtimeId)
+            ..varint(2, generation)
+            ..bytesField(3, payload))
+          .takeBytes(),
+    );
+  }
+
   static Uint8List claimIncomingRealtimeOfferCommand({
     required String commandId,
     required String realtimeId,

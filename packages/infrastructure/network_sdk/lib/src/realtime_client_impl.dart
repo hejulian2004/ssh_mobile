@@ -175,6 +175,34 @@ final class RealtimeClientImpl implements RealtimeClient {
       case RealtimeIncomingSessionOfferBackendEvent(:final offer):
         if (!_isValidIncomingOffer(offer)) return;
         _incomingOffers.add(offer);
+      case RealtimeApplicationChannelBackendEvent(
+        :final realtimeId,
+        :final peerId,
+        :final generation,
+        :final sharedSessionInstanceId,
+        :final open,
+      ):
+        final session = _sessions[realtimeId];
+        if (session == null || session.peerId != peerId) return;
+        session._applyApplicationChannel(
+          generation: generation,
+          sharedSessionInstanceId: sharedSessionInstanceId,
+          open: open,
+        );
+      case RealtimeApplicationDataBackendEvent(
+        :final realtimeId,
+        :final peerId,
+        :final generation,
+        :final sharedSessionInstanceId,
+        :final payload,
+      ):
+        final session = _sessions[realtimeId];
+        if (session == null || session.peerId != peerId) return;
+        session._applyApplicationData(
+          payload,
+          generation: generation,
+          sharedSessionInstanceId: sharedSessionInstanceId,
+        );
     }
   }
 
@@ -207,6 +235,41 @@ final class RealtimeClientImpl implements RealtimeClient {
   }) async {
     if (!allowDisposed) _ensureUsable();
     return _backend.stop(realtimeId: session.realtimeId);
+  }
+
+  Future<SdkResult<void>> _sendApplicationData(
+    _RealtimeSession session,
+    Uint8List payload,
+  ) async {
+    _ensureUsable();
+    final generation = session.generation;
+    if (generation == null || generation <= 0) {
+      return SdkFailure(
+        NetworkError(
+          code: NetworkErrorCode.invalidArgument,
+          message: 'Realtime generation is not available.',
+          operation: NetworkOperation.send,
+          peerId: session.peerId,
+        ),
+      );
+    }
+    final backend = _backend;
+    if (backend is! RealtimeApplicationDataBackend) {
+      return SdkFailure(
+        NetworkError(
+          code: NetworkErrorCode.invalidArgument,
+          message: 'Realtime application data is unavailable on this backend.',
+          operation: NetworkOperation.send,
+          peerId: session.peerId,
+        ),
+      );
+    }
+    return (backend as RealtimeApplicationDataBackend).sendApplicationData(
+      realtimeId: session.realtimeId,
+      peerId: session.peerId,
+      generation: generation,
+      payload: payload,
+    );
   }
 
   Future<SdkResult<void>> _sendConsent(

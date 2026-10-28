@@ -259,6 +259,8 @@ final class AppLanShareStrings implements lan.LanShareStrings {
   @override
   String get lanShareOpenBrowser => _strings.lanShareOpenBrowser;
   @override
+  String get lanShareFailed => _strings.lanShareFailed;
+  @override
   String get lanSharePinMismatch => _strings.lanSharePinMismatch;
   @override
   String get lanSharePinPairing => _strings.lanSharePinPairing;

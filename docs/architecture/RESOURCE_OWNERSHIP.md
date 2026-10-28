@@ -118,3 +118,7 @@ Owner，不替代该 ADR 的 pairing、route 或 binary transfer 验收。
 dart run tool/check_resource_owners.dart
 dart run test/tool/resource_owner_check_test.dart
 ```
+
+## Development diagnostic resources
+
+App Runtime owns local LogSink instances and drains them after borrowers stop. Full App drains local-only sinks before disposing its logger; AppLoggerImpl closes its owned sinks. Native runtime owns and joins its diagnostic writer thread after runtime tasks stop. The development worker owns its child Process objects, stdout subscriptions and Android collector; stop releases only these resources. Query commands own no application runtime or database.

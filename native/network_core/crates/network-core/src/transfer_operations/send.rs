@@ -29,11 +29,14 @@ pub(crate) async fn ensure_business_path(
     .map(|_| ())
 }
 
-/// 校验源文件，并交给当前逻辑 Session 的 Route Dispatcher。
-pub(crate) async fn start_file_send(
-    state: Arc<RuntimeState>,
-    command: SendFileCommand,
-) -> Result<(), ProtocolError> {
+/// 命令接受前的廉价校验：身份、普通文件、安全文件名、已注册对端。
+///
+/// 整文件哈希和路由选择不在这里。它们留在 [`start_file_send`]，避免挡住
+/// 单线程命令 worker。
+async fn prepare_outgoing_file(
+    state: &RuntimeState,
+    command: &SendFileCommand,
+) -> Result<PathBuf, ProtocolError> {
     if !valid_transfer_identity(&command.transfer_id, &command.peer_id)
         || command.file_path.is_empty()
     {
@@ -61,6 +64,18 @@ pub(crate) async fn start_file_send(
             &command.peer_id,
         ));
     }
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    if !network_transfer::single_safe_file_name(file_name) {
+        return Err(protocol_error_with_peer(
+            NetworkErrorCode::InvalidArgument,
+            "file_name must be a single safe path component",
+            "send",
+            &command.peer_id,
+        ));
+    }
     if !state.peers.read().await.contains_key(&command.peer_id) {
         return Err(protocol_error_with_peer(
             NetworkErrorCode::NoRoute,
@@ -69,6 +84,43 @@ pub(crate) async fn start_file_send(
             &command.peer_id,
         ));
     }
+    Ok(path)
+}
+
+/// 廉价校验通过后立即接受发送命令。
+///
+/// 成功只表示发送已入队。哈希、选路和真正发出在后台执行；失败发布
+/// `TransferFailed`，不再变成迟到的命令错误。
+pub(crate) async fn accept_file_send(
+    state: Arc<RuntimeState>,
+    command: SendFileCommand,
+) -> Result<(), ProtocolError> {
+    prepare_outgoing_file(&state, &command).await?;
+    let transfer_id = command.transfer_id.clone();
+    let peer_id = command.peer_id.clone();
+    let task_state = Arc::clone(&state);
+    tokio::spawn(async move {
+        if let Err(error) = start_file_send(task_state.clone(), command).await {
+            let code = NetworkErrorCode::try_from(error.code).unwrap_or(NetworkErrorCode::IoError);
+            emit_transfer_error(
+                &task_state.event_tx,
+                &transfer_id,
+                code,
+                error.message,
+                "send",
+                Some(&peer_id),
+            );
+        }
+    });
+    Ok(())
+}
+
+/// 校验源文件，并交给当前逻辑 Session 的 Route Dispatcher。
+pub(crate) async fn start_file_send(
+    state: Arc<RuntimeState>,
+    command: SendFileCommand,
+) -> Result<(), ProtocolError> {
+    let path = prepare_outgoing_file(&state, &command).await?;
     let manifest = build_file_manifest(command.transfer_id.clone(), &path)
         .await
         .map_err(|_| {

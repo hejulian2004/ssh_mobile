@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:io';
 
 import 'package:app_core/app_core.dart' as app_core;
+import 'package:app_diagnostics/app_diagnostics.dart';
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -60,10 +61,9 @@ class AppLogService extends ChangeNotifier implements app_core.AppLogger {
   bool _notifyScheduled = false;
   Timer? _notifyTimer;
   int _nextEntryId = 1;
-  File? _logFile;
-  final List<String> _logWriteQueue = [];
-  bool _isWriting = false;
-  Completer<void>? _writeCompleter;
+  RotatingLogWriter? _diskWriter;
+  Future<void>? _diskInitialization;
+  final List<app_core.LogSink> _localSinks = [];
   Future<void> _databaseOperationTail = Future<void>.value();
   int _activeDbWrites = 0;
   Completer<void>? _dbWriteCompleter;
@@ -85,10 +85,7 @@ class AppLogService extends ChangeNotifier implements app_core.AppLogger {
   /// 返回磁盘写入队列排空的 Future。
   @visibleForTesting
   Future<void> get pendingWrites {
-    if (!_isWriting && _logWriteQueue.isEmpty) {
-      return Future.value();
-    }
-    return (_writeCompleter ??= Completer<void>()).future;
+    return _flushDiskWrites();
   }
 
   /// 返回数据库写入队列排空的 Future。
@@ -110,7 +107,8 @@ class AppLogService extends ChangeNotifier implements app_core.AppLogger {
   /// 清除磁盘文件句柄，仅供测试在切换临时目录时使用。
   @visibleForTesting
   void resetLogFileForTesting() {
-    _logFile = null;
+    _diskWriter = null;
+    _diskInitialization = null;
   }
 
   /// 重置数据库绑定状态，仅供数据库测试隔离场景使用。
@@ -236,6 +234,30 @@ class AppLogService extends ChangeNotifier implements app_core.AppLogger {
     _sinks.remove(sink);
   }
 
+  /// Transfers ownership of a local-only sink. Legacy logs never reach the
+  /// separately registered telemetry sinks.
+  void addLocalSink(app_core.LogSink sink) {
+    if (!_localSinks.contains(sink)) _localSinks.add(sink);
+  }
+
+  /// Drains owned local sinks before App Scope releases the logger.
+  Future<void> closeLocalSinks() async {
+    final sinks = List<app_core.LogSink>.of(_localSinks);
+    _localSinks.clear();
+    Object? firstError;
+    StackTrace? firstStack;
+    for (final sink in sinks) {
+      try {
+        await sink.close();
+      } catch (error, stack) {
+        firstError ??= error;
+        firstStack ??= stack;
+      }
+    }
+    await pendingWrites;
+    if (firstError != null) Error.throwWithStackTrace(firstError, firstStack!);
+  }
+
   /// 写入普通信息日志。
   void info(String message, {String? details}) {
     add('info', message, details: details);
@@ -273,7 +295,7 @@ class AppLogService extends ChangeNotifier implements app_core.AppLogger {
     }
     final source = record.source;
     final hasSource = source?.isNotEmpty == true;
-    add(
+    _add(
       _legacyLevelName(record.level),
       record.error == null
           ? record.message
@@ -282,6 +304,7 @@ class AppLogService extends ChangeNotifier implements app_core.AppLogger {
       details: record.details,
       captureSource: !hasSource,
       sourceLocation: hasSource ? source : null,
+      structuredRecord: record,
     );
   }
 

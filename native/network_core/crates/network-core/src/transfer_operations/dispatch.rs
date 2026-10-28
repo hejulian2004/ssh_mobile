@@ -95,7 +95,7 @@ pub(crate) async fn dispatch_transfer_command(
 ) -> Result<(), ProtocolError> {
     match command.payload {
         Some(network_protocol::network_command::Payload::SendFile(send)) => {
-            start_file_send(state, send).await
+            accept_file_send(state, send).await
         }
         Some(network_protocol::network_command::Payload::CancelTransfer(cancel)) => {
             if state

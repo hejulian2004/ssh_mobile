@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:app_core/app_core.dart';
+import 'package:app_diagnostics/app_diagnostics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:connection_core/connection_core.dart' as connection_core;
@@ -58,6 +59,7 @@ import 'ssh_native_stream_adapters.dart';
 import 'rag_feature_adapters.dart';
 import 'realtime_feature_adapters.dart';
 import 'realtime_media_feature_adapters.dart';
+import 'screen_share_guidance_android.dart';
 import 'terminal_ssh_capability_adapter.dart';
 import 'webview_feature_adapters.dart';
 

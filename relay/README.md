@@ -1,4 +1,4 @@
-> Last updated: 2026-09-08
+> Last updated: 2026-10-23
 
 # SSH Mobile Control, Relay, and Admin Backend Services
 
@@ -106,3 +106,10 @@ Compose requires the Relay storage inputs (`RELAY_DATABASE_URL`,
 `RELAY_REDIS_URL`, `RELAY_REDIS_PASSWORD`, `MYSQL_ROOT_PASSWORD`, and
 `MYSQL_PASSWORD`) as well as the six Analytics/Telemetry inputs documented in
 `.env.example`; the example file contains placeholders only.
+
+## Local development diagnostics
+
+Runtime output and agent queries follow the [local diagnostic contract](../docs/agent/runtime-diagnostics.md).
+App composition roots inject `app_diagnostics` through public Core logging
+contracts; Feature dependencies remain unchanged. Development tools own launched
+processes and file queries, and are never imported by runtime packages.

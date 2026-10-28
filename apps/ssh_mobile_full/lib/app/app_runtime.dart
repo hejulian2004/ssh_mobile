@@ -465,6 +465,7 @@ final class AppRuntime implements Disposable {
 
     // Logger 必须最后释放，因为上面的资源可能仍需记录关闭失败。
     if (disposeLogger) {
+      await attempt('app-log.local-drain', appLogService.closeLocalSinks);
       await attempt('app-log.dispose', appLogService.dispose);
       await attempt('app-log.assert-released', () {
         assert(appLogService.activeTimerCount == 0);

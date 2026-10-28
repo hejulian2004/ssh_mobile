@@ -171,6 +171,18 @@ final class NativeNetworkProtocol {
     payload: payload,
   );
 
+  static Uint8List sendRealtimeApplicationDataCommand({
+    required String commandId,
+    required String realtimeId,
+    required int generation,
+    required Uint8List payload,
+  }) => _NativeProtocolCommandEncoder.sendRealtimeApplicationDataCommand(
+    commandId: commandId,
+    realtimeId: realtimeId,
+    generation: generation,
+    payload: payload,
+  );
+
   static Uint8List claimIncomingRealtimeOfferCommand({
     required String commandId,
     required String realtimeId,

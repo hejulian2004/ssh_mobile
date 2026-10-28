@@ -1,4 +1,4 @@
-最新更新时间：2026-10-13
+最新更新时间：2026-10-23
 
 # network_sdk
 
@@ -55,7 +55,8 @@ import 'package:network_sdk/network_sdk.dart';
 `SdkRequestExecutor`，不会自行创建 HTTP client。Feature 只使用所需的最小客户端
 或 App Shell 注入的 Feature Port。
 
-`RealtimeSession` 是唯一的 Realtime 信令/状态 Feature 边界。`RealtimeClientImpl` 只协调
+`RealtimeSession` 是唯一的 Realtime 信令/状态 Feature 边界。它另外提供当前代际的
+不透明应用字节通道，单包不超过 4096 字节，不解释涂鸦内容。`RealtimeClientImpl` 只协调
 App Shell 注入的 backend 事件和生命周期；它不再提供合成视频帧流。屏幕共享使用
 `realtime_media` 的不透明 endpoint/surface 生命周期，未解码的视频帧和音频设备能力
 保持 unavailable，不把 SDP/ICE 事件泄漏给 Feature。`start()`/`stop()` 的 Future 等待 App Shell 关联到

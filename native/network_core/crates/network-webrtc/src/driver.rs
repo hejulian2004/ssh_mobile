@@ -61,6 +61,8 @@ pub struct RealtimeIoDriver {
     socket: Arc<UdpSocket>,
     local_addr: SocketAddr,
     io_local_addr: SocketAddr,
+    /// First opened DataChannel. A realtime session creates only one.
+    application_channel: Option<RTCDataChannelId>,
 }
 
 /// Shared owner handle used by Runtime signal handling and the I/O task.  The
@@ -111,6 +113,7 @@ impl RealtimeIoDriver {
             socket: Arc::new(socket),
             local_addr,
             io_local_addr: SocketAddr::new(candidate_ip, local_addr.port()),
+            application_channel: None,
         })
     }
 
@@ -133,7 +136,33 @@ impl RealtimeIoDriver {
     /// Close the peer while retaining the driver owner for deterministic
     /// shutdown tests.
     pub fn close(&mut self) -> Result<(), WebRtcError> {
+        self.application_channel = None;
         self.peer.close()
+    }
+
+    pub(crate) fn note_application_channel_opened(&mut self, channel_id: RTCDataChannelId) {
+        if self.application_channel.is_none() {
+            self.application_channel = Some(channel_id);
+        }
+    }
+
+    pub(crate) fn note_application_channel_closed(&mut self, channel_id: RTCDataChannelId) -> bool {
+        if self.application_channel == Some(channel_id) {
+            self.application_channel = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Sends opaque application bytes on the session DataChannel.
+    pub fn send_application_data(&mut self, payload: &[u8]) -> Result<(), WebRtcError> {
+        let Some(channel_id) = self.application_channel else {
+            return Err(WebRtcError::InvalidConfiguration(
+                "application channel is not open".into(),
+            ));
+        };
+        self.peer.send_data(channel_id, payload)
     }
 
     fn socket(&self) -> Arc<UdpSocket> {
@@ -179,6 +208,15 @@ pub async fn run_realtime_io(
             while let Some(event) = driver.peer.poll_event() {
                 driver.peer.observe_screen_video_event(&event);
                 for mapped in map_peer_event(event)? {
+                    match mapped {
+                        RealtimeIoEvent::DataChannelOpened(channel_id) => {
+                            driver.note_application_channel_opened(channel_id);
+                        }
+                        RealtimeIoEvent::DataChannelClosed(channel_id) => {
+                            driver.note_application_channel_closed(channel_id);
+                        }
+                        _ => {}
+                    }
                     apply_terminal_media_policy(driver.peer_mut(), &mapped);
                     pending_events.push(mapped);
                 }

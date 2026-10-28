@@ -1,4 +1,4 @@
-> Last updated: 2026-10-12
+> Last updated: 2026-10-23
 
 # Repository scripts
 
@@ -52,3 +52,10 @@ still run on each consumer.
 `e2e/online_e2e.sh` and `e2e/online_e2e.ps1` are an explicit external-deployment
 gate. They are manual-only and never start Compose or join the routine CI
 aggregate.
+
+## Local development diagnostics
+
+Runtime output and agent queries follow the [local diagnostic contract](../docs/agent/runtime-diagnostics.md).
+App composition roots inject `app_diagnostics` through public Core logging
+contracts; Feature dependencies remain unchanged. Development tools own launched
+processes and file queries, and are never imported by runtime packages.

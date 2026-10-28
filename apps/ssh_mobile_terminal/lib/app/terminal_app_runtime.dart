@@ -1,3 +1,5 @@
+import 'package:app_diagnostics/app_diagnostics.dart';
+
 // Terminal-only App 的 App Scope 运行时。
 //
 // Runtime 只持有该编译切片所需的 Connection、Network、SSH 和日志资源；
@@ -98,13 +100,25 @@ final class TerminalAppRuntime implements Disposable {
 
   /// 创建并初始化 Terminal-only App 的最小资源集合。
   static Future<TerminalAppRuntime> create() async {
-    final logger = AppLoggerImpl();
+    final logger = AppLoggerImpl(
+      sinks: [?DiagnosticFileSink.fromEnvironment('flutter')],
+    );
     final connectionDatabase = ConnectionDatabase();
     final connectionRepository = DriftConnectionRepository(
       database: connectionDatabase,
     );
     final credentialRepository = SecureCredentialRepository();
-    final networkRuntime = NetworkRuntimeImpl();
+    final diagnosticConfig = DiagnosticConfig.fromEnvironment();
+    final networkRuntime = NetworkRuntimeImpl(
+      nativeAdapter: SshMobileNativeNetworkAdapter(
+        diagnosticDirectory: diagnosticConfig.enabled
+            ? diagnosticConfig.directory.path
+            : null,
+        diagnosticRunId: diagnosticConfig.enabled
+            ? diagnosticConfig.runId
+            : null,
+      ),
+    );
     final terminalCapability = TerminalOnlyCapability();
     final sshSessionManager = SshSessionManagerImpl(
       runtime: DesktopSshRuntime(),
