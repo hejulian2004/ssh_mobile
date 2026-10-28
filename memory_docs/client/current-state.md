@@ -1,4 +1,4 @@
-> Last updated: 2026-10-22
+> Last updated: 2026-10-28
 
 # Client Current State
 
@@ -47,6 +47,12 @@ Authenticated Direct QUIC/TCP signaling works without Relay under
 the capture source before carrier preparation; native signaling remains encrypted
 and bound to current ConnectionSession admission. Relay Control remains the
 signaling path when Direct is unavailable; actual capture/render stays a device gate.
+An Android receiver with a live frame can enter system picture-in-picture when
+the user leaves the app. The same activity, texture, media endpoint, and
+annotation session stay in place; the small window hides controls and ink.
+Stopping the share or reopening the window returns to that route. Senders and
+Windows do not enter picture-in-picture. Device entry and restoration remain a
+manual check.
 
 ## Validation
 

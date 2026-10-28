@@ -109,16 +109,19 @@ final class _AppScreenShareRouteScopeState
             final remoteSurface = _operation.media?.remoteSurface;
             final presenter =
                 widget.presenter ?? const AppTextureRemoteVideoPresenter();
+            final viewer =
+                remoteSurface != null &&
+                !operation.isTerminal &&
+                !_operation.finished;
             return AppScreenShareVideoPage(
               annotation: _operation.annotationInteractive
                   ? _operation.annotation
                   : null,
               videoSize: _operation.media!.remoteVideoSize,
               autoEnterFullscreen: operation.role == ScreenShareRole.receiver,
-              enableViewerControls:
-                  remoteSurface != null &&
-                  !operation.isTerminal &&
-                  !_operation.finished,
+              allowPictureInPicture:
+                  viewer && operation.role == ScreenShareRole.receiver,
+              enableViewerControls: viewer,
               onStop:
                   (!operation.isTerminal || _operation.cleanupFailed) &&
                       !_operation.stopping &&

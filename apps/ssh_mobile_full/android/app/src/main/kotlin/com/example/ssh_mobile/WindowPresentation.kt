@@ -44,6 +44,10 @@ internal class WindowPresentation(private val window: Window, messenger: BinaryM
 
     fun refresh() { owner.refresh() }
 
+    fun suspendImmersive() { owner.suspend() }
+
+    fun resumeImmersive() { owner.refresh() }
+
     fun dispose() {
         channel.setMethodCallHandler(null)
         owner.close()

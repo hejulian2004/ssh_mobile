@@ -28,6 +28,17 @@ internal class WindowSnapshotLease<S>(
         return try { enter(); true } catch (_: Exception) { false }
     }
 
+    /** Shows the saved window state without releasing the lease. */
+    fun suspend(): Boolean {
+        val previous = current ?: return true
+        return try {
+            restore(previous.second)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun close(): Boolean {
         val previous = current ?: return true
         return try {

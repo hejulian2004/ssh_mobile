@@ -5,6 +5,7 @@ import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ssh_mobile/app/screen_share_picture_in_picture.dart';
 import 'package:ssh_mobile/app/screen_share_video_page.dart';
 import 'package:ssh_mobile/app/window_fullscreen_controller.dart';
 
@@ -21,6 +22,8 @@ void main() {
     VoidCallback? onStop,
     bool enabled = true,
     bool automatic = false,
+    bool pictureInPicture = false,
+    AppPictureInPicturePlatform? pip,
     Locale? locale,
     ScreenShareAnnotationSession? annotation,
   }) => MaterialApp(
@@ -31,6 +34,8 @@ void main() {
       controls: const Text('consent state'),
       enableViewerControls: enabled,
       autoEnterFullscreen: automatic,
+      allowPictureInPicture: pictureInPicture,
+      pictureInPicturePlatform: pip,
       onStop: onStop,
       annotation: annotation,
       windowPlatform: platform,
@@ -295,6 +300,69 @@ void main() {
     expect(find.byTooltip('Stop screen share'), findsNothing);
     expect(session.strokes, hasLength(1));
   });
+
+  testWidgets('picture in picture keeps the same video and hides chrome', (
+    tester,
+  ) async {
+    final pip = _PipPlatform();
+    final annotation = ScreenShareAnnotationSession(
+      operationId: 'operation',
+      generation: 1,
+      transport: _AnnotationTransport(),
+    );
+    addTearDown(annotation.dispose);
+    await tester.pumpWidget(
+      page(
+        pictureInPicture: true,
+        pip: pip,
+        annotation: annotation,
+        onStop: () {},
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(pip.sessions.single?.width, 1080);
+    expect(pip.sessions.single?.height, 2400);
+    expect(find.byType(ScreenShareAnnotationToolbar), findsOneWidget);
+    expect(find.byType(ScreenShareAnnotationCanvas), findsOneWidget);
+    expect(find.byTooltip('Rotate view'), findsOneWidget);
+    expect(platform.calls, isEmpty);
+    final video = tester.state(find.byType(_Video));
+    pip.listener!(true);
+    await tester.pump();
+    expect(find.byType(ScreenShareAnnotationToolbar), findsNothing);
+    expect(find.byType(ScreenShareAnnotationCanvas), findsNothing);
+    expect(find.byTooltip('Rotate view'), findsNothing);
+    expect(find.byTooltip('Stop screen share'), findsNothing);
+    expect(find.byType(AppBar), findsNothing);
+    expect(find.text('consent state'), findsNothing);
+    expect(tester.state(find.byType(_Video)), same(video));
+    pip.listener!(false);
+    await tester.pump();
+    expect(find.byTooltip('Rotate view'), findsOneWidget);
+    expect(find.byType(ScreenShareAnnotationCanvas), findsOneWidget);
+    await tester.tap(find.byTooltip('Rotate view'));
+    await tester.pump();
+    expect(pip.sessions.last?.width, 2400);
+    expect(pip.sessions.last?.height, 1080);
+    size.value = Size.zero;
+    await tester.pump();
+    expect(pip.sessions.last, isNull);
+    expect(platform.calls, isEmpty);
+  });
+
+  testWidgets('sender and an unread frame do not become eligible', (
+    tester,
+  ) async {
+    final pip = _PipPlatform();
+    size.value = null;
+    await tester.pumpWidget(page(pictureInPicture: true, pip: pip));
+    await tester.pump();
+    expect(pip.sessions, [null]);
+    size.value = const Size(320, 180);
+    await tester.pumpWidget(page(pip: pip));
+    await tester.pump();
+    expect(pip.sessions.last, isNull);
+  });
 }
 
 class _AnnotationTransport implements ScreenShareAnnotationTransport {
@@ -314,6 +382,26 @@ class _AnnotationTransport implements ScreenShareAnnotationTransport {
 
   @override
   Future<void> send(Uint8List bytes) async {}
+}
+
+class _PipPlatform implements AppPictureInPicturePlatform {
+  final sessions = <AppPictureInPictureSession?>[];
+  void Function(bool active)? listener;
+
+  @override
+  Future<void> setSession(AppPictureInPictureSession? session) async {
+    sessions.add(session);
+  }
+
+  @override
+  void bind(void Function(bool active) onModeChanged) {
+    listener = onModeChanged;
+  }
+
+  @override
+  void unbind() {
+    listener = null;
+  }
 }
 
 class _WindowPlatform implements AppWindowPresentationPlatform {
