@@ -142,6 +142,7 @@ final class AppScreenSharePictureInPicture extends ChangeNotifier {
   bool _active = false;
   int _modeEpoch = 0;
   int _readSerial = 0;
+  int _publishEpoch = 0;
   bool _disposed = false;
   bool _unsupported = false;
   bool _hasApplied = false;
@@ -157,10 +158,8 @@ final class AppScreenSharePictureInPicture extends ChangeNotifier {
   void claim() {
     if (_disposed || _unsupported) return;
     platform.bind(_onMode);
-    _hasApplied = false;
-    _applied = null;
+    _dropPublication();
     _failed = null;
-    _rejected = null;
     _readMode();
   }
 
@@ -169,9 +168,7 @@ final class AppScreenSharePictureInPicture extends ChangeNotifier {
     _desired = session;
     if (!platform.holds) {
       if (platform.reclaimIfVacant(_onMode)) {
-        _hasApplied = false;
-        _applied = null;
-        _rejected = null;
+        _dropPublication();
         _readMode();
       } else if (_work == null && _same(session, _rejected)) {
         return;
@@ -218,6 +215,14 @@ final class AppScreenSharePictureInPicture extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Forgets a publish that started before this page became the owner again.
+  void _dropPublication() {
+    _publishEpoch++;
+    _hasApplied = false;
+    _applied = null;
+    _rejected = null;
+  }
+
   bool _matches(AppPictureInPictureSession? session) =>
       _hasApplied && _same(session, _applied);
 
@@ -232,6 +237,7 @@ final class AppScreenSharePictureInPicture extends ChangeNotifier {
         final pending =
             !_disposed &&
             !_unsupported &&
+            platform.holds &&
             !_matches(_desired) &&
             !_same(_desired, _failed) &&
             !_same(_desired, _rejected);
@@ -245,9 +251,14 @@ final class AppScreenSharePictureInPicture extends ChangeNotifier {
   Future<void> _apply() async {
     while (!_unsupported) {
       final target = _desired;
+      final epoch = _publishEpoch;
       try {
         final delivered = await platform.setSession(target);
-        if (!delivered) {
+        if (epoch != _publishEpoch) {
+          if (platform.holds) continue;
+          return;
+        }
+        if (!platform.holds || !delivered) {
           _rejected = target;
           _hasApplied = false;
           return;
@@ -257,12 +268,19 @@ final class AppScreenSharePictureInPicture extends ChangeNotifier {
         _failed = null;
         _rejected = null;
       } on MissingPluginException {
+        if (epoch != _publishEpoch) return;
         _unsupported = true;
         return;
       } catch (_) {
+        if (epoch != _publishEpoch) {
+          if (platform.holds) continue;
+          return;
+        }
+        if (!platform.holds) return;
         _failed = target;
         return;
       }
+      if (epoch != _publishEpoch) continue;
       if (_same(target, _desired)) return;
     }
   }

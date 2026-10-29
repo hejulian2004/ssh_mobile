@@ -237,6 +237,35 @@ void main() {
   );
 
   test(
+    'a claim publishes again when an older session reply arrives late',
+    () async {
+      final platform = _Platform();
+      final firstReply = Completer<void>();
+      platform.block = firstReply;
+      final pip = AppScreenSharePictureInPicture(platform: platform);
+      const session = AppPictureInPictureSession(width: 16, height: 9);
+      pip.update(session);
+      await Future<void>.delayed(Duration.zero);
+      expect(platform.attempts, 1);
+      expect(platform.sessions, isEmpty);
+      pip.claim();
+      pip.update(session);
+      await Future<void>.delayed(Duration.zero);
+      expect(platform.attempts, 1);
+      firstReply.complete();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(platform.sessions.map((item) => item?.width).toList(), [
+        16.0,
+        16.0,
+      ]);
+      pip.dispose();
+      await Future<void>.delayed(Duration.zero);
+    },
+  );
+
+  test(
     'a vacant reclaim reads the activity mode before publishing again',
     () async {
       const channel = MethodChannel('ssh_mobile/screen_share_pip_mode_update');

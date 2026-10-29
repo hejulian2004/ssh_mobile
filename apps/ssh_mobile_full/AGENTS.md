@@ -84,7 +84,8 @@ expands back to the same route. Destroying the activity controller, including
 engine reconfigure, only clears the published session and does not start the
 activity again. The shared channel has one current page; an older page cannot
 clear it. After that page closes, the route presented again reclaims the
-channel and republishes its frame. Reclaiming reads whether the
+channel and republishes its frame. A session publish that started
+before the reclaim does not count as that frame. Reclaiming reads whether the
 activity is still in picture-in-picture, so a stale compact flag cannot
 keep the full-page controls hidden. Senders and Windows do not enter
 picture-in-picture.

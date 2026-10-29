@@ -62,7 +62,9 @@ The same activity and texture stay in place; the small window hides controls
 and ink. Stopping the share brings that route forward. Destroying the activity
 controller clears eligibility and does not start the activity again. A newer
 share page owns the channel; after it closes, the presented page reclaims
-that channel and adopts the activity's current picture-in-picture mode.
+that channel, republishes its frame, and adopts the activity's current
+picture-in-picture mode. A publish still in flight from before the reclaim
+is not kept.
 Senders and Windows do not enter
 picture-in-picture. Device entry and restoration remain a manual check.
 
