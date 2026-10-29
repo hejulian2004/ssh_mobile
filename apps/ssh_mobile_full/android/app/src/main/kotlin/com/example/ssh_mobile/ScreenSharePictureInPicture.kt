@@ -40,7 +40,7 @@ internal class ScreenSharePictureInPicture(
 
     fun dispose() {
         channel.setMethodCallHandler(null)
-        coordinator.setVideoAspect(null, null)
+        coordinator.release()
     }
 
     private inner class Host : PictureInPictureHost {

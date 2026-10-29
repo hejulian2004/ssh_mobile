@@ -11,10 +11,18 @@ final class AppPictureInPictureSession {
   final double height;
 }
 
-/// Activity-scoped picture-in-picture control. One page binds it at a time.
+/// Activity-scoped picture-in-picture control.
+///
+/// The shared channel has one current owner. A later page replaces that owner;
+/// an older page's clear or unbind cannot remove it.
 abstract interface class AppPictureInPicturePlatform {
-  Future<void> setSession(AppPictureInPictureSession? session);
+  /// False when this page is not the current owner and the call was not sent.
+  Future<bool> setSession(AppPictureInPictureSession? session);
+  bool get holds;
   void bind(void Function(bool active) onModeChanged);
+
+  /// Binds only when nobody owns the channel. A live newer owner stays in place.
+  bool reclaimIfVacant(void Function(bool active) onModeChanged);
   void unbind();
 }
 
@@ -24,31 +32,86 @@ final class MethodChannelAppPictureInPicture
     : _channel = channel ?? const MethodChannel('ssh_mobile/screen_share_pip');
 
   final MethodChannel _channel;
-  void Function(bool active)? _listener;
+  int? _generation;
+
+  static final Map<String, _PictureInPictureChannelLease> _leases =
+      <String, _PictureInPictureChannelLease>{};
+
+  _PictureInPictureChannelLease get _lease => _leases.putIfAbsent(
+    _channel.name,
+    () => _PictureInPictureChannelLease(_channel),
+  );
 
   @override
-  Future<void> setSession(AppPictureInPictureSession? session) {
-    return _channel.invokeMethod<void>(
-      'setSession',
-      session == null
-          ? null
-          : <String, double>{'width': session.width, 'height': session.height},
-    );
+  bool get holds {
+    final generation = _generation;
+    return generation != null && _lease.holds(generation);
+  }
+
+  @override
+  Future<bool> setSession(AppPictureInPictureSession? session) {
+    if (!holds) return Future<bool>.value(false);
+    return _channel
+        .invokeMethod<void>(
+          'setSession',
+          session == null
+              ? null
+              : <String, double>{
+                  'width': session.width,
+                  'height': session.height,
+                },
+        )
+        .then((_) => true);
   }
 
   @override
   void bind(void Function(bool active) onModeChanged) {
-    _listener = onModeChanged;
-    _channel.setMethodCallHandler((call) async {
-      if (call.method == 'onModeChanged') {
-        _listener?.call(call.arguments == true);
-      }
-    });
+    _generation = _lease.bind(onModeChanged);
+  }
+
+  @override
+  bool reclaimIfVacant(void Function(bool active) onModeChanged) {
+    if (holds) return true;
+    if (!_lease.vacant) return false;
+    bind(onModeChanged);
+    return true;
   }
 
   @override
   void unbind() {
-    _listener = null;
+    final generation = _generation;
+    _generation = null;
+    if (generation != null) _lease.unbind(generation);
+  }
+}
+
+/// One generation owns the platform channel. Stale owners cannot publish.
+final class _PictureInPictureChannelLease {
+  _PictureInPictureChannelLease(this._channel);
+
+  final MethodChannel _channel;
+  int _generation = 0;
+  int? _owner;
+
+  int bind(void Function(bool active) onModeChanged) {
+    final generation = ++_generation;
+    _owner = generation;
+    _channel.setMethodCallHandler((call) async {
+      if (_owner != generation) return;
+      if (call.method == 'onModeChanged') {
+        onModeChanged(call.arguments == true);
+      }
+    });
+    return generation;
+  }
+
+  bool holds(int generation) => _owner == generation;
+
+  bool get vacant => _owner == null;
+
+  void unbind(int generation) {
+    if (_owner != generation) return;
+    _owner = null;
     _channel.setMethodCallHandler(null);
   }
 }
@@ -67,14 +130,34 @@ final class AppScreenSharePictureInPicture extends ChangeNotifier {
   AppPictureInPictureSession? _desired;
   AppPictureInPictureSession? _applied;
   AppPictureInPictureSession? _failed;
+  AppPictureInPictureSession? _rejected;
   Future<void>? _work;
 
   bool get active => _active;
 
+  /// Binds this page as the presented owner and publishes its frame again.
+  void claim() {
+    if (_disposed || _unsupported) return;
+    platform.bind(_onMode);
+    _hasApplied = false;
+    _applied = null;
+    _failed = null;
+    _rejected = null;
+  }
+
   void update(AppPictureInPictureSession? session) {
     if (_disposed || _unsupported) return;
     _desired = session;
-    if (_work == null && _matches(session)) return;
+    if (!platform.holds) {
+      if (platform.reclaimIfVacant(_onMode)) {
+        _hasApplied = false;
+        _applied = null;
+        _rejected = null;
+      } else if (_work == null && _same(session, _rejected)) {
+        return;
+      }
+    }
+    if (_work == null && platform.holds && _matches(session)) return;
     _schedule();
   }
 
@@ -99,7 +182,8 @@ final class AppScreenSharePictureInPicture extends ChangeNotifier {
             !_disposed &&
             !_unsupported &&
             !_matches(_desired) &&
-            !_same(_desired, _failed);
+            !_same(_desired, _failed) &&
+            !_same(_desired, _rejected);
         if (pending) unawaited(_schedule());
         completion.complete();
       }),
@@ -111,10 +195,16 @@ final class AppScreenSharePictureInPicture extends ChangeNotifier {
     while (!_unsupported) {
       final target = _desired;
       try {
-        await platform.setSession(target);
+        final delivered = await platform.setSession(target);
+        if (!delivered) {
+          _rejected = target;
+          _hasApplied = false;
+          return;
+        }
         _applied = target;
         _hasApplied = true;
         _failed = null;
+        _rejected = null;
       } on MissingPluginException {
         _unsupported = true;
         return;

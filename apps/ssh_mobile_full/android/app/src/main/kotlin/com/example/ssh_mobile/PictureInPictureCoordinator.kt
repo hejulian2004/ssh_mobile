@@ -55,6 +55,13 @@ internal class PictureInPictureCoordinator(
         if (wasEligible && next == null && host.isActive()) host.expand()
     }
 
+    /** Drops published eligibility. Teardown must not bring the activity forward. */
+    fun release() {
+        aspect = null
+        hasPublished = true
+        publish()
+    }
+
     fun onUserLeaveHint() {
         val ratio = aspect ?: return
         if (!host.sdkAtLeast26() || host.isActive()) return

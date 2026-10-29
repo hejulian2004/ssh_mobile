@@ -1375,6 +1375,76 @@ void main() {
   );
 
   _testSharedWidgets(
+    'covering the receiver clears picture in picture without stopping the share',
+    (tester) async {
+      const pipChannel = MethodChannel('ssh_mobile/screen_share_pip');
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(pipChannel, (call) async {
+            calls.add(call);
+            return null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(pipChannel, null),
+      );
+      backend.statsSnapshot = RealtimeMediaStats(width: 1080, height: 2424);
+      await tester.pumpWidget(
+        _routeApp(
+          backend,
+          session,
+          capabilities,
+          presenter: const _FixtureVideoPresenter(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      session.emitConsent(_incomingConsent());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Accept screen share'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pump();
+      expect(calls.last.arguments, {'width': 1080.0, 'height': 2424.0});
+      final operation = _testSessions.current!;
+      final surface = operation.media!.remoteSurface;
+      final annotation = operation.annotation;
+      final mediaOperations = List<String>.of(backend.operations);
+      expect(operation.finished, isFalse);
+      expect(operation.controller!.state, ScreenShareOperationState.active);
+      expect(surface, isNotNull);
+
+      tester
+          .state<NavigatorState>(find.byType(Navigator))
+          .push(
+            MaterialPageRoute<void>(
+              builder: (_) => const Scaffold(body: Text('Covering route')),
+            ),
+          );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Covering route'), findsOneWidget);
+      expect(calls.last.arguments, isNull);
+      expect(operation.finished, isFalse);
+      expect(operation.controller!.state, ScreenShareOperationState.active);
+      expect(operation.media!.remoteSurface, same(surface));
+      expect(operation.annotation, same(annotation));
+      expect(backend.operations, mediaOperations);
+
+      tester.state<NavigatorState>(find.byType(Navigator)).pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(calls.last.arguments, {'width': 1080.0, 'height': 2424.0});
+      expect(operation.finished, isFalse);
+      expect(operation.controller!.state, ScreenShareOperationState.active);
+      expect(operation.media!.remoteSurface, same(surface));
+      expect(operation.annotation, same(annotation));
+      expect(backend.operations, mediaOperations);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
+
+  _testSharedWidgets(
     'received portrait video retains its native aspect ratio',
     (tester) async {
       backend.statsSnapshot = RealtimeMediaStats(width: 1080, height: 2424);
