@@ -2,6 +2,68 @@
 
 part of 'ci_workflow_test.dart';
 
+void _testWidgetBridgeGates(Directory root, String workflow) {
+  final core = _jobSection(workflow, 'workspace-core-quality');
+  _expect(
+    RegExp(r'--scope=android_server_widgets\b').allMatches(core).length == 3,
+    'Widget plugin must have format, analyze and Dart test gates',
+  );
+  _expect(
+    _stepSection(
+      core,
+      'Measure Android widget Dart coverage',
+    ).contains('flutter test --no-pub --coverage'),
+    'Widget Dart coverage must come from its independent tests',
+  );
+  final dartCoverage = _stepSection(
+    core,
+    'Enforce Android widget Dart per-file coverage',
+  );
+  _expect(
+    dartCoverage.contains('packages/infrastructure/android_server_widgets') &&
+        dartCoverage.contains(
+          '../../../apps/ssh_mobile_full/tool/check_coverage.dart',
+        ) &&
+        dartCoverage.contains('--minimum=90') &&
+        dartCoverage.contains('--source-root=lib') &&
+        dartCoverage.contains('--all-sources') &&
+        dartCoverage.contains('--include=lib/src/'),
+    'Widget Dart implementation must retain its 90% per-file gate',
+  );
+  _expect(
+    _jobSection(
+      workflow,
+      'android-build',
+    ).contains(':android_server_widgets:verifyWidgetCoverage'),
+    'Android must run the widget JVM persistence and per-file coverage gate',
+  );
+  for (final extension in const ['sh', 'ps1']) {
+    final shell = extension == 'sh' ? 'bash' : 'powershell';
+    final jobs = File(
+      '${root.path}/scripts/$shell/ci/full_test_jobs.$extension',
+    ).readAsStringSync();
+    final app = File(
+      '${root.path}/scripts/$shell/ci/full_test_app.$extension',
+    ).readAsStringSync();
+    _expect(
+      jobs.contains('android_server_widgets'),
+      '$shell must test the widget Dart package',
+    );
+    _expect(
+      jobs.contains('--coverage') &&
+          jobs.contains('--all-sources') &&
+          jobs.contains('--include=lib/src/') &&
+          jobs.contains('--source-root=lib') &&
+          jobs.contains('--minimum=90'),
+      '$shell must retain independent widget Dart per-file coverage',
+    );
+    _expect(
+      app.contains(':android_server_widgets:verifyWidgetCoverage'),
+      '$shell must retain the focused widget JVM coverage gate',
+    );
+  }
+}
+
 void _testNativeBuildArtifacts(String workflow) {
   final producer = _jobSection(workflow, 'native-linux-build');
   _expect(

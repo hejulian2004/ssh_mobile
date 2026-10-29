@@ -7,6 +7,14 @@ class ConnectionDao extends DatabaseAccessor<ConnectionDatabase>
   /// 创建由 Drift 注入数据库的 DAO。
   ConnectionDao(super.attachedDatabase);
 
+  /// 订阅持久化目录；只拥有查询订阅，不拥有数据库生命周期。
+  Stream<List<ConnectionTableData>> watchAll() =>
+      (select(connectionTable)..orderBy([
+            (table) => OrderingTerm(expression: table.sortOrder),
+            (table) => OrderingTerm(expression: table.createdAt),
+          ]))
+          .watch();
+
   /// 按显式排序字段读取所有连接。
   Future<List<ConnectionTableData>> loadAll() {
     return (select(connectionTable)..orderBy([

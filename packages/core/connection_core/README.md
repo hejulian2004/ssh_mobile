@@ -1,4 +1,4 @@
-最新更新时间：2026-08-24
+最新更新时间：2026-10-29
 
 # connection_core
 
@@ -12,6 +12,10 @@ Connection/凭据/Host Key 公共契约，以及只保存非敏感连接结构�
   会主动排除它们。
 - `ConnectionRepository` 只管理连接结构和排序；`CredentialRepository` 只管理
   Secure Storage 中的密码、私钥；`HostKeyRepository` 只管理 Host Key 信任元数据。
+- 可选的公开 `ConnectionCatalogChanges.watchConnections()` 能力由
+  `DriftConnectionRepository` 提供：从原有数据库订阅首次、更新和删除后的不可变
+  连接结构快照，排除凭据字段。查询订阅由调用方取消，数据库仍由 AppRuntime 关闭。
+  `test/connection_catalog_changes_test.dart` 验证目录变化及凭据隔离。
 - Connection ID 必须非空且已规范化，Repository 不会静默 trim；Secure Storage
   使用版本化、无碰撞编码键，并在首次读取时按“先写新键、再删旧键”迁移历史键。
 - `ConnectionDatabase` 是本 Package 的资源，由 AppRuntime 创建并关闭；它使用

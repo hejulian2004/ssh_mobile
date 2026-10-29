@@ -32,6 +32,7 @@ void main() {
         final runtime = await harness.createFuture;
 
         expect(runtime.isDisposed, isFalse);
+        expect(runtime.monitoringWidgetAdapter, isNull);
         expect(runtime.appLogService, isNotNull);
         expect(runtime.logger, same(runtime.appLogService));
         expect(runtime.aiStorageAdapter, isNotNull);

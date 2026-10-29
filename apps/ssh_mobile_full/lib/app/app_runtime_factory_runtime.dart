@@ -33,6 +33,7 @@ extension _AppRuntimeFactoryRuntime on _AppRuntimeFactoryContext {
       sftpService: sftpService,
       monitoringModule: monitoringModule,
       monitoringService: monitoringService,
+      monitoringWidgetAdapter: monitoringWidgetAdapter,
       playbookModule: playbookModule,
       playbookSettingsAdapter: playbookSettingsAdapter,
       playbookConnectionCatalogAdapter: playbookConnectionCatalogAdapter,

@@ -1,9 +1,9 @@
-最新更新时间：2026-10-28
+最新更新时间：2026-10-29
 
 # 模块依赖审计
 
 本文件记录 Step 32 的最终依赖审计结果。审计对象是根 `pubspec.yaml` 明确列出的
-29 个 workspace 成员，依赖边只统计各 Package `dependencies` 中指向另一个
+30 个 workspace 成员，依赖边只统计各 Package `dependencies` 中指向另一个
 workspace 成员的直接生产依赖。
 
 ## 审计命令
@@ -44,7 +44,7 @@ Feature。Feature 之间默认禁止直接依赖，当前唯一登记的例外�
 
 | 层级 | Package | 内部生产依赖 | 边界说明 |
 | --- | --- | --- | --- |
-| App | `ssh_mobile` | `app_core`, `app_diagnostics`, `app_notifications`, `app_ui`, `connection_core`, `feature_ai`, `feature_connection`, `feature_developer`, `feature_lan_share`, `feature_mcp`, `feature_monitoring`, `feature_playbook`, `feature_rag`, `feature_screen_share`, `feature_sftp`, `feature_system_admin`, `feature_terminal`, `feature_webview`, `network_sdk`, `network_transport`, `realtime_media`, `realtime_media_android`, `realtime_media_windows`, `ssh_core`, `ssh_mobile_network_native` | Full App 组合根，负责注入 App Scope 与 Feature Route；screen-share 由 App Shell 组合 `feature_lan_share` 的窄 Port 与 `feature_screen_share` 的业务状态 |
+| App | `ssh_mobile` | `android_server_widgets`, `app_core`, `app_diagnostics`, `app_notifications`, `app_ui`, `connection_core`, `feature_ai`, `feature_connection`, `feature_developer`, `feature_lan_share`, `feature_mcp`, `feature_monitoring`, `feature_playbook`, `feature_rag`, `feature_screen_share`, `feature_sftp`, `feature_system_admin`, `feature_terminal`, `feature_webview`, `network_sdk`, `network_transport`, `realtime_media`, `realtime_media_android`, `realtime_media_windows`, `ssh_core`, `ssh_mobile_network_native` | Full App 组合根，负责注入 App Scope 与 Feature Route；screen-share 由 App Shell 组合 `feature_lan_share` 的窄 Port 与 `feature_screen_share` 的业务状态；监控 Widget 由 App 将现有样本与最小安全目录注入原生存储 |
 | App | `ssh_mobile_ssh` | `app_core`, `app_diagnostics`, `app_ui`, `connection_core`, `feature_connection`, `feature_terminal`, `ssh_core` | 直接 TCP SSH 组合根；不创建 NetworkRuntime |
 | App | `ssh_mobile_network` | `app_core`, `app_diagnostics`, `app_notifications`, `app_ui`, `feature_lan_share`, `network_sdk`, `network_transport` | 网络传输页组合根；加载 LAN Share；不创建 NetworkFacade，不加载 SSH Feature |
 | App | `ssh_mobile_terminal` | `app_core`, `app_diagnostics`, `app_ui`, `connection_core`, `feature_terminal`, `network_transport`, `ssh_core` | Terminal-only 组合根；不加载 Connection editor Feature |
@@ -66,6 +66,7 @@ Feature。Feature 之间默认禁止直接依赖，当前唯一登记的例外�
 | Feature | `feature_webview` | `app_core`, `app_ui` | WebView 会话与安全策略 |
 | Infrastructure | `app_diagnostics` | `app_core` | 本地结构化诊断输出；只依赖 app_core 公开契约，Feature 不导入该包 |
 | Infrastructure | `app_notifications` | 无 | Android 与 Windows 系统通知适配；不依赖 Feature，不保存聊天正文或文件路径 |
+| Infrastructure | `android_server_widgets` | 无 | Android-only Flutter Plugin；只持久化安全目录和每台服务器最新监控快照，不依赖 Feature、Connection Repository 或 SSH/Network SDK |
 | Infrastructure | `network_transport` | `app_core`, `ssh_mobile_network_native` | App Scope 网络门面和 Native handle 适配器 |
 | Infrastructure | `network_sdk` | 无 | Flutter 层 Bootstrap、鉴权 API、Session、事件流客户端及注入式 JSON 适配 |
 | Infrastructure | `realtime_media` | 无 | 不透明屏幕媒体端点的 Dart 生命周期契约；不拥有 Runtime、采集、编解码或渲染实现 |

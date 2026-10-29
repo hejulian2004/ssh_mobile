@@ -14,7 +14,7 @@ void _testCurrentRepositoryPasses() {
     repositoryRoot: Directory.current,
   ).audit();
   _expect(report.isValid, '当前 workspace 不应有依赖违规：${report.violations}');
-  _expect(report.packages.length == 29, '应审计根 workspace 的 29 个成员。');
+  _expect(report.packages.length == 30, '应审计根 workspace 的 30 个成员。');
   final diagnostics = report.packages.singleWhere(
     (package) => package.name == 'app_diagnostics',
   );

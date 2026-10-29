@@ -210,4 +210,6 @@ job_android() {
     return "$SKIP_STATUS"
   fi
   step 'Build Android debug APK' run_in apps/ssh_mobile_full flutter build apk --debug --no-pub
+  step 'Test Android widget storage and per-file coverage' run_in apps/ssh_mobile_full/android \
+    ./gradlew :android_server_widgets:verifyWidgetCoverage --no-daemon --console=plain
 }

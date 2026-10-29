@@ -541,6 +541,7 @@ jobs:
       - name: Format core packages
         run: >-
           dart run melos run format
+          --scope=android_server_widgets
           --scope=app_core
           --scope=app_diagnostics
           --scope=app_ui
@@ -549,6 +550,7 @@ jobs:
       - name: Analyze core packages
         run: >-
           dart run melos run analyze
+          --scope=android_server_widgets
           --scope=app_core
           --scope=app_diagnostics
           --scope=app_ui
@@ -557,11 +559,22 @@ jobs:
       - name: Test core packages
         run: >-
           dart run melos run test
+          --scope=android_server_widgets
           --scope=app_core
           --scope=app_diagnostics
           --scope=app_ui
           --scope=connection_core
           --scope=ssh_core
+
+      - name: Measure Android widget Dart coverage
+        working-directory: packages/infrastructure/android_server_widgets
+        run: flutter test --no-pub --coverage
+      - name: Enforce Android widget Dart per-file coverage
+        working-directory: packages/infrastructure/android_server_widgets
+        run: >-
+          dart run ../../../apps/ssh_mobile_full/tool/check_coverage.dart
+          --minimum=90 --file=coverage/lcov.info
+          --source-root=lib --all-sources --include=lib/src/ --details
 
   workspace-features-quality:
     needs: native-linux-build
@@ -1126,6 +1139,9 @@ jobs:
           ./gradlew :realtime_media_android:testDebugUnitTest --no-daemon --console=plain
       - name: Build Android debug APK
         run: flutter build apk --debug --no-pub
+      - name: Test Android widget storage and per-file coverage
+        working-directory: apps/ssh_mobile_full/android
+        run: ./gradlew :android_server_widgets:verifyWidgetCoverage --no-daemon --console=plain
 
   windows-build:
     needs: change_scope
