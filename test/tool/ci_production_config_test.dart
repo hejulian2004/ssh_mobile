@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:yaml/yaml.dart';
+
 /// Guards the CI/production boundaries that are easy to regress when the
 /// aggregate scripts or Docker contexts are edited.
 void main() {
@@ -344,14 +346,16 @@ void main() {
     coverageAliasPowerShell.contains('client_coverage.ps1'),
     'PowerShell coverage_test.ps1 must remain the client-gate compatibility alias.',
   );
+  final workflowJobs = (loadYaml(workflow) as YamlMap)['jobs'] as YamlMap;
+  final fullAppCoverage = workflowJobs['app-coverage'].toString();
   _expect(
-    workflow.contains('--minimum=90') &&
-        workflow.contains(
+    fullAppCoverage.contains('--minimum=90') &&
+        fullAppCoverage.contains(
           r'--base-ref="${{ needs.change_scope.outputs.base_sha }}"',
         ) &&
-        workflow.contains('--source-root=lib') &&
-        !workflow.contains('--minimum=35') &&
-        !workflow.contains('--all-sources'),
+        fullAppCoverage.contains('--source-root=lib') &&
+        !fullAppCoverage.contains('--minimum=35') &&
+        !fullAppCoverage.contains('--all-sources'),
     'CI Full App coverage must retain the 90% gate for new hand-written source files.',
   );
   final bashAppCoverage = File(

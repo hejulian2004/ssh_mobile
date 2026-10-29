@@ -85,6 +85,7 @@ final class _AppRuntimeFactoryContext {
   late final SftpService sftpService;
   late final monitoring.MonitoringModule monitoringModule;
   late final monitoring.MonitoringService monitoringService;
+  MonitoringWidgetAdapter? monitoringWidgetAdapter;
   late final AppAiSettingsAdapter aiSettingsAdapter;
   late final AppAiSshAdapter aiSshAdapter;
   late final AppAiSftpAdapter aiSftpAdapter;

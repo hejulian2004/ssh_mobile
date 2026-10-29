@@ -1,4 +1,4 @@
-最新更新时间：2026-10-28
+最新更新时间：2026-10-29
 
 # 资源 Owner 审计
 
@@ -57,6 +57,8 @@
 | McpDatabase | `AppRuntime` → `McpModule` | App Module | stop HTTP Server, then DB `dispose` |
 | LanShareDatabase | `AppRuntime` → `LanShareModule` | App Module | stop receiver, then DB `dispose` |
 | MonitoringService | `AppRuntime` → `MonitoringModule` | App Module | stop polling, cancel subscriptions, `dispose` |
+| Monitoring widget bridge | `AppRuntime` → `MonitoringWidgetAdapter` | Android App | cancel its monitor listener, directory subscription and import callback; settle serialized writes before monitoring Module disposal; never stop borrowed monitoring or SSH |
+| Monitoring snapshot DataStore | Application-private `MonitorSnapshotStorage`; borrowed by Flutter plugin and native readers | Android process | one DataStore owner per file, released with process; Engine detach cancels only its channel scope; newer writer session and increasing sequence invalidate late writes |
 | SystemAdminService | `AppSystemAdminModuleScope` → `SystemAdminModule` | Route Module | cancel commands, then `dispose` |
 | WebViewService | `AppRuntime` → `ClientWebViewService` | App | `dispose` chat sessions and controllers |
 | MCP HTTP Server | `McpModule` → `McpServerController` | App Module | `stop` server and pending approvals |

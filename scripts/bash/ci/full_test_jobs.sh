@@ -358,23 +358,31 @@ job_lan_network_v2() {
 job_core() {
   need dart || return "$SKIP_STATUS"
   step 'Format core packages' melos_exec 'dart format --output=none --set-exit-if-changed lib test' \
+    --scope=android_server_widgets \
     --scope=app_core \
     --scope=app_diagnostics \
     --scope=app_ui \
     --scope=connection_core \
     --scope=ssh_core
   step 'Analyze core packages' melos_exec 'flutter analyze --no-fatal-infos --no-pub' \
+    --scope=android_server_widgets \
     --scope=app_core \
     --scope=app_diagnostics \
     --scope=app_ui \
     --scope=connection_core \
     --scope=ssh_core
   step 'Test core packages' melos_exec "flutter test --no-pub --concurrency $MELOS_TEST_CONCURRENCY" \
+    --scope=android_server_widgets \
     --scope=app_core \
     --scope=app_diagnostics \
     --scope=app_ui \
     --scope=connection_core \
     --scope=ssh_core
+  step 'Measure Android widget Dart coverage' run_in packages/infrastructure/android_server_widgets \
+    flutter test --no-pub --coverage
+  step 'Enforce Android widget Dart per-file coverage' run_in packages/infrastructure/android_server_widgets \
+    dart run ../../../apps/ssh_mobile_full/tool/check_coverage.dart \
+    --minimum=90 --file=coverage/lcov.info --source-root=lib --all-sources --include=lib/src/ --details
 }
 
 job_features() {

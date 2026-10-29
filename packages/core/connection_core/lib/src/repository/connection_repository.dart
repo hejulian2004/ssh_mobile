@@ -1,5 +1,11 @@
 import '../model/connection_profile.dart';
 
+/// 可选的只读目录订阅能力；订阅者只取消自己的订阅，不关闭数据库。
+/// 每次发出不含凭据的持久化快照，包括首次读取、导入和删除。
+abstract interface class ConnectionCatalogChanges {
+  Stream<List<ConnectionConfig>> watchConnections();
+}
+
 /// Connection 结构数据的公共读写契约。
 ///
 /// 该契约故意保留现有 App 的同步快照接口，方便当前 ViewModel 逐步迁移；

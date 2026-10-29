@@ -22,6 +22,13 @@
 
 ## Scope, dependencies, and API
 
+- `MonitoringWidgetAdapter` is an Android-only App Scope borrower of the public
+  MonitoringService and Connection directory stream. Keep its single-flight,
+  coalesced writes and native writer-session/sequence protection. No new Timer,
+  sampler, SSH connection or MainActivity business logic. Dispose its listener,
+  subscription and import callback before releasing the monitoring Module;
+  stopping the adapter never stops the borrowed service. Only safe Widget DTOs
+  reach `android_server_widgets`; target configuration stays in its Core owner.
 - `LanSystemNotificationHost` owns the process notification center for this
   app, using `AppNotificationIdentity.full`. It may resume the app or open an
   existing LAN chat. It must not accept a file transfer or screen share from a

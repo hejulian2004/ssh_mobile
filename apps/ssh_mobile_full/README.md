@@ -162,6 +162,20 @@ Package 和 App Shell 直接使用的插件；Feature 实现不得通过 App `/s
 
 ## 数据库
 
+Android 的 `MonitoringWidgetAdapter` 由 AppRuntime 持有，订阅现有监控服务和
+公开的 Connection 目录变化，把四项真实指标与采样时间转换为
+`android_server_widgets` 的安全快照。普通样本按通知去重并以至少十五秒间隔
+同步，状态变化立即同步；桥接不创建 Timer，不改变监控的显式启动策略。
+监控轮次时间和原生 writer session/sequence 防止旧样本或迟到写入恢复已停止状态。
+删除连接、修改目标和导入恢复会使相应缓存失效。Runtime 先取消桥接订阅再关闭
+监控 Module；Windows 不初始化 Android Widget 通道。
+
+原生最新快照由插件的应用私有 DataStore 保存，不计入 App 日志或 Feature 历史。
+目录只含内部 ID 和脱敏名称；完整连接配置、地址、用户名和凭据不进入原生缓存。
+纯 JVM 的持久化重建测试不能代替 Android 进程重建与真实监控验收。
+桥接回归入口为 `test/app/monitoring_widget_adapter_test.dart`，插件边界和验证命令见
+[`android_server_widgets`](../../packages/infrastructure/android_server_widgets/README.md)。
+
 App Shell 只拥有独立的 `app_logs` 日志数据库。Connection、AI、Terminal、SFTP、
 Playbook、RAG、MCP 和 LAN Share 数据库分别由对应 Core/Feature Module 拥有；不再创建
 统一 `AppDatabase`。
