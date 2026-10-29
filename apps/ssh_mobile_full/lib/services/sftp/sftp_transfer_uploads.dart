@@ -10,6 +10,8 @@ extension SftpServiceTransferUploads on SftpService {
     final sftp = session?.sftp;
     if (sftp == null) throw StateError('SFTP is not connected');
     final activeSession = session!;
+    final remotePath = _joinRemotePath(activeSession.currentPath, filename);
+    final cancelGeneration = _transferCancelGeneration;
 
     final localFile = File(localPath);
     if (!await localFile.exists()) {
@@ -21,8 +23,11 @@ extension SftpServiceTransferUploads on SftpService {
       'upload',
       maxBytes: SftpService.maxUploadBytes,
     );
-
-    final remotePath = _joinRemotePath(activeSession.currentPath, filename);
+    if (_disposed ||
+        !activeSession.isCurrent(_sessions) ||
+        cancelGeneration != _transferCancelGeneration) {
+      throw const SftpTransferCancelledException();
+    }
 
     final transferId = DateTime.now().millisecondsSinceEpoch.toString();
     final transfer = SftpTransferState(
@@ -41,6 +46,9 @@ extension SftpServiceTransferUploads on SftpService {
     SftpFile? remoteFile;
     try {
       raf = await localFile.open(mode: FileMode.read);
+      if (_cancelTransferId == transferId) {
+        throw const SftpTransferCancelledException();
+      }
       remoteFile = await sftp.open(
         remotePath,
         mode:
@@ -103,9 +111,11 @@ extension SftpServiceTransferUploads on SftpService {
             path: remotePath,
           ),
         );
-        try {
-          await sftp.remove(remotePath);
-        } catch (_) {}
+        if (remoteFile != null) {
+          try {
+            await sftp.remove(remotePath);
+          } catch (_) {}
+        }
         activeSession.state = SftpConnectionState.connected;
         await _failTransferTelemetry(
           transferId,

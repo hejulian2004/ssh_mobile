@@ -9,7 +9,11 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
   }) {
     return AppConnectionRouteScope(
       connectionRepository: _connectionRepositoryAdapter!,
-      credentialRepository: _connectionCredentialAdapter!,
+      credentialRepository:
+          _runtime.credentialRepository
+              is connection_core.CredentialProtectionRepository
+          ? _runtime.credentialRepository
+          : _connectionCredentialAdapter!,
       hostKeyRepository: _connectionHostKeyAdapter!,
       runtimePort: _connectionRuntimeAdapter!,
       verificationPort: _connectionVerificationAdapter!,

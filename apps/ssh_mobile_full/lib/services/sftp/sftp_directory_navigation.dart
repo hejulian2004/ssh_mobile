@@ -123,6 +123,7 @@ extension _SftpDirectoryNavigation on SftpService {
       final client = await _clientFactory.connectClient(
         config,
         credentials: credentials,
+        validateTarget: target.validateCurrent,
       );
       SftpClient? sftp;
       try {

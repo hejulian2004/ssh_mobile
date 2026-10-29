@@ -6,6 +6,7 @@ import '../sftp_service.dart';
 import '../sftp_path_history_store.dart';
 
 class SftpService extends ChangeNotifier implements SftpClientAdapter {
+  String? get targetFingerprint => null;
   static const int maxTextEditBytes = 512 * 1024;
   static const int maxTextPreviewBytes = 2 * 1024 * 1024;
   static const int maxRichPreviewBytes = 20 * 1024 * 1024;

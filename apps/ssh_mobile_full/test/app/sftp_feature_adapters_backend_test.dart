@@ -33,6 +33,7 @@ void main() {
     final adapter = AppSftpBackendAdapter(service);
 
     expect(adapter.connectionId, 'conn-1');
+    expect(adapter.targetFingerprint, 'fingerprint');
     expect(adapter.connectionName, 'Server A');
     expect(adapter.currentPath, '/home/user');
     expect(adapter.state, feature_sftp.SftpConnectionState.loading);

@@ -4,11 +4,18 @@
 // 或全局单例。当前 App Shell 的后端仍是旧 SftpService 兼容适配器，后续
 // 清理旧 services 时可以只替换适配器，不改变 UI 和 Feature API。
 
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:ssh_core/ssh_core.dart';
 
+import '../domain/sftp_document.dart';
 import '../domain/sftp_models.dart';
 import '../domain/sftp_ports.dart';
+import 'sftp_document_transfer.dart';
+
+part 'sftp_service_documents.dart';
 
 /// SFTP 文件大小限制，集中归属 SFTP Feature，避免 UI/Service 各自硬编码。
 abstract final class SftpLimits {
@@ -27,12 +34,19 @@ final class SftpService extends ChangeNotifier
     required SftpBackend backend,
     required SftpPathHistoryRepository historyRepository,
     required SshSessionManager sshSessionManager,
-  }) : this._(backend, historyRepository, sshSessionManager);
+    Directory Function()? documentSpillDirectory,
+  }) : this._(
+         backend,
+         historyRepository,
+         sshSessionManager,
+         documentSpillDirectory,
+       );
 
   SftpService._(
     this._backend,
     this._historyRepository,
     this._sshSessionManager,
+    this._documentSpillDirectory,
   ) {
     _backend.addListener(_forwardBackendChanged);
   }
@@ -40,7 +54,15 @@ final class SftpService extends ChangeNotifier
   final SftpBackend _backend;
   final SftpPathHistoryRepository _historyRepository;
   final SshSessionManager _sshSessionManager;
+  final Directory Function()? _documentSpillDirectory;
   bool _disposed = false;
+  bool _documentCancelled = false;
+  SftpTransferState? _documentTransfer;
+  _SftpDocumentReadLease? _documentReadLease;
+  _SftpDocumentWriteLease? _documentWriteLease;
+  bool _documentBackendActive = false;
+  final _documentSettlements = <Future<void>>{};
+  Future<void>? _closeFuture;
 
   /// 文本编辑上限，保留旧调用面的命名以减少迁移期间行为差异。
   static const int maxTextEditBytes = SftpLimits.textEditBytes;
@@ -85,13 +107,15 @@ final class SftpService extends ChangeNotifier
   bool get isConnected => _backend.isConnected;
 
   @override
-  bool get isBusy => _backend.isBusy;
+  bool get isBusy => _documentTransfer != null || _backend.isBusy;
 
   @override
-  SftpTransferState? get activeTransfer => _backend.activeTransfer;
+  SftpTransferState? get activeTransfer =>
+      _backend.activeTransfer ?? _documentTransfer;
 
   @override
-  bool get hasActiveTransfer => _backend.hasActiveTransfer;
+  bool get hasActiveTransfer =>
+      _documentTransfer != null || _backend.hasActiveTransfer;
 
   @override
   bool isConnectionBusy(String id) => _backend.isConnectionBusy(id);
@@ -124,6 +148,45 @@ final class SftpService extends ChangeNotifier
     required String localPath,
     required String filename,
   }) => _backend.uploadFile(localPath: localPath, filename: filename);
+
+  SftpDocumentUploadTarget get documentUploadTarget => _captureDocumentTarget();
+
+  Future<void> uploadFromDocument({
+    required SftpDocumentSource source,
+    required String filename,
+    SftpDocumentUploadTarget? target,
+    int maxBytes = maxUploadBytes,
+  }) =>
+      _trackDocument(() => _uploadDocument(source, filename, target, maxBytes));
+
+  Future<void> downloadToDocument({
+    required SftpEntry entry,
+    required SftpDocumentSink sink,
+    int maxBytes = maxDownloadBytes,
+  }) => _trackDocument(() => _downloadDocument(entry, sink, maxBytes));
+
+  Future<void> _trackDocument(Future<void> Function() run) {
+    // Register before running: a listener may synchronously start shutdown.
+    final settled = Completer<void>();
+    _documentSettlements.add(settled.future);
+    final operation = Future<void>.sync(run);
+    void complete() {
+      _documentSettlements.remove(settled.future);
+      settled.complete();
+    }
+
+    unawaited(
+      operation.then<void>(
+        (_) {
+          complete();
+        },
+        onError: (Object error, StackTrace stack) {
+          complete();
+        },
+      ),
+    );
+    return operation;
+  }
 
   @override
   Future<void> deleteEntry(SftpEntry entry, {required String confirmedName}) =>
@@ -248,7 +311,10 @@ final class SftpService extends ChangeNotifier
       _backend.disconnectAll(notify: notify);
 
   @override
-  void cancelActiveTransfer() => _backend.cancelActiveTransfer();
+  void cancelActiveTransfer() {
+    _cancelDocument();
+    _backend.cancelActiveTransfer();
+  }
 
   /// 读取模块自己的最近路径记录。
   Future<List<SftpRecentPathRecord>> loadRecentPaths({int limit = 30}) async {
@@ -321,11 +387,38 @@ final class SftpService extends ChangeNotifier
     if (!_disposed) notifyListeners();
   }
 
+  /// Stops new document work and drains every accepted attempt's cleanup.
+  /// The borrowed backend and SSH manager remain owned by AppRuntime.
+  Future<void> close() {
+    final existing = _closeFuture;
+    if (existing != null) return existing;
+    final completion = Completer<void>();
+    _closeFuture = completion.future;
+    try {
+      dispose();
+      unawaited(
+        Future.wait<void>(_documentSettlements.toList()).then<void>(
+          (_) {
+            completion.complete();
+          },
+          onError: (Object error, StackTrace stack) {
+            completion.completeError(error, stack);
+          },
+        ),
+      );
+    } catch (error, stack) {
+      completion.completeError(error, stack);
+    }
+    return completion.future;
+  }
+
   /// 释放本服务的监听；后端和 SSH 资源由上层 Owner 释放。
   @override
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _cancelDocument();
+    if (_documentBackendActive) _backend.cancelActiveTransfer();
     _backend.removeListener(_forwardBackendChanged);
     super.dispose();
   }

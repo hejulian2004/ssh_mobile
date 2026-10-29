@@ -24,6 +24,8 @@ final class ConnectionPersistenceCoordinator {
     required bool isEditing,
     required String? password,
     required String? privateKey,
+    CredentialProtectionSnapshot? protectedSnapshot,
+    bool Function()? isCredentialAccessCurrent,
   }) async {
     var connectionAttempted = false;
     var hostKeyAttempted = false;
@@ -45,15 +47,30 @@ final class ConnectionPersistenceCoordinator {
       );
 
       credentialsAttempted = true;
-      await _credentialRepository.saveCredentials(
-        connectionId: stagedConfig.id,
-        password: password,
-        privateKey: privateKey,
-      );
+      if (protectedSnapshot != null) {
+        await (_credentialRepository as CredentialProtectionRepository)
+            .saveProtectedCredentials(
+              connectionId: stagedConfig.id,
+              password: password,
+              privateKey: privateKey,
+              expectedRevision: protectedSnapshot.revision,
+              isCurrent: isCredentialAccessCurrent,
+            );
+      } else {
+        await _credentialRepository.saveCredentials(
+          connectionId: stagedConfig.id,
+          password: password,
+          privateKey: privateKey,
+        );
+      }
     } catch (error, stackTrace) {
       final rollbackErrors = <Object>[];
       if (credentialsAttempted) {
         await _captureRollbackError(rollbackErrors, () {
+          if (protectedSnapshot != null) {
+            return (_credentialRepository as CredentialProtectionRepository)
+                .restoreProtectedSnapshot(protectedSnapshot);
+          }
           return _credentialRepository.saveCredentials(
             connectionId: stagedConfig.id,
             password: previousPassword,

@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ssh_core/ssh_core.dart' as ssh_core;
 import 'package:ssh_mobile/core/services/ssh_client_factory.dart';
 import 'package:ssh_mobile/services/ssh_service.dart';
+import 'package:ssh_mobile/services/app_log_service.dart';
 
 import '../../test_utils/test_storage_adapter.dart';
 
@@ -26,6 +27,9 @@ void main() {
   late List<_ManualTimer> timers;
 
   setUp(() async {
+    // The process logger outlives each fixture; drain before switching its path.
+    await AppLogService.instance.pendingWrites;
+    AppLogService.instance.resetLogFileForTesting();
     SharedPreferences.setMockInitialValues({});
     FlutterSecureStorage.setMockInitialValues({});
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
@@ -71,6 +75,7 @@ void main() {
     await factory.dispose();
     await storage.shutdown();
     storage.dispose();
+    await AppLogService.instance.pendingWrites;
     PathProviderPlatform.instance = previousPathProvider;
     await supportDirectory.delete(recursive: true);
     debugDefaultTargetPlatformOverride = null;
@@ -294,6 +299,8 @@ final class _FakeSshClientFactory implements SshClientFactory {
     String? peerId,
     String? traceId,
     bool persistHostKeyTrust = true,
+    Future<void> Function(ConnectionConfig? authenticatedConfig)?
+    validateTarget,
   }) async {
     final error = connectError;
     if (error != null) throw error;

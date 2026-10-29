@@ -21,6 +21,22 @@ Connection/凭据/Host Key 公共契约，以及只保存非敏感连接结构�
 - `ConnectionDatabase` 是本 Package 的资源，由 AppRuntime 创建并关闭；它使用
   `connection.sqlite`，不读取或迁移旧统一业务数据库/SharedPreferences 连接数据。
 - 本 Package 不依赖任何 Feature，也不暴露 `/src/` 路径给外部调用方。
+- 可选 `CredentialCryptoPort` 由 App 注入平台认证加密能力；
+  `SecureCredentialRepository` 仍是唯一凭据存储 Owner。`CredentialProtectionRepository`
+  暴露保护开关、只读 revision、一次完整 pair 解锁和显式受保护更新。
+  普通 getter/save 遇到保护记录只返回 typed locked/corrupt，不读取旧键。
+- 保护 pair 的 JSON 明文预算为 512 KiB；AES-GCM、认证与按 revision 的密钥均由平台
+  Owner 负责，AAD 绑定规范连接 ID 和随机 revision。新保护 API 接受 1–256 字符 ID，
+  不改变未保护凭据的既有 ID 契约。每个 ID 的读写、迁移和保护状态变更严格串行。
+- 密文记录经写入回读核验后才清理旧键。失败/不明写入保留可恢复密文和密钥；
+  删除尽最大努力清理各版本键和已知 Keystore revision，部分失败保留阻断旧键读取的
+  tombstone，可重试。保护记录、revision 账本和秘密都只进入同一 Secure Storage 命名空间。
+  新 revision 的清理账本必须先持久化并回读核验，平台才可 seal/生成 Keystore 密钥；
+  提示框期间 engine/进程终止后，重建的 Owner 仍能发现并清理未交付的密钥。
+- 保存协调使用 `captureProtectedSnapshot` 保留旧密钥的 opaque 租约；成功后必须
+  `discardProtectedSnapshot`，失败用 `restoreProtectedSnapshot` 无解密回滚。
+  restore 消费租约，discard 对同 Owner 已消费租约幂等。租约只能恢复自己直接产生的
+  后继状态，不能覆盖别的 Repository、后续 revision 或关闭保护后的正常凭据更新。
 - Full App 的旧 Connection 模型、ViewModel 和页面入口已完成零引用清理；
   AppRuntime 仍通过公开 Repository/Host Key/Credential 契约提供唯一 Owner。
 

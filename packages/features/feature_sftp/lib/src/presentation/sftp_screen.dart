@@ -10,6 +10,7 @@ import 'package:app_ui/app_ui.dart';
 
 import '../application/sftp_viewmodel.dart';
 import '../data/sftp_service.dart';
+import '../domain/sftp_document.dart';
 import '../domain/sftp_models.dart';
 import '../domain/sftp_ports.dart';
 import '../domain/sftp_strings.dart';

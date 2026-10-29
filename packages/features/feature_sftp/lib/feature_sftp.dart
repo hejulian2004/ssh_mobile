@@ -11,6 +11,7 @@ export 'src/application/sftp_viewmodel.dart';
 export 'src/data/database/sftp_database.dart';
 export 'src/data/repository/drift_sftp_path_history_repository.dart';
 export 'src/data/sftp_service.dart';
+export 'src/domain/sftp_document.dart';
 export 'src/domain/sftp_models.dart';
 export 'src/domain/sftp_ports.dart';
 export 'src/domain/sftp_strings.dart';

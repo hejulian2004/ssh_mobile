@@ -62,12 +62,14 @@ class SftpService extends ChangeNotifier implements SftpClientAdapter {
   final Map<String, _SftpSession> _sessions = {};
   final Map<String, String> _lastPaths = {};
   final Map<String, Future<void>> _connectTasks = {};
+  final Map<String, Object> _connectAttempts = {};
   final SftpDirectoryCache _directoryCache = SftpDirectoryCache();
   Timer? _notifyTimer;
   String? _activeConnectionId;
   bool _disposed = false;
   SftpTransferState? _activeTransfer;
   String? _cancelTransferId;
+  int _transferCancelGeneration = 0;
 
   /// 可选遥测客户端；由 Composition Root 在 SFTP 服务创建后注入。
   ///
@@ -171,6 +173,16 @@ class SftpService extends ChangeNotifier implements SftpClientAdapter {
 
   @override
   String? get connectionId => _activeSession?.connectionId;
+
+  String? get targetFingerprint {
+    final binding = _activeSession?.targetBinding;
+    if (binding == null ||
+        !binding.matches(_connectionRepository.getConnection(binding.id))) {
+      return null;
+    }
+    return binding.fingerprint;
+  }
+
   @override
   String? get connectionName => _activeSession?.connectionName;
   @override
@@ -247,6 +259,7 @@ class SftpService extends ChangeNotifier implements SftpClientAdapter {
 
   @override
   void cancelActiveTransfer() {
+    _transferCancelGeneration++;
     final transfer = _activeTransfer;
     if (transfer != null) {
       _cancelTransferId = transfer.id;
@@ -407,53 +420,19 @@ class SftpService extends ChangeNotifier implements SftpClientAdapter {
   }
 
   @override
-  Future<void> disconnect({bool notify = true}) async {
-    final connectionId = _activeConnectionId;
-    if (connectionId == null) return;
-    final session = _sessions.remove(connectionId);
-    if (session != null) {
-      _lastPaths[connectionId] = session.currentPath;
-    }
-    session?.close();
-    _activeConnectionId = null;
-
-    if (notify) notifyListeners();
-  }
+  Future<void> disconnect({bool notify = true}) =>
+      _disconnectCurrent(notify: notify);
 
   @override
   Future<void> disconnectConnection(
     String connectionId, {
     bool notify = true,
     bool forgetPath = false,
-  }) async {
-    _connectTasks.remove(connectionId);
-    final session = _sessions.remove(connectionId);
-    if (session != null && !forgetPath) {
-      _lastPaths[connectionId] = session.currentPath;
-    }
-    if (forgetPath) {
-      _lastPaths.remove(connectionId);
-      await SftpFileCache.clearConnection(connectionId);
-    }
-    session?.close();
-    if (_activeConnectionId == connectionId) {
-      _activeConnectionId = null;
-    }
-    if (notify) notifyListeners();
-  }
+  }) => _disconnectId(connectionId, notify: notify, forgetPath: forgetPath);
 
   @override
-  Future<void> disconnectAll({bool notify = true}) async {
-    _connectTasks.clear();
-    for (final session in _sessions.values) {
-      _lastPaths[session.connectionId] = session.currentPath;
-      session.close();
-    }
-    _sessions.clear();
-    _activeConnectionId = null;
-    if (notify) notifyListeners();
-  }
-
+  Future<void> disconnectAll({bool notify = true}) =>
+      _disconnectEvery(notify: notify);
   @override
   void notifyListeners() {
     if (_disposed) return;

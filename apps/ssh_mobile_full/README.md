@@ -17,6 +17,70 @@ SFTP、Realtime 和 Relay 只借用这些 App Scope 资源；Feature
 映射为 `NetworkCapability.webSocketRelay`。`feature_lan_share` 不依赖
 `network_transport`。进程仍在运行时，后台的局域网文字、文件申请和传入传输终态可以显示脱敏系统通知；点击只恢复应用或打开已有聊天。
 
+Android 的 SFTP 与局域网文件出入口可以通过 `ssh_mobile/document_access` 使用系统文档选择器。授权只覆盖用户选中的一个 content URI，以及这次请求的读或写模式，并可以持久化后释放。取消选择不会改变授权，也不会开始传输。非 Android 仍使用路径选择器。这里不把远程目录挂进系统文件管理器。
+
+`AndroidSystemDocuments` 将原生能力适配为两个 Feature 的公开文档 Port，
+`android_document_cache.dart` 负责单次缓存、分块和迟到结果清理。读关闭后不能
+重新打开；写入只有原生复制完成才算成功，重复关闭保留同一次提交结果。单文件
+授权可并存，释放只影响本次借用；Activity 销毁会结束未完成请求并清理本次原生资源。
+取消或失败的外部保存目标可能仍由文档提供方保留空文件或部分内容，界面不报告成功。
+
+App 层文档桥接回归入口为 `test/app/android_system_documents_test.dart` 和
+`test/app/android_document_cache_test.dart`；真实系统选择、云端文档提供方、授权撤销
+和 Activity 销毁场景按 `docs/security_manual_regression.md` 的 SAF 清单验收。
+
+Android 原生授权、复制、缓存归属与取消策略位于 `DocumentAccess.kt`，独立 JVM
+回归入口为 Android 工程的 `:app:testDebugUnitTest --tests '*Document*Test'`。
+`:app:verifyDocumentAccessCoverage` 生成 JaCoCo 报告并强制该核心源文件至少 90%
+行覆盖率。`DocumentAccessSession.kt` 是 Activity、ContentResolver、
+ParcelFileDescriptor 和 MethodChannel 的平台绑定，按平台胶水例外不纳入纯 JVM
+行覆盖门禁；其真实 Android 回调、文档流、取消与销毁由测试 APK 中的
+`DocumentAccessInstrumentation` 验证，不能用 JVM 行覆盖代替设备结果。
+
+模拟器验收先构建并安装 `:app:assembleDebug` 和 `:app:assembleDebugAndroidTest`
+的两个 APK，再针对选定模拟器运行 `adb -s <emulator> shell am instrument -w
+com.example.ssh_mobile.test/com.example.ssh_mobile.DocumentAccessInstrumentation`。
+测试只使用测试 APK 自有的公开固定文档，检查选择/取消回调、PFD 分块读写和
+截断、大小限制、错误映射、按操作取消及资源清理。它不自动操作真实系统选择器，
+不代替云端提供方、持久化权限或进程重建的系统验收；提供方不能响应系统取消或
+文件描述符关闭时，也不能承诺立即终止其阻塞 I/O。
+
+Android 凭据保护通过 `ssh_mobile/credential_protection` 提供 `capability`、`seal`、
+`open`、`removeKey` 和按 `operationId` 取消。平台实现支持 Android 11/API 30+
+且不提高 App 的最低系统版本；旧版本返回不支持，不降级为普通认证弹框或明文。
+能力查询只检查平台/Keystore 能力，录入状态和暂时锁定在每次敏感操作时重新检查。
+系统认证弹框按 Android 系统语言显示。
+
+每个连接的每个 revision 独占一个 Android Keystore AES-256/GCM 密钥，alias 使用
+域、连接 ID 和 revision 的不可歧义编码摘要；同一编码也作为 AAD。密钥不可导出、
+每次操作只接受强生物认证，生物录入变化使其失效。真正的 Cipher 通过
+`BiometricPrompt.CryptoObject` 认证，成功回调必须返回同一实例才执行 AAD 绑定和
+加解密。缺失/失效密钥绝不在解锁时重建，取消、后台和 Activity 结束不返回明文。
+单次明文预算为 512 KiB，GCM IV 为 12 字节，认证标签为 16 字节；原生层不写入
+凭据、URI、密钥别名或平台异常正文日志，临时明文字节在使用后清零。
+
+`CredentialProtection.kt` 的绑定、预算与一次终态策略通过独立 JVM 测试验证，
+`:app:verifyCredentialProtectionCoverage` 强制文件行覆盖率至少 90%。
+`CredentialProtectionSession.kt` 的 Activity、AndroidKeyStore、BiometricPrompt
+和 MethodChannel 绑定属于平台胶水例外，不以纯 JVM 行覆盖替代真实设备验证。
+测试 APK 的 `CredentialProtectionInstrumentation` 验证能力、缺失密钥不重建与
+后台拒绝；`CredentialCryptoInstrumentation` 使用独立公开测试标识验证真实
+Keystore 不可导出/逐次认证、CryptoObject 封装与解锁、篡改拒绝、取消和后台终态。
+
+已录入专用测试指纹的模拟器可运行
+`adb -s <emulator> shell am instrument -w -r com.example.ssh_mobile.test/com.example.ssh_mobile.CredentialCryptoInstrumentation`。
+分别收到 `await_seal_authentication`、`await_open_authentication` 和
+`await_tamper_authentication` 阶段后，使用模拟器的固定测试手指事件认证；测试
+不显示或导出秘密内容。临时锁屏/指纹、通知权限隔离标记和测试 alias 必须随测试
+清理。低 API、真实硬件、录入变更、永久锁定和进程重建仍需对应设备专项验收。
+
+受保护凭据仍由 `connection_core.SecureCredentialRepository` 唯一管理。
+App 工厂注入 `AndroidCredentialCrypto`，能力查询最多等待两秒且不生成凭据密钥。
+Connection 编辑路由直接借用其可选保护接口，避免普通转发适配器隐藏该能力。
+显式 SSH/SFTP 连接一次解锁完整凭据，随后重新核验目标与 revision；Socket 就绪、
+Host Key 确认和密码认证回调也保留核验。普通后台/工具读取不自动弹出认证或
+使用旧明文键。已建立会话继续由原 SSH Owner 管理，不提供全局“已解锁”缓存。
+
 ## 不负责什么
 
 新的 Feature 业务实现、跨 Feature 的 `/src/` 调用和第二套全局 SSH/Network Owner

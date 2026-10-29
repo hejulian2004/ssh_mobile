@@ -49,6 +49,7 @@ class SshHostKeyPolicy {
     AppLogger? logger,
     this.onUnknownHostKey,
     this.persistTrust,
+    this.validateTarget,
     DateTime Function()? now,
   }) : _logger = logger ?? _noopAppLogger,
        _now = now ?? DateTime.now;
@@ -62,12 +63,17 @@ class SshHostKeyPolicy {
   /// 用户确认后的持久化回调。
   final SshHostKeyTrustPersister? persistTrust;
 
+  /// 认证许可绑定的目标/凭据版本核验；首次已确认 Host Key 允许丰富快照。
+  final Future<void> Function(ConnectionConfig? authenticatedConfig)?
+  validateTarget;
+
   /// 校验服务端 Host Key，并在首次确认后更新配置快照。
   Future<bool> verifyHostKey({
     required ConnectionConfig config,
     required String algorithm,
     required Uint8List md5Fingerprint,
   }) async {
+    await validateTarget?.call(null);
     final fingerprint = formatMd5Fingerprint(md5Fingerprint);
     final trustedFingerprint = normalizeFingerprint(config.hostKeyFingerprint);
     final trustedAlgorithm = _nonEmpty(config.hostKeyAlgorithm);
@@ -75,7 +81,10 @@ class SshHostKeyPolicy {
     if (trustedFingerprint != null) {
       final algorithmMatches =
           trustedAlgorithm == null || trustedAlgorithm == algorithm;
-      if (trustedFingerprint == fingerprint && algorithmMatches) return true;
+      if (trustedFingerprint == fingerprint && algorithmMatches) {
+        await validateTarget?.call(config);
+        return true;
+      }
       _log(
         LogLevel.warning,
         'SSH host key verification blocked changed fingerprint',
@@ -132,6 +141,8 @@ class SshHostKeyPolicy {
         fingerprint: fingerprint,
       );
     }
+    // 用户确认可能长期挂起。确认旧 Host Key 不能批准已经变更的目标或凭据。
+    await validateTarget?.call(null);
 
     final trustedAt = _now().toUtc();
     // 先持久化独立快照，再更新调用方对象。数据库/安全存储失败时，调用方仍
@@ -144,6 +155,7 @@ class SshHostKeyPolicy {
     config.hostKeyAlgorithm = algorithm;
     config.hostKeyFingerprint = fingerprint;
     config.hostKeyTrustedAt = trustedAt;
+    await validateTarget?.call(config);
     _log(
       LogLevel.info,
       'SSH host key trusted',

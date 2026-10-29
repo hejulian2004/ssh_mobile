@@ -163,6 +163,8 @@ final class FakeSshClientFactory implements SshClientFactory {
     String? peerId,
     String? traceId,
     bool persistHostKeyTrust = true,
+    Future<void> Function(ConnectionConfig? authenticatedConfig)?
+    validateTarget,
   }) async {
     connectCount++;
     return FakeSshClient(_sftp);

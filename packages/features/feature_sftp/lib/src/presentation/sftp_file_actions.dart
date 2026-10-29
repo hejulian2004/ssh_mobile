@@ -6,6 +6,11 @@ extension _SftpFilePaneActions on _FilePane {
     final settings = context.read<SftpSettingsPort>();
     final strings = SftpStrings(settings.language);
     final messenger = ScaffoldMessenger.of(context);
+    final documents = _systemDocuments(context);
+    if (documents != null && documents.usesSystemDocuments) {
+      await _uploadSystemDocument(context, sftp, strings, messenger, documents);
+      return;
+    }
 
     final file = await FilePicker.pickFile();
     if (file == null) return;
@@ -123,6 +128,20 @@ extension _SftpFilePaneActions on _FilePane {
             ),
           ),
         ),
+      );
+      return;
+    }
+
+    final documents = _systemDocuments(context);
+    if (documents != null && documents.usesSystemDocuments) {
+      await _downloadSystemDocument(
+        context,
+        entry,
+        sftp,
+        strings,
+        messenger,
+        documents,
+        settings.sftpDownloadLimitBytes,
       );
       return;
     }
@@ -254,6 +273,124 @@ extension _SftpFilePaneActions on _FilePane {
             ),
       ),
     );
+  }
+
+  Future<void> _uploadSystemDocument(
+    BuildContext context,
+    SftpViewModel sftp,
+    SftpStrings strings,
+    ScaffoldMessengerState messenger,
+    SftpDocumentAccessPort documents,
+  ) async {
+    try {
+      final target = sftp.documentUploadTarget;
+      final source = await documents.openForRead(
+        maxBytes: SftpService.maxUploadBytes,
+      );
+      if (source == null) return;
+      if (!context.mounted) {
+        await source.close();
+        return;
+      }
+      await sftp.uploadFromDocument(
+        source: source,
+        filename: source.displayName,
+        target: target,
+        maxBytes: SftpService.maxUploadBytes,
+      );
+      if (!context.mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text(strings.uploadComplete)));
+    } on SftpFileSizeLimitException {
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            strings.uploadFailed(
+              strings.uploadFileTooLarge(
+                _formatBytes(SftpService.maxUploadBytes),
+              ),
+            ),
+          ),
+        ),
+      );
+    } on SftpDocumentMissingException {
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(strings.uploadFailed(strings.uploadFileNoAccess)),
+        ),
+      );
+    } on SftpTransferCancelledException {
+      if (!context.mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text(strings.uploadCancelled)));
+    } catch (error) {
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(strings.uploadFailed(error))),
+      );
+    }
+  }
+
+  Future<void> _downloadSystemDocument(
+    BuildContext context,
+    SftpEntry entry,
+    SftpViewModel sftp,
+    SftpStrings strings,
+    ScaffoldMessengerState messenger,
+    SftpDocumentAccessPort documents,
+    int maxBytes,
+  ) async {
+    try {
+      final sink = await documents.createForWrite(suggestedName: entry.name);
+      if (sink == null) return;
+      if (!context.mounted) {
+        await sink.abort();
+        return;
+      }
+      await sftp.downloadToDocument(
+        entry: entry,
+        sink: sink,
+        maxBytes: maxBytes,
+      );
+      if (!context.mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text(strings.downloadComplete)));
+    } on SftpFileSizeLimitException {
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            strings.downloadFailed(
+              strings.downloadFileTooLarge(_formatBytes(maxBytes)),
+            ),
+          ),
+        ),
+      );
+    } on SftpDocumentMissingException {
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(strings.downloadFailed(strings.uploadFileNoAccess)),
+        ),
+      );
+    } on SftpTransferCancelledException {
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(strings.downloadCancelled)),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(strings.downloadFailed(error))),
+      );
+    }
+  }
+
+  SftpDocumentAccessPort? _systemDocuments(BuildContext context) {
+    try {
+      return Provider.of<SftpDocumentAccessPort>(context, listen: false);
+    } on ProviderNotFoundException {
+      return null;
+    }
   }
 
   String _entryMeta(SftpStrings strings, SftpEntry entry) {

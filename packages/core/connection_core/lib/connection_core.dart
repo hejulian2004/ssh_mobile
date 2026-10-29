@@ -6,6 +6,7 @@ export 'src/model/connection_enums.dart';
 export 'src/model/connection_profile.dart';
 export 'src/repository/connection_repository.dart';
 export 'src/repository/credential_repository.dart';
+export 'src/repository/credential_protection.dart';
 export 'src/repository/drift_connection_repository.dart';
 export 'src/repository/host_key_repository.dart';
 export 'src/repository/secure_credential_repository.dart';

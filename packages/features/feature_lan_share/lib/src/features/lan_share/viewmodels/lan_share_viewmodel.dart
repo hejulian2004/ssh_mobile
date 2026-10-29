@@ -15,6 +15,7 @@ import '../../../services/lan_share/lan_network_models.dart';
 import '../../../services/lan_share/lan_security_service.dart';
 import '../../../services/lan_share/lan_peer_trust.dart';
 import '../../../services/lan_share/lan_share_models.dart';
+import '../../../services/lan_share/lan_document_exchange.dart';
 import '../../../services/lan_share/lan_storage_service.dart';
 import '../../../services/lan_share/lan_native_transfer_coordinator.dart';
 import '../../../services/lan_share/lan_pairing_reciprocal.dart';
@@ -27,6 +28,7 @@ part 'lan_share_viewmodel_history.dart';
 part 'lan_share_viewmodel_presence.dart';
 part 'lan_share_viewmodel_lifecycle.dart';
 part 'lan_share_viewmodel_commands.dart';
+part 'lan_share_viewmodel_documents.dart';
 
 /// 功能范围内的 LAN 状态、命令编排与历史记录外观。
 class LanShareViewModel extends ChangeNotifier {
@@ -68,6 +70,9 @@ class LanShareViewModel extends ChangeNotifier {
   Future<void> _historyRefreshSerial = Future<void>.value();
   final Map<String, Future<void>> _messagePersistence = {};
   final Set<Future<void>> _backgroundOperations = <Future<void>>{};
+  final _documentSources = <LanDocumentSource>{};
+  final _documentSinks = <LanDocumentSink>{};
+  final _documentOperations = <Future<void>>{};
 
   final _pairingRequestController =
       StreamController<LanPairingRequest>.broadcast();

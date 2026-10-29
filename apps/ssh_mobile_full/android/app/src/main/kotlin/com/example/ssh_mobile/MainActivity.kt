@@ -23,6 +23,9 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private var windowPresentation: WindowPresentation? = null
     private var pictureInPicture: ScreenSharePictureInPicture? = null
+    private var documentAccess: DocumentAccessSession? = null
+    private var credentialProtection: CredentialProtectionSession? = null
+    private var credentialForeground = false
     private val channelName = "ssh_mobile/power"
     private val systemChannelName = "ssh_mobile/client_system"
     private val lanDiscoveryChannelName = "ssh_mobile/lan_discovery"
@@ -37,6 +40,10 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        credentialProtection?.dispose()
+        credentialProtection = null
+        documentAccess?.dispose()
+        documentAccess = null
         pictureInPicture?.dispose()
         pictureInPicture = null
         windowPresentation?.dispose()
@@ -77,6 +84,17 @@ class MainActivity : FlutterActivity() {
             this,
             flutterEngine.dartExecutor.binaryMessenger,
             windowPresentation!!,
+        )
+        documentAccess?.dispose()
+        documentAccess = DocumentAccessSession(
+            this,
+            flutterEngine.dartExecutor.binaryMessenger,
+        )
+        credentialProtection?.dispose()
+        credentialProtection = CredentialProtectionSession(
+            this,
+            flutterEngine.dartExecutor.binaryMessenger,
+            credentialForeground,
         )
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
@@ -154,9 +172,27 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (documentAccess?.onActivityResult(requestCode, resultCode, data) == true) return
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
     override fun onResume() {
         super.onResume()
+        credentialForeground = true
+        credentialProtection?.setForeground(true)
         windowPresentation?.refresh()
+    }
+
+    override fun onPause() {
+        credentialForeground = false
+        credentialProtection?.setForeground(false)
+        super.onPause()
+    }
+
+    override fun onStop() {
+        credentialProtection?.setForeground(false)
+        super.onStop()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

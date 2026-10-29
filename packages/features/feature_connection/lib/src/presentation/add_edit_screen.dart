@@ -10,6 +10,8 @@ import 'package:connection_core/connection_core.dart';
 import '../application/connection_ports.dart';
 import '../application/connection_view_model.dart';
 import 'connection_strings.dart';
+import 'connection_credential_protection.dart';
+import '../application/connection_credential_editor.dart';
 import '../widgets/connection_layout.dart';
 import '../widgets/connection_surface.dart';
 import '../widgets/connection_ui_tokens.dart';
@@ -17,6 +19,7 @@ import '../widgets/connection_ui_tokens.dart';
 part 'add_edit_form_fields.dart';
 part 'add_edit_advanced_fields.dart';
 part 'add_edit_actions.dart';
+part 'add_edit_credentials.dart';
 
 class AddEditScreen extends StatefulWidget {
   final String? editId;
@@ -27,7 +30,8 @@ class AddEditScreen extends StatefulWidget {
   State<AddEditScreen> createState() => _AddEditScreenState();
 }
 
-class _AddEditScreenState extends State<AddEditScreen> {
+class _AddEditScreenState extends State<AddEditScreen>
+    with WidgetsBindingObserver {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _hostController = TextEditingController();
@@ -54,6 +58,8 @@ class _AddEditScreenState extends State<AddEditScreen> {
   bool _isLoadingSecrets = false;
   bool _jumpHostExpanded = false;
   bool _advancedOptionsExpanded = false;
+  ConnectionCredentialEditor? _credentialEditor;
+  CredentialPair? _appliedCredentials;
 
   bool get isEditing => widget.editId != null;
 
@@ -84,6 +90,7 @@ class _AddEditScreenState extends State<AddEditScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (isEditing) _loadExistingConfig();
   }
 
@@ -122,21 +129,12 @@ class _AddEditScreenState extends State<AddEditScreen> {
     _loadSecrets(config.id);
   }
 
-  Future<void> _loadSecrets(String id) async {
-    setState(() => _isLoadingSecrets = true);
-
-    final connectionViewModel = context.read<ConnectionViewModel>();
-    final password = await connectionViewModel.getPassword(id);
-    final privateKey = await connectionViewModel.getPrivateKey(id);
-
-    if (!mounted) return;
-    _passwordController.text = password ?? '';
-    _privateKeyController.text = privateKey ?? '';
-    setState(() => _isLoadingSecrets = false);
-  }
-
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _credentialEditor?.removeListener(_credentialStateChanged);
+    _credentialEditor?.dispose();
+    _appliedCredentials = null;
     _nameController.dispose();
     _hostController.dispose();
     _portController.dispose();
@@ -148,6 +146,17 @@ class _AddEditScreenState extends State<AddEditScreen> {
     _jumpUsernameController.dispose();
     _tmuxAutoDeleteController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if ((_credentialEditor?.isProtected == true ||
+            _credentialEditor?.isBusy == true) &&
+        (state == AppLifecycleState.paused ||
+            state == AppLifecycleState.hidden ||
+            state == AppLifecycleState.detached)) {
+      _credentialEditor?.lock();
+    }
   }
 
   @override
@@ -237,7 +246,13 @@ class _AddEditScreenState extends State<AddEditScreen> {
                     ),
                     elevation: 0,
                   ),
-                  onPressed: isSaving || _isLoadingSecrets ? null : _save,
+                  onPressed:
+                      isSaving ||
+                          _isLoadingSecrets ||
+                          _credentialsLocked ||
+                          _credentialEditor?.canSubmit == false
+                      ? null
+                      : _save,
                   icon: isSaving
                       ? const AppLoadingIndicator(
                           size: 18,
@@ -361,18 +376,25 @@ class _AddEditScreenState extends State<AddEditScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _buildAuthMethodSelector(strings, colorScheme),
-                            const SizedBox(height: 12),
-                            if (_authMethod == AuthMethod.password ||
-                                _authMethod == AuthMethod.both) ...[
-                              _buildPasswordField(strings),
+                            if (!_credentialsLocked) ...[
+                              _buildAuthMethodSelector(strings, colorScheme),
                               const SizedBox(height: 12),
+                              if (_authMethod == AuthMethod.password ||
+                                  _authMethod == AuthMethod.both) ...[
+                                _buildPasswordField(strings),
+                                const SizedBox(height: 12),
+                              ],
+                              if (_authMethod == AuthMethod.privateKey ||
+                                  _authMethod == AuthMethod.both) ...[
+                                _buildPrivateKeyField(strings),
+                                const SizedBox(height: 12),
+                              ],
                             ],
-                            if (_authMethod == AuthMethod.privateKey ||
-                                _authMethod == AuthMethod.both) ...[
-                              _buildPrivateKeyField(strings),
-                              const SizedBox(height: 12),
-                            ],
+                            if (_credentialEditor != null)
+                              _buildCredentialProtection(
+                                strings,
+                                isSaving: isSaving,
+                              ),
                           ],
                         ),
                       ),

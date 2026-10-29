@@ -95,6 +95,8 @@ class SshClientFactory {
     String? peerId,
     String? traceId,
     bool persistHostKeyTrust = true,
+    Future<void> Function(ConnectionConfig? authenticatedConfig)?
+    validateTarget,
   }) async {
     final resolved = credentials ?? await loadCredentials(config);
     validateAuthSecrets(
@@ -103,6 +105,7 @@ class SshClientFactory {
       privateKey: resolved.privateKey,
       logger: logger,
     );
+    await validateTarget?.call(null);
     final identities = await identitiesFor(config, resolved);
     final authOptions = buildAuthOptions(
       config: config,
@@ -111,6 +114,7 @@ class SshClientFactory {
     );
     final hostKeyPolicy = SshHostKeyPolicy(
       logger: logger,
+      validateTarget: validateTarget,
       onUnknownHostKey: onUnknownHostKey,
       persistTrust: persistHostKeyTrust
           ? (updatedConfig) => hostKeyRepository.trustHostKey(
@@ -128,6 +132,7 @@ class SshClientFactory {
           'connection=${config.name} host=${config.host}:${config.port} '
           'user=${config.username} authMethod=${config.authMethod.name}',
     );
+    await validateTarget?.call(null);
     final socket = await _openSocket(
       config,
       timeout: timeout,
@@ -135,6 +140,9 @@ class SshClientFactory {
       traceId: traceId,
     );
     try {
+      // Socket readiness may arrive after credential revision or target revocation.
+      // Validate before creating the SSH client, which can begin authentication.
+      await validateTarget?.call(null);
       final client = SSHClient(
         socket,
         username: config.username,
@@ -145,8 +153,18 @@ class SshClientFactory {
               md5Fingerprint: fingerprint,
             ),
         identities: authOptions.identities,
-        onPasswordRequest: authOptions.onPasswordRequest,
-        onUserInfoRequest: authOptions.onUserInfoRequest,
+        onPasswordRequest: authOptions.onPasswordRequest == null
+            ? null
+            : () async {
+                await validateTarget?.call(config);
+                return authOptions.onPasswordRequest!();
+              },
+        onUserInfoRequest: authOptions.onUserInfoRequest == null
+            ? null
+            : (request) async {
+                await validateTarget?.call(config);
+                return authOptions.onUserInfoRequest!(request);
+              },
       );
       await client.authenticated.timeout(timeout);
       return client;
@@ -168,6 +186,15 @@ class SshClientFactory {
           error: closeError,
           stackTrace: closeStackTrace,
         );
+        try {
+          socket.destroy();
+        } catch (_) {
+          _log(
+            LogLevel.warning,
+            'SSH socket force cleanup failed',
+            details: 'code=ssh_socket_force_cleanup_failed',
+          );
+        }
       }
       Error.throwWithStackTrace(error, stackTrace);
     }

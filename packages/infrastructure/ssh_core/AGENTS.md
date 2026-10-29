@@ -1,4 +1,4 @@
-最新更新时间：2026-08-30
+最新更新时间：2026-10-29
 
 # ssh_core 维护约束
 
@@ -10,6 +10,10 @@
   them; callers only release `SshSessionLease`. `AppRuntime` closes the manager;
   Feature never closes shared Sessions. Mobile Background SDK is App-injected
   Runtime only.
+- `validateTarget` binds socket/authentication use to the current target and
+  credential revision. Revalidate after awaited Host Key confirmation, before
+  trust persistence and before authentication permission; a successful first
+  trust may enrich only the same target's Host Key fields.
 - Pool/Lease/refcount/idle timeout/shutdown/reacquire/concurrency changes first
   add lifecycle failure tests asserting exactly-once release/close. Contract:
   allowed Manager/Pool/Lease/Runtime/Client/Host-Key/target code/tests; no DB or

@@ -1,4 +1,4 @@
-最新更新时间：2026-08-24
+最新更新时间：2026-10-29
 
 # ssh_core
 
@@ -17,6 +17,10 @@ App Shell 存储实现、任何 Feature、Flutter 页面或平台 Background Ser
 `CredentialRepository`、`HostKeyRepository` 等契约注入。
 Host Key 首次确认使用独立候选快照，只有持久化成功后才更新调用方配置；连接
 编辑验证可显式只返回候选信任，再由 Feature 与配置、凭据统一提交。
+`SshClientFactory` 与 `SshHostKeyPolicy` 可注入同一 `validateTarget` 能力：
+Socket 创建及 Host Key 确认前后重新核验目标和凭据 revision。未知 Host Key
+对话框或信任持久化等待期间的撤销不能返回认证许可；只有合法首个已确认
+Host Key 可以通过 `authenticatedConfig` 丰富原绑定快照。
 
 ## 生命周期
 

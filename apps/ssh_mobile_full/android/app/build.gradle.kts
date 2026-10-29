@@ -1,7 +1,81 @@
 plugins {
     id("com.android.application")
+    jacoco
     // The Flutter Gradle Plugin must be applied after the Android Gradle plugin.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+jacoco {
+    toolVersion = "0.8.13"
+}
+
+// Pure SAF policies have a JVM source-file gate. The Activity/ContentResolver/
+// PFD/MethodChannel binding is validated by DocumentAccessInstrumentation.
+val documentAccessClasses = files(fileTree(layout.buildDirectory.dir("tmp/kotlin-classes/debug")) {
+    include("**/Document*.class", "**/CopyOutcome*.class", "**/BoundedChunkCopy*.class")
+    exclude("**/DocumentAccessSession*.class")
+})
+val documentAccessExecution = layout.buildDirectory.file("jacoco/testDebugUnitTest.exec")
+
+val credentialProtectionClasses = files(fileTree(layout.buildDirectory.dir("tmp/kotlin-classes/debug")) {
+    include("**/Credential*.class")
+    exclude("**/CredentialProtectionSession*.class")
+})
+
+tasks.register<JacocoReport>("credentialProtectionCoverage") {
+    dependsOn("testDebugUnitTest")
+    executionData.from(documentAccessExecution)
+    classDirectories.from(credentialProtectionClasses)
+    sourceDirectories.from(file("src/main/kotlin"))
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+tasks.register<JacocoCoverageVerification>("verifyCredentialProtectionCoverage") {
+    dependsOn("credentialProtectionCoverage")
+    executionData.from(documentAccessExecution)
+    classDirectories.from(credentialProtectionClasses)
+    sourceDirectories.from(file("src/main/kotlin"))
+    violationRules {
+        rule {
+            element = "SOURCEFILE"
+            limit {
+                counter = "LINE"
+                value = "COVEREDRATIO"
+                minimum = "0.90".toBigDecimal()
+            }
+        }
+    }
+}
+
+tasks.register<JacocoReport>("documentAccessCoverage") {
+    dependsOn("testDebugUnitTest")
+    executionData.from(documentAccessExecution)
+    classDirectories.from(documentAccessClasses)
+    sourceDirectories.from(file("src/main/kotlin"))
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+tasks.register<JacocoCoverageVerification>("verifyDocumentAccessCoverage") {
+    dependsOn("documentAccessCoverage")
+    executionData.from(documentAccessExecution)
+    classDirectories.from(documentAccessClasses)
+    sourceDirectories.from(file("src/main/kotlin"))
+    violationRules {
+        rule {
+            element = "SOURCEFILE"
+            limit {
+                counter = "LINE"
+                value = "COVEREDRATIO"
+                minimum = "0.90".toBigDecimal()
+            }
+        }
+    }
 }
 
 val releaseStoreFile = providers.environmentVariable("SSH_MOBILE_KEYSTORE_FILE").orNull

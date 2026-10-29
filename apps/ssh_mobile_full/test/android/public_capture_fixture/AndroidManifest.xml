@@ -1,5 +1,22 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <instrumentation
+        android:name="com.example.ssh_mobile.DocumentAccessInstrumentation"
+        android:targetPackage="com.example.ssh_mobile"
+        android:label="Public SAF bridge contract" />
+    <instrumentation
+        android:name="com.example.ssh_mobile.CredentialProtectionInstrumentation"
+        android:targetPackage="com.example.ssh_mobile"
+        android:label="Public credential protection contract" />
+    <instrumentation
+        android:name="com.example.ssh_mobile.CredentialCryptoInstrumentation"
+        android:targetPackage="com.example.ssh_mobile"
+        android:label="Authenticated public credential round trip" />
     <application android:label="SSH Mobile public fixture">
+        <provider
+            android:name="com.example.ssh_mobile.DocumentFixtureProvider"
+            android:authorities="com.example.ssh_mobile.test.documents"
+            android:exported="true"
+            android:grantUriPermissions="true" />
         <activity
             android:name="com.example.ssh_mobile.test.PublicCaptureFixtureActivity"
             android:exported="true"

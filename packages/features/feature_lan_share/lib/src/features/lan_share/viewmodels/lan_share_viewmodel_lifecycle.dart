@@ -400,6 +400,7 @@ extension LanShareViewModelLifecycle on LanShareViewModel {
       }
     }
 
+    await attempt(_cancelDocumentOperations);
     await attempt(_cancelRuntimeSubscriptions);
     final keepAlive = _keepAliveOperation;
     if (keepAlive != null) await attempt(() => keepAlive);

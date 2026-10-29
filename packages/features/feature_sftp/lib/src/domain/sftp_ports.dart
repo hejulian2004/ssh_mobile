@@ -56,6 +56,9 @@ abstract interface class SftpHostKeyConfirmationPort {
 /// Module 只通过 [SshSessionManager] 共享初始化和生命周期边界。
 abstract interface class SftpBackend
     implements SftpClientAdapter, SftpContentPort {
+  /// Active SSH target still matching the saved config, even for an empty directory.
+  /// Null for a missing or rebound target.
+  String? get targetFingerprint;
   void addListener(VoidCallback listener);
   void removeListener(VoidCallback listener);
 }

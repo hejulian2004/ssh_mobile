@@ -175,15 +175,20 @@ class ConnectionRuntimeTarget {
   final ConnectionConfig _configSnapshot;
   final String? password;
   final String? privateKey;
+  final Future<void> Function(ConnectionConfig?)? _validate;
 
   ConnectionRuntimeTarget(
     this.binding,
     ConnectionConfig config,
     this.password,
-    this.privateKey,
-  ) : _configSnapshot = ConnectionConfig.fromJson(
-        Map<String, dynamic>.from(config.toJson()),
-      ) {
+    this.privateKey, {
+    Future<void> Function(ConnectionConfig?)? validate,
+  }) : _configSnapshot = ConnectionConfig.fromJson(
+         Map<String, dynamic>.from(config.toJson()),
+       ),
+       // Public callback parameter keeps the validation closure encapsulated.
+       // ignore: prefer_initializing_formals
+       _validate = validate {
     if (!binding.matches(config)) {
       throw ArgumentError.value(
         config.id,
@@ -196,4 +201,9 @@ class ConnectionRuntimeTarget {
   ConnectionConfig get config => ConnectionConfig.fromJson(
     Map<String, dynamic>.from(_configSnapshot.toJson()),
   );
+
+  /// 在 Socket 或后台凭据交接前再次验证目标及凭据版本，不缓存解锁状态。
+  Future<void> validateCurrent([ConnectionConfig? authenticatedConfig]) async {
+    await _validate?.call(authenticatedConfig);
+  }
 }

@@ -1,4 +1,4 @@
-最新更新时间：2026-10-28
+最新更新时间：2026-10-29
 
 # feature_lan_share
 
@@ -25,7 +25,13 @@ LAN Quick Share 的独立 Feature Package。当前开发阶段只接受破坏性
 `LAN Control Protocol V2`：负责设备发现、配对、capabilities、authenticated
 control HTTP、WSS Relay enrollment/编排、Web Share、传输历史和非秘密配对元数据。
 二进制附件只有 Native `Network Protocol V2 Transfer` 一条正式数据面；按照 V2 控制面
-决定，文本和剪贴板使用 authenticated HTTPS + application E2E。
+决定，文本和剪贴板使用 authenticated HTTPS + application E2E。Android 可以选择
+单个系统文档，先按块复制进沙箱，再交给这条发送路径；沙箱里的文件也可以按块导出
+到用户选择的文档。复制按现有存储 Owner 独占预留文件并检查剩余空间，读取授权在
+交给普通发送路径前释放。原生返回受理时文件仍保留，供后续异步读取和历史重试；
+沿用沙箱七日清理。复制失败或 Module 关闭不留下未提交的部分文件。导出拒绝符号
+链接逃逸，所有失败均中止目标写入。选择期间关闭页面会回收迟到的文档资源。
+对端提供的 `localPath` 仍然忽略。其它平台继续使用路径选择器。
 
 ## 边界
 

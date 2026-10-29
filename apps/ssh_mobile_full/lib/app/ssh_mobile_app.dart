@@ -25,6 +25,7 @@ import '../services/app_settings.dart';
 import 'package:app_ui/app_ui.dart';
 import '../services/app_log_service.dart';
 import 'app_runtime.dart';
+import 'android_system_documents.dart';
 import 'lan_system_notification_host.dart';
 import 'monitoring_widget_navigation_host.dart';
 import 'package:feature_system_admin/feature_system_admin.dart' as system_admin;
@@ -76,6 +77,7 @@ class _SshMobileAppState extends State<SshMobileApp>
   AppConnectionRuntimeAdapter? _connectionRuntimeAdapter;
   AppConnectionVerificationAdapter? _connectionVerificationAdapter;
   ScreenShareEntryCoordinator? _lanScreenShareAdapter;
+  final AndroidSystemDocuments _androidDocuments = AndroidSystemDocuments();
 
   @override
   void initState() {
@@ -264,6 +266,12 @@ class _SshMobileAppState extends State<SshMobileApp>
         ),
         Provider<feature_lan_share.LanShareScreenSharePort>.value(
           value: _lanScreenShareAdapter!,
+        ),
+        Provider<feature_sftp.SftpDocumentAccessPort>.value(
+          value: _androidDocuments.sftp,
+        ),
+        Provider<feature_lan_share.LanDocumentAccessPort>.value(
+          value: _androidDocuments.lan,
         ),
         ListenableProvider<feature_playbook.PlaybookSettingsPort>.value(
           value: runtime.playbookSettingsAdapter,

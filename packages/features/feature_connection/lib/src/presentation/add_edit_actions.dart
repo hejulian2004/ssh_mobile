@@ -2,7 +2,13 @@ part of 'add_edit_screen.dart';
 
 extension _AddEditActions on _AddEditScreenState {
   Future<void> _save() async {
+    final editor = _credentialEditor;
+    if (_isLoadingSecrets || editor?.canSubmit == false) {
+      if (editor?.isAccessCurrent == false) editor?.lock();
+      return;
+    }
     if (!_formKey.currentState!.validate()) return;
+    final accessLease = editor?.captureSubmissionAccess();
 
     final connectionViewModel = context.read<ConnectionViewModel>();
     final uiAdapter = context.read<ConnectionUiAdapter?>();
@@ -53,6 +59,9 @@ extension _AddEditActions on _AddEditScreenState {
         isEditing: isEditing,
         rawPassword: _passwordController.text,
         rawPrivateKey: _privateKeyController.text,
+        expectedCredentialRevision: _credentialEditor?.revision,
+        isCredentialAccessCurrent: () =>
+            mounted && (accessLease?.call() ?? true),
         confirmDisconnectCallback: _confirmDisconnectActiveWindows,
         onUnknownHostKey: uiAdapter == null
             ? null

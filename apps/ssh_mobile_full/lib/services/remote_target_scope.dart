@@ -92,6 +92,7 @@ class RemoteTargetScope {
     required ConnectionRepository connectionRepository,
     required CredentialRepository credentialRepository,
     required String connectionId,
+    bool allowCredentialUnlock = false,
   }) async {
     final normalizedId = connectionId.trim();
     final scopedBindings = currentBindings;
@@ -110,6 +111,7 @@ class RemoteTargetScope {
       binding,
       connectionRepository: connectionRepository,
       credentialRepository: credentialRepository,
+      allowCredentialUnlock: allowCredentialUnlock,
     );
     if (target != null) return target;
 
@@ -124,14 +126,69 @@ class RemoteTargetScope {
     ConnectionTargetBinding binding, {
     required ConnectionRepository connectionRepository,
     required CredentialRepository credentialRepository,
+    bool allowCredentialUnlock = false,
   }) async {
     final config = connectionRepository.getConnection(binding.id);
     if (!binding.matches(config)) return null;
+    final protection = credentialRepository is CredentialProtectionRepository
+        ? credentialRepository as CredentialProtectionRepository
+        : null;
+    final revision = await protection?.protectionRevision(binding.id);
+    final CredentialPair pair;
+    if (revision != null) {
+      if (!allowCredentialUnlock) {
+        throw const CredentialProtectionException(
+          CredentialProtectionError.locked,
+        );
+      }
+      pair = await protection!.unlockCredentials(
+        binding.id,
+        expectedRevision: revision,
+      );
+      if (pair.revision != revision) {
+        throw const CredentialProtectionException(
+          CredentialProtectionError.stale,
+        );
+      }
+    } else {
+      pair = CredentialPair(
+        password: await credentialRepository.getPassword(binding.id),
+        privateKey: await credentialRepository.getPrivateKey(binding.id),
+      );
+    }
+    Future<void> validate(ConnectionConfig? authenticatedConfig) async {
+      var expected = binding;
+      // Only a first, explicitly authenticated Host Key may enrich this snapshot.
+      // It cannot change routing, user, authentication method or a pinned key.
+      if (authenticatedConfig != null &&
+          binding.hostKeyFingerprint == null &&
+          authenticatedConfig.hostKeyFingerprint?.isNotEmpty == true) {
+        final enriched = binding.config
+          ..hostKeyAlgorithm = authenticatedConfig.hostKeyAlgorithm
+          ..hostKeyFingerprint = authenticatedConfig.hostKeyFingerprint
+          ..hostKeyTrustedAt = authenticatedConfig.hostKeyTrustedAt;
+        expected = ConnectionTargetBinding.fromConfig(enriched);
+        if (!expected.matches(authenticatedConfig)) {
+          throw RemoteTargetScopeException.targetChanged(binding.id);
+        }
+      }
+      final currentRevision = await protection?.protectionRevision(binding.id);
+      if (!expected.matches(connectionRepository.getConnection(binding.id)) ||
+          currentRevision != revision) {
+        throw RemoteTargetScopeException.targetChanged(binding.id);
+      }
+    }
+
+    if (!binding.matches(connectionRepository.getConnection(binding.id))) {
+      return null;
+    }
+    await validate(null);
     return ConnectionRuntimeTarget(
       binding,
       config!,
-      await credentialRepository.getPassword(binding.id),
-      await credentialRepository.getPrivateKey(binding.id),
+      pair.password,
+      pair.privateKey,
+      validate: validate,
     );
   }
 

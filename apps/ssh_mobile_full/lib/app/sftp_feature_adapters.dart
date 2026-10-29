@@ -198,6 +198,9 @@ final class AppSftpBackendAdapter implements feature_sftp.SftpBackend {
   String? get connectionId => _legacyService.connectionId;
 
   @override
+  String? get targetFingerprint => _legacyService.targetFingerprint;
+
+  @override
   String? get connectionName => _legacyService.connectionName;
 
   @override

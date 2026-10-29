@@ -1,4 +1,4 @@
-最新更新时间：2026-08-24
+最新更新时间：2026-10-29
 
 # feature_sftp
 
@@ -9,6 +9,15 @@ SFTP 文件浏览、传输、预览、编辑和路径收藏 Feature。
 - `SftpModule` 独占 `sftp.db`、路径 Repository 和 Feature Service。
 - `sftp.db` 只保存 recent paths、favorite paths 和必要的传输元数据，不保存密码、
   私钥或 Token。
+- Android 上，App Shell 可以注入 `SftpDocumentAccessPort`，用系统文档选择器
+  读写单个 content URI。上传和下载仍走现有路径 API，文档内容按块经过一次
+  临时文件。其它平台继续使用路径选择器。远程目录不会出现在系统文件管理器里。
+- 文档上传在打开选择器前保存连接 ID、目标指纹和目录快照，复制结束仍须一致；
+  切换服务器、同 ID 改绑或切换目录会拒绝上传。文档暂存同一时间只允许一次，
+  通过现有传输状态展示进度；取消和 Module 释放会主动关闭源/中止目标，
+  进行中的操作在返回前等待这次清理。`SftpModule.dispose()` 等待
+  `SftpService.close()` 排空文档操作后再关闭数据库，不关闭 App-owned 后端或 SSH。
+  临时文件只保留这次尝试，成功、错误、取消和文档关闭失败都会收敛删除。
 - Feature 通过 `SftpBackend` 使用 App Shell 注入的旧 SFTP 后端，并通过
   `ssh_core.SshSessionManager` 共享 App Scope SSH 初始化；Feature 不创建或关闭
   全局 SSH/SFTP 资源。
