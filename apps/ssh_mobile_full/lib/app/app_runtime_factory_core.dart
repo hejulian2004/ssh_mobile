@@ -14,8 +14,16 @@ extension _AppRuntimeFactoryCore on _AppRuntimeFactoryContext {
         connection_core.DriftConnectionRepository(
           database: runtimeConnectionDatabase,
         );
-    runtimeCredentialRepository =
-        credentialRepository ?? connection_core.SecureCredentialRepository();
+    final suppliedCredentials = credentialRepository;
+    if (suppliedCredentials != null) {
+      runtimeCredentialRepository = suppliedCredentials;
+    } else {
+      final crypto = AndroidCredentialCrypto();
+      await crypto.initialize();
+      runtimeCredentialRepository = connection_core.SecureCredentialRepository(
+        crypto: crypto,
+      );
+    }
     runtimeHostKeyRepository = AppRuntimeFactory._resolveHostKeyRepository(
       supplied: hostKeyRepository,
       connectionRepository: runtimeConnectionRepository,

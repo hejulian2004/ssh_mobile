@@ -19,6 +19,7 @@ extension _SshConnectionRuntime on SshService {
       credentials: credentials,
       onUnknownHostKey: onUnknownHostKey,
       peerId: _resolvePeerId(config),
+      validateTarget: target.validateCurrent,
     );
     try {
       final result = await client.runWithResult(command).timeout(timeout);
@@ -44,6 +45,8 @@ extension _SshConnectionRuntime on SshService {
     required SshHostKeyConfirmation? onUnknownHostKey,
     String? peerId,
     String? traceId,
+    Future<void> Function(ConnectionConfig? authenticatedConfig)?
+    validateTarget,
   }) async {
     final client = await _clientFactory.connectClient(
       config,
@@ -52,6 +55,7 @@ extension _SshConnectionRuntime on SshService {
       onUnknownHostKey: onUnknownHostKey,
       peerId: peerId,
       traceId: traceId,
+      validateTarget: validateTarget,
     );
     try {
       await client.ping().timeout(const Duration(seconds: 8));
@@ -72,6 +76,8 @@ extension _SshConnectionRuntime on SshService {
     SshHostKeyConfirmation? onUnknownHostKey,
     String? peerId,
     String? traceId,
+    Future<void> Function(ConnectionConfig? authenticatedConfig)?
+    validateTarget,
   }) async {
     final connectToken = _localConnectGate.begin(session.id);
     final owner = SshConnectionAttemptOwner();
@@ -93,6 +99,7 @@ extension _SshConnectionRuntime on SshService {
         onUnknownHostKey: onUnknownHostKey,
         peerId: peerId,
         traceId: traceId,
+        validateTarget: validateTarget,
       );
       owner.ownClient(client.close);
       _ensureLocalConnectCurrent(session, connectToken);

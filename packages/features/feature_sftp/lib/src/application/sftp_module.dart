@@ -167,10 +167,12 @@ final class SftpModule implements AppModule {
     _database = null;
     _backend = null;
     _sshSessionManager = null;
-    if (service != null) {
-      // 兼容后端的连接 Owner 仍是 AppRuntime，Module 只释放自己的监听。
-      service.dispose();
+    try {
+      // Drain Feature-owned document I/O before closing its database.
+      // Backend connections and SSH resources still belong to AppRuntime.
+      if (service != null) await service.close();
+    } finally {
+      if (database != null) await database.dispose();
     }
-    if (database != null) await database.dispose();
   }
 }

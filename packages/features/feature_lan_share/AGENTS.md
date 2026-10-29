@@ -1,4 +1,4 @@
-最新更新时间：2026-10-28
+最新更新时间：2026-10-29
 
 # feature_lan_share 维护约束
 
@@ -68,7 +68,17 @@
 - Network V2 transfer events (`Progress`/`Completed`/`Failed`) require authoritative
   `peerId`; missing/mismatched IDs fail closed, never use `transferId` alone.
   App↔App binary image/video/audio/file uses Native Network V2 regular-file
-  transfer; directory/multi-file and `/api/lan/upload` are rejected. Outgoing
+  transfer; directory/multi-file and `/api/lan/upload` are rejected. Android
+  may supply that one regular file through `LanDocumentAccessPort`: the picked
+  document is copied into the sandbox in bounded chunks, and `sendFile` runs
+  only after the copy completes and its source grant closes. Reuse the storage
+  owner's unique reservation and fail-closed space check. After handoff retain
+  that source for asynchronous native reads/history retries and the existing
+  sandbox TTL; do not delete it when native only acknowledges acceptance.
+  A sandbox file can be exported the same way; reject links that resolve outside
+  the sandbox and abort the selected document on every export failure. A picker
+  result arriving after its page closes releases its source or aborts its sink.
+  Peer `localPath` stays ignored. Non-Android keeps the path picker. Outgoing
   media history stores the sender source path. A failed or cancelled outgoing
   image/video/audio/file can be retried in place when that file still exists
   and the stored failure is retryable or unknown; retry reuses the history id,

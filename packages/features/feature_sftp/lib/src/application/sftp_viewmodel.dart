@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:ssh_core/ssh_core.dart';
 
 import '../data/sftp_service.dart';
+import '../domain/sftp_document.dart';
 import '../domain/sftp_models.dart';
 
 /// SFTP 页面状态协调器。
@@ -81,6 +82,33 @@ final class SftpViewModel extends ChangeNotifier {
   }) => _sftpService.downloadFile(
     entry,
     localPath: localPath,
+    maxBytes: maxBytes,
+  );
+
+  /// 上传一个系统文档。超限时不会写远端。
+  SftpDocumentUploadTarget get documentUploadTarget =>
+      _sftpService.documentUploadTarget;
+
+  Future<void> uploadFromDocument({
+    required SftpDocumentSource source,
+    required String filename,
+    SftpDocumentUploadTarget? target,
+    int maxBytes = SftpLimits.uploadBytes,
+  }) => _sftpService.uploadFromDocument(
+    source: source,
+    filename: filename,
+    target: target,
+    maxBytes: maxBytes,
+  );
+
+  /// 把远端文件写入用户选择的文档。
+  Future<void> downloadToDocument({
+    required SftpEntry entry,
+    required SftpDocumentSink sink,
+    required int maxBytes,
+  }) => _sftpService.downloadToDocument(
+    entry: entry,
+    sink: sink,
     maxBytes: maxBytes,
   );
 

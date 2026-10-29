@@ -59,6 +59,7 @@ extension _SshServiceConnection on SshService {
         connectionRepository: _connectionRepository,
         credentialRepository: _credentialRepository,
         connectionId: connectionId,
+        allowCredentialUnlock: true,
       );
     } on RemoteTargetScopeException catch (e) {
       if (_shutdownRequested) return;
@@ -177,6 +178,7 @@ extension _SshServiceConnection on SshService {
             onUnknownHostKey: onUnknownHostKey,
             traceId: traceId,
             peerId: resolvedPeerId,
+            validateTarget: runtimeTarget.validateCurrent,
           );
         }
         await BackgroundServiceManager.start(
@@ -187,6 +189,7 @@ extension _SshServiceConnection on SshService {
         // Let the UI render while foreground service is starting up
         await Future<void>.delayed(const Duration(milliseconds: 16));
         if (_shutdownRequested) throw const _SshServiceClosing();
+        await runtimeTarget.validateCurrent(config);
         _backgroundService.invoke('sshConnect', {
           'sessionId': id,
           'id': config.id,
@@ -222,6 +225,7 @@ extension _SshServiceConnection on SshService {
           onUnknownHostKey: onUnknownHostKey,
           peerId: resolvedPeerId,
           traceId: traceId,
+          validateTarget: runtimeTarget.validateCurrent,
         );
       }
 

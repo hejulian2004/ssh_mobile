@@ -153,6 +153,8 @@ final class _DelayedSshClientFactory implements SshClientFactory {
     String? peerId,
     String? traceId,
     bool persistHostKeyTrust = true,
+    Future<void> Function(ConnectionConfig? authenticatedConfig)?
+    validateTarget,
   }) async {
     connectCount++;
     await connectGate.future;
@@ -181,6 +183,8 @@ final class _DelayedSftpClientFactory implements SshClientFactory {
     String? peerId,
     String? traceId,
     bool persistHostKeyTrust = true,
+    Future<void> Function(ConnectionConfig? authenticatedConfig)?
+    validateTarget,
   }) async {
     connectCount++;
     final sftp = _ClosableSftpClient(sftpGate);

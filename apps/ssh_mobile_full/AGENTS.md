@@ -22,6 +22,16 @@
 
 ## Scope, dependencies, and API
 
+- Android document pick and save use the `ssh_mobile/document_access` channel.
+  The activity asks for one content URI, persists only that read or write
+  grant, and copies bytes in bounded chunks through the app cache. Cancelling
+  the picker changes no grant. This activity does not publish remote
+  directories into the system file manager.
+- Document grants and cache files belong to the activity/session that acquired
+  them. Independent URI/mode borrowers must not revoke each other. Release all
+  owned resources on Activity teardown, settle accepted channel calls, and
+  discard late cache results. A failed or aborted write never reports success.
+  Do not log document URIs, names, bytes, local paths, or provider exceptions.
 - `LanSystemNotificationHost` owns the process notification center for this
   app, using `AppNotificationIdentity.full`. It may resume the app or open an
   existing LAN chat. It must not accept a file transfer or screen share from a

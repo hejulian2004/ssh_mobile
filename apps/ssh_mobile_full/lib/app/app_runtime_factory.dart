@@ -42,6 +42,7 @@ import '../services/terminal_session_metadata_store.dart';
 import '../services/shortcut_command_service.dart';
 import '../services/ssh_service.dart';
 import 'app_runtime.dart';
+import 'android_credential_crypto.dart';
 import 'app_network_resources.dart';
 import 'app_runtime_initialization_owner.dart';
 import 'ai_external_capability_adapters.dart';

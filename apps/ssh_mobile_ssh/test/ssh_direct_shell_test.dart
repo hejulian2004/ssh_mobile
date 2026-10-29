@@ -202,6 +202,8 @@ final class _RecordingFactory extends SshClientFactory {
     String? peerId,
     String? traceId,
     bool persistHostKeyTrust = true,
+    Future<void> Function(ConnectionConfig? authenticatedConfig)?
+    validateTarget,
   }) async {
     this.config = config;
     this.credentials = credentials;

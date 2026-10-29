@@ -10,6 +10,8 @@ import 'package:ssh_core/ssh_core.dart';
 /// 可控的 SFTP 后端 Fake。
 final class FakeSftpBackend extends ChangeNotifier implements SftpBackend {
   @override
+  String? targetFingerprint = 'fingerprint';
+  @override
   String? connectionId;
 
   @override
@@ -75,11 +77,25 @@ final class FakeSftpBackend extends ChangeNotifier implements SftpBackend {
     required Uint8List bytes,
   }) async {}
 
+  /// 测试观察实际上传。未设置时保持空操作。
+  Future<void> Function({required String localPath, required String filename})?
+  onUploadFile;
+
+  /// 测试观察实际下载。未设置时保持空操作。
+  Future<void> Function(
+    SftpEntry entry, {
+    required String localPath,
+    required int maxBytes,
+  })?
+  onDownloadFile;
+
   @override
   Future<void> uploadFile({
     required String localPath,
     required String filename,
-  }) async {}
+  }) async {
+    await onUploadFile?.call(localPath: localPath, filename: filename);
+  }
 
   @override
   Future<void> deleteEntry(
@@ -112,7 +128,9 @@ final class FakeSftpBackend extends ChangeNotifier implements SftpBackend {
     SftpEntry entry, {
     required String localPath,
     int maxBytes = SftpService.maxDownloadBytes,
-  }) async {}
+  }) async {
+    await onDownloadFile?.call(entry, localPath: localPath, maxBytes: maxBytes);
+  }
 
   @override
   Future<SftpPathInfo> statPathForConnection({
@@ -199,9 +217,12 @@ final class FakeSftpBackend extends ChangeNotifier implements SftpBackend {
 
   @override
   void cancelActiveTransfer() {
+    onCancelTransfer?.call();
     activeTransfer = null;
     notifyListeners();
   }
+
+  VoidCallback? onCancelTransfer;
 
   @override
   Future<Uint8List> downloadBytes(

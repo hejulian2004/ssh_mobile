@@ -14,6 +14,7 @@ export 'package:connection_core/connection_core.dart'
         ServerPlatform,
         TerminalLaunchMode;
 export 'src/application/connection_ports.dart';
+export 'src/application/connection_credential_editor.dart';
 export 'src/application/connection_persistence_coordinator.dart'
     show ConnectionSaveRollbackException;
 export 'src/application/connection_view_model.dart';

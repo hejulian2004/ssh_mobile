@@ -9,6 +9,7 @@ import 'package:network_sdk/network_sdk.dart';
 
 import 'lan_relay_ports.dart';
 
+export 'lan_document_access.dart';
 export 'lan_relay_ports.dart';
 
 /// A current eligible local IPv4 address and its transient interface identity.

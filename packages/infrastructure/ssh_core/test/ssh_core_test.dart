@@ -118,6 +118,41 @@ void main() {
   });
 
   group('SshClientFactory native stream', () {
+    test('revoked credential approval fails before any Socket opens', () async {
+      final connector = _ThrowingConnector();
+      final factory = SshClientFactory(
+        credentialRepository: _FakeCredentialRepository(),
+        hostKeyRepository: _FakeHostKeyRepository(),
+        logger: _FakeLogger(),
+        nativeStreamConnector: connector,
+      );
+      await expectLater(
+        factory.connectClient(
+          ConnectionConfig(
+            id: 'fixture',
+            name: 'Public fixture',
+            host: 'fixture.example.invalid',
+            username: 'fixture',
+            authMethod: AuthMethod.password,
+          ),
+          credentials: const SshCredentials(
+            password: 'public-fixture',
+            privateKey: null,
+          ),
+          peerId: 'fixture-peer',
+          validateTarget: (_) async =>
+              throw StateError('approval_target_changed'),
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'code',
+            'approval_target_changed',
+          ),
+        ),
+      );
+      expect(connector.openedPeerIds, isEmpty);
+    });
     test(
       'connectClient opens a native stream when peerId is provided',
       () async {

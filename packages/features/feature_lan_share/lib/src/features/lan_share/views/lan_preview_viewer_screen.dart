@@ -343,6 +343,19 @@ class _LanPreviewViewerScreenState extends State<LanPreviewViewerScreen> {
     final path = widget.message.localPath;
     if (path == null) return;
 
+    final documents = _documentPort(context);
+    if (documents != null && documents.usesSystemDocuments) {
+      await _exportSystemDocument(
+        context,
+        strings,
+        path,
+        documents,
+        fileName: widget.message.fileName,
+        payloadType: widget.message.payloadType,
+      );
+      return;
+    }
+
     final storageService = context.read<LanShareViewModel>().storageService;
     final success = await storageService.exportToPublic(
       path,
@@ -361,6 +374,52 @@ class _LanPreviewViewerScreenState extends State<LanPreviewViewerScreen> {
         SnackBar(content: Text(strings.lanShareSaveFailed)),
       );
     }
+  }
+}
+
+LanDocumentAccessPort? _documentPort(BuildContext context) {
+  try {
+    return Provider.of<LanDocumentAccessPort>(context, listen: false);
+  } on ProviderNotFoundException {
+    return null;
+  }
+}
+
+Future<void> _exportSystemDocument(
+  BuildContext context,
+  LanShareStrings strings,
+  String path,
+  LanDocumentAccessPort documents, {
+  required String? fileName,
+  required LanPayloadType payloadType,
+}) async {
+  final mime = switch (payloadType) {
+    LanPayloadType.image => 'image/*',
+    LanPayloadType.video => 'video/*',
+    _ => 'application/octet-stream',
+  };
+  try {
+    final sink = await documents.createForWrite(
+      suggestedName: fileName ?? 'download',
+      mimeType: mime,
+    );
+    if (sink == null) return;
+    if (!context.mounted) {
+      await sink.abort();
+      return;
+    }
+    await context.read<LanShareViewModel>().exportSandboxToDocument(
+      sandboxPath: path,
+      sink: sink,
+    );
+    if (!context.mounted) return;
+    final saved = LanDocumentStrings(isEnglish: strings.isEnglish).saved;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(saved)));
+  } catch (_) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(strings.lanShareSaveFailed)));
   }
 }
 

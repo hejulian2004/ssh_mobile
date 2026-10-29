@@ -44,6 +44,88 @@ void main() {
   });
 
   group('SFTP stream transfers', () {
+    test(
+      'document identity rejects a saved target rebound behind a live session',
+      () async {
+        final connection = makeConnection('server-1');
+        final fixture = TransferFixture(
+          connection: connection,
+          remote: MemorySftpClient(),
+          entry: makeFileEntry(connection, 'up.bin'),
+        );
+        addTearDown(fixture.dispose);
+        await fixture.storage.connectionRepository.addConnection(connection);
+        expect(
+          fixture.service.targetFingerprint,
+          fixture.entry.targetFingerprint,
+        );
+        await fixture.storage.connectionRepository.updateConnection(
+          connection.copyWith(host: 'two.example.com'),
+        );
+        expect(fixture.service.isConnected, isTrue);
+        expect(fixture.service.targetFingerprint, isNull);
+      },
+    );
+
+    test(
+      'cancel during upload metadata I/O prevents remote creation',
+      () async {
+        final connection = makeConnection('server-1');
+        final remote = MemorySftpClient()..setListing('/srv', const []);
+        final fixture = TransferFixture(
+          connection: connection,
+          remote: remote,
+          entry: makeFileEntry(connection, 'up.bin'),
+        );
+        addTearDown(fixture.dispose);
+        final local = File('${tempDir.path}/input.bin');
+        await local.writeAsBytes([1, 2, 3]);
+        final upload = fixture.service.uploadFile(
+          localPath: local.path,
+          filename: 'up.bin',
+        );
+        fixture.service.cancelActiveTransfer();
+        await expectLater(
+          upload,
+          throwsA(isA<SftpTransferCancelledException>()),
+        );
+        expect(remote.files, isEmpty);
+        expect(fixture.service.hasActiveTransfer, isFalse);
+      },
+    );
+
+    test('upload freezes the remote directory before local file I/O', () async {
+      final connection = makeConnection('server-1');
+      final remote = MemorySftpClient()
+        ..setListing('/srv', const [])
+        ..setListing('/other', const []);
+      final fixture = TransferFixture(
+        connection: connection,
+        remote: remote,
+        entry: makeFileEntry(connection, 'up.bin'),
+      );
+      addTearDown(fixture.dispose);
+      final local = File('${tempDir.path}/input.bin');
+      await local.writeAsBytes([1, 2, 3]);
+      // Cached navigation completes in microtasks before local filesystem I/O.
+      await fixture.storage.connectionRepository.addConnection(connection);
+      await fixture.service.openPath('/other');
+      await fixture.service.openPath('/srv');
+      expect(
+        fixture.service.targetFingerprint,
+        fixture.entry.targetFingerprint,
+      );
+      final upload = fixture.service.uploadFile(
+        localPath: local.path,
+        filename: 'up.bin',
+      );
+      await fixture.service.openPath('/other');
+      expect(fixture.service.currentPath, '/other');
+      await upload;
+      expect(remote.fileBytes('/srv/up.bin'), [1, 2, 3]);
+      expect(remote.files.containsKey('/other/up.bin'), isFalse);
+    });
+
     test('downloadFile streams bounded bytes into a new local file', () async {
       final connection = makeConnection('server-1');
       final bytes = Uint8List.fromList(

@@ -96,6 +96,8 @@ void main() {
 
 final class _FakeSftpBackend extends ChangeNotifier implements SftpBackend {
   @override
+  String? get targetFingerprint => 'fingerprint';
+  @override
   String? connectionId = 'server-1';
 
   @override

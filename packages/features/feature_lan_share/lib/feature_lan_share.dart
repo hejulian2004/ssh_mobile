@@ -48,6 +48,7 @@ export 'src/services/lan_share/lan_discovery_service.dart';
 export 'src/services/lan_share/lan_discovery_datagrams.dart';
 export 'src/services/lan_share/lan_security_service.dart';
 export 'src/services/lan_share/lan_share_models.dart';
+export 'src/services/lan_share/lan_document_exchange.dart';
 export 'src/services/lan_share/lan_storage_service.dart';
 export 'src/services/lan_share/lan_native_transfer_coordinator.dart';
 export 'src/services/lan_share/lan_transfer_protocol.dart';

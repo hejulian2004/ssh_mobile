@@ -1,4 +1,4 @@
-> Last updated: 2026-08-24
+> Last updated: 2026-10-29
 
 # SSH Security Manual Regression Checklist
 
@@ -26,6 +26,22 @@ and server details, then mark each scenario pass/fail with notes.
 | Plain SSH connect/disconnect/reconnect | Connects normally and host key policy is enforced every time |  |  |
 | tmux connect/attach/disconnect | tmux attach works; unexpected disconnect asks app reconnect instead of background credential reuse |  |  |
 
+## Android protected credentials
+
+| Scenario | Expected result | Result | Notes |
+| --- | --- | --- | --- |
+| Enable biometric protection on a saved connection | Strong biometric CryptoObject authentication is required; only a verified ciphertext envelope replaces the old credential keys |  |  |
+| Open a protected connection editor | Password and private key remain hidden until one explicit complete-pair unlock; backgrounding or leaving clears the displayed secrets |  |  |
+| Cancel authentication, close its route or background the Activity | No decrypted secret is published to the closed route, no stale envelope is committed, and a late native success cannot override cancellation |  |  |
+| Change the host or credential revision while a biometric or Host Key confirmation is pending | Authentication fails closed before credentials reach the changed target; first explicit Host Key trust may enrich only that same immutable target |  |  |
+| Invoke a noninteractive command or automatic reconnect using protected credentials | No implicit prompt or legacy credential fallback; the caller must return to an explicit foreground unlock flow |  |  |
+| Edit protected credentials, then fail persistence | Opaque ciphertext snapshot restores the prior protected revision; no plaintext rollback record is created |  |  |
+| Lose/invalidate the key, change biometric enrollment, remove screen lock, or corrupt the protected record | Typed locked/invalidated/corrupt failure; no replacement key or old plaintext is silently selected |  |  |
+| Interrupt enabling protection after envelope verification but before old-key cleanup | Protected status remains authoritative; ordinary getters reject access and cleanup can be retried |  |  |
+| Delete a protected connection with a storage/Keystore failure | Cleanup ledger/tombstone preserves the outstanding cleanup work; retry does not lose retired key revisions |  |  |
+| Use Android below API 30 or a device without available strong biometrics | Feature is unavailable or reports a typed readiness failure; the App's existing unprotected behavior continues |  |  |
+| Export a backup after protecting credentials | Password, private key and decrypted pair remain excluded from export and diagnostics |  |  |
+
 ## SFTP
 
 | Scenario | Expected result | Result | Notes |
@@ -38,6 +54,26 @@ and server details, then mark each scenario pass/fail with notes.
 | Preview/edit secret path such as `.env` or `.ssh/id_rsa` | No local cache file is written |  |  |
 | Trigger SFTP failures with sensitive remote/local paths and secret-bearing exception text | Logs contain only operation, stable code, counts, connection ID, and irreversible path hashes |  |  |
 | Delete a saved connection | SFTP session, remembered path, and cache are cleared |  |  |
+
+## Android document access (SAF)
+
+Use public test documents on an emulator or a dedicated test device. A system
+picker grant covers the selected document and requested mode only. SAF does not
+mount SFTP servers in the system Files app; the independent DocumentsProvider
+stage requires its own background connection and descriptor lifecycle.
+
+| Scenario | Expected result | Result | Notes |
+| --- | --- | --- | --- |
+| Cancel open/save, including while a prior selected document remains in use | No new transfer; prior document remains usable and its grant is unchanged |  |  |
+| Open two different documents or read/write leases for one document | Each operation uses only its URI and mode; releasing one does not revoke another |  |  |
+| Select a file from local storage and a cloud provider with unknown size | Bounded streaming preserves bytes; the caller's byte ceiling applies while reading |  |  |
+| Move/delete the selected document or revoke access before copying | Typed failure, no remote upload and no success notification; temporary files and owned grants are released |  |  |
+| Switch SFTP connection, host binding, or directory while the picker or source copy is pending | The pending upload fails closed instead of writing into the newly selected target |  |  |
+| Cancel or destroy the Activity during a picker/copy | Pending calls terminate and late cache results are cleaned; no stale Activity publishes success |  |  |
+| Export an empty file, then force provider I/O failure during a larger save | Empty file saves correctly; failed save never reports success, including repeated close; external provider may retain an empty/partial target |  |  |
+| Send two same-name LAN documents, then wait for native hashing/transfer and retry a failed send | Distinct sandbox sources remain available to their history records and cannot overwrite each other |  |  |
+| Attempt LAN export using a path outside the sandbox or a symlink pointing outside it | Export is denied, the write lease is aborted, and outside bytes never reach the document |  |  |
+| Inspect diagnostics after provider exceptions containing document names/URIs | Only stable operation/error metadata is visible; document bytes, names, paths and URIs are absent |  |  |
 
 ## System Admin and Monitor
 

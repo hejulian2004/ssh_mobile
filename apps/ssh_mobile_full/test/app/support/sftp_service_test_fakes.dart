@@ -13,6 +13,8 @@ final class FakeSftpService extends Fake implements legacy_sftp.SftpService {
   @override
   String? connectionId = 'conn-1';
   @override
+  String? get targetFingerprint => 'fingerprint';
+  @override
   String? connectionName = 'Server A';
   @override
   String currentPath = '/home/user';

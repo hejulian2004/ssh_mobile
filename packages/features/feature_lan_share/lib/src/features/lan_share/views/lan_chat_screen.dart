@@ -15,6 +15,8 @@ import 'lan_preview_viewer_screen.dart';
 import 'lan_text_selection_screen.dart';
 import 'widgets/lan_outgoing_file_status.dart';
 
+part 'lan_chat_attachments.dart';
+
 class LanChatScreen extends StatefulWidget {
   final String targetDeviceId;
   final String initialAlias;
@@ -113,159 +115,6 @@ class _LanChatScreenState extends State<LanChatScreen> {
     final hour = dateTime.hour.toString().padLeft(2, '0');
     final minute = dateTime.minute.toString().padLeft(2, '0');
     return '$hour:$minute';
-  }
-
-  void _showAttachmentOptions(
-    BuildContext context,
-    LanShareStrings strings,
-    LanShareViewModel vm,
-    String peerId,
-    LanDiscoveredPeer? device,
-  ) {
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_library_rounded),
-              title: Text(strings.lanShareSelectImage),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final file = await FilePicker.pickFile(type: FileType.image);
-                if (file != null && file.path != null) {
-                  final result = await lanUiIgnored(
-                    vm.sendFile(
-                      peerId: peerId,
-                      filePath: file.path!,
-                      discovery: device,
-                    ),
-                  );
-                  if (result.failure != null && context.mounted) {
-                    if (result.failure!.kind ==
-                        LanUiFailureKind.authenticationFailed) {
-                      _showE2ENotSupportedError(context, strings);
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            strings.isEnglish
-                                ? 'Failed to send image: ${result.failure!.message}'
-                                : '发送图片失败：${result.failure!.message}',
-                          ),
-                        ),
-                      );
-                    }
-                  }
-                }
-              },
-            ),
-
-            ListTile(
-              leading: const Icon(Icons.video_library_rounded),
-              title: Text(strings.lanShareSelectVideo),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final file = await FilePicker.pickFile(type: FileType.video);
-                if (file != null && file.path != null) {
-                  final result = await lanUiIgnored(
-                    vm.sendFile(
-                      peerId: peerId,
-                      filePath: file.path!,
-                      discovery: device,
-                    ),
-                  );
-                  if (result.failure != null && context.mounted) {
-                    if (result.failure!.kind ==
-                        LanUiFailureKind.authenticationFailed) {
-                      _showE2ENotSupportedError(context, strings);
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            strings.isEnglish
-                                ? 'Failed to send video: ${result.failure!.message}'
-                                : '发送视频失败：${result.failure!.message}',
-                          ),
-                        ),
-                      );
-                    }
-                  }
-                }
-              },
-            ),
-
-            ListTile(
-              leading: const Icon(Icons.insert_drive_file_rounded),
-              title: Text(strings.lanShareSelectFile),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final file = await FilePicker.pickFile();
-                if (file != null && file.path != null) {
-                  final result = await lanUiIgnored(
-                    vm.sendFile(
-                      peerId: peerId,
-                      filePath: file.path!,
-                      discovery: device,
-                    ),
-                  );
-                  if (result.failure != null && context.mounted) {
-                    if (result.failure!.kind ==
-                        LanUiFailureKind.authenticationFailed) {
-                      _showE2ENotSupportedError(context, strings);
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            strings.isEnglish
-                                ? 'Failed to send file: ${result.failure!.message}'
-                                : '发送文件失败：${result.failure!.message}',
-                          ),
-                        ),
-                      );
-                    }
-                  }
-                }
-              },
-            ),
-
-            ListTile(
-              leading: const Icon(Icons.content_paste_rounded),
-              title: Text(strings.lanShareClipboard),
-              onTap: () async {
-                Navigator.pop(ctx);
-                if (device == null) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        strings.isEnglish
-                            ? 'Clipboard sync requires direct local network.'
-                            : '剪贴板同步暂不支持中继传输，需处于同一局域网。',
-                      ),
-                    ),
-                  );
-                  return;
-                }
-                final data = await Clipboard.getData(Clipboard.kTextPlain);
-                if (data != null &&
-                    data.text != null &&
-                    data.text!.isNotEmpty) {
-                  final result = await lanUiIgnored(
-                    vm.sendClipboard(device, data.text!),
-                  );
-                  if (result.failure?.kind ==
-                          LanUiFailureKind.authenticationFailed &&
-                      context.mounted) {
-                    _showE2ENotSupportedError(context, strings);
-                  }
-                }
-              },
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget? _screenShareAction(BuildContext context, LanShareStrings strings) {
@@ -414,9 +263,7 @@ class _LanChatScreenState extends State<LanChatScreen> {
                               ],
                             ),
                           ),
-                          if (_screenShareAction(context, strings)
-                              case final action?)
-                            action,
+                          ?_screenShareAction(context, strings),
                           PopupMenuButton<String>(
                             icon: const Icon(Icons.more_vert_rounded),
                             onSelected: (action) async {
