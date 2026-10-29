@@ -61,6 +61,7 @@ void main() {
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'currentMode') return false;
         calls.add(call);
         return null;
       });
@@ -95,6 +96,216 @@ void main() {
     },
   );
 
+  test('an older page cannot clear a newer owner after a late reply', () async {
+    const channel = MethodChannel('ssh_mobile/screen_share_pip_generation');
+    final calls = <MethodCall>[];
+    final firstReply = Completer<void>();
+    var seen = 0;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'currentMode') return false;
+      calls.add(call);
+      seen += 1;
+      if (seen == 1) await firstReply.future;
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final older = AppScreenSharePictureInPicture(
+      platform: MethodChannelAppPictureInPicture(channel: channel),
+    );
+    older.update(const AppPictureInPictureSession(width: 16, height: 9));
+    await Future<void>.delayed(Duration.zero);
+    expect(calls, hasLength(1));
+    final newer = AppScreenSharePictureInPicture(
+      platform: MethodChannelAppPictureInPicture(channel: channel),
+    );
+    newer.update(const AppPictureInPictureSession(width: 4, height: 3));
+    await Future<void>.delayed(Duration.zero);
+    older.dispose();
+    firstReply.complete();
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    expect(calls.map((call) => call.arguments).toList(), [
+      {'width': 16.0, 'height': 9.0},
+      {'width': 4.0, 'height': 3.0},
+    ]);
+    await messenger.handlePlatformMessage(
+      channel.name,
+      const StandardMethodCodec().encodeMethodCall(
+        const MethodCall('onModeChanged', true),
+      ),
+      (data) {},
+    );
+    expect(newer.active, isTrue);
+    expect(older.active, isFalse);
+    newer.dispose();
+    await Future<void>.delayed(Duration.zero);
+    expect(calls.last.arguments, isNull);
+  });
+
+  test(
+    'a surviving page reclaims the channel after the newer owner closes',
+    () async {
+      const channel = MethodChannel('ssh_mobile/screen_share_pip_reclaim');
+      final calls = <MethodCall>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'currentMode') return false;
+        calls.add(call);
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final older = AppScreenSharePictureInPicture(
+        platform: MethodChannelAppPictureInPicture(channel: channel),
+      );
+      final newer = AppScreenSharePictureInPicture(
+        platform: MethodChannelAppPictureInPicture(channel: channel),
+      );
+      const kept = AppPictureInPictureSession(width: 16, height: 9);
+      older.update(kept);
+      await Future<void>.delayed(Duration.zero);
+      newer.update(const AppPictureInPictureSession(width: 4, height: 3));
+      await Future<void>.delayed(Duration.zero);
+      older.update(kept);
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.last.arguments, {'width': 4.0, 'height': 3.0});
+      newer.dispose();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.last.arguments, isNull);
+      older.update(kept);
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.last.arguments, {'width': 16.0, 'height': 9.0});
+      await messenger.handlePlatformMessage(
+        channel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('onModeChanged', true),
+        ),
+        (data) {},
+      );
+      expect(older.active, isTrue);
+      expect(newer.active, isFalse);
+      older.dispose();
+      await Future<void>.delayed(Duration.zero);
+    },
+  );
+
+  test(
+    'a reclaimed page adopts the activity mode instead of its stale flag',
+    () async {
+      const channel = MethodChannel('ssh_mobile/screen_share_pip_mode');
+      var systemActive = false;
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'currentMode') return systemActive;
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      Future<void> mode(bool active) {
+        systemActive = active;
+        return messenger.handlePlatformMessage(
+          channel.name,
+          const StandardMethodCodec().encodeMethodCall(
+            MethodCall('onModeChanged', active),
+          ),
+          (_) {},
+        );
+      }
+
+      final older = AppScreenSharePictureInPicture(
+        platform: MethodChannelAppPictureInPicture(channel: channel),
+      );
+      await mode(true);
+      expect(older.active, isTrue);
+      final newer = AppScreenSharePictureInPicture(
+        platform: MethodChannelAppPictureInPicture(channel: channel),
+      );
+      await mode(false);
+      expect(newer.active, isFalse);
+      expect(older.active, isTrue);
+      newer.dispose();
+      await Future<void>.delayed(Duration.zero);
+      older.claim();
+      await Future<void>.delayed(Duration.zero);
+      expect(older.active, isFalse);
+      expect(newer.active, isFalse);
+      older.dispose();
+    },
+  );
+
+  test(
+    'a claim publishes again when an older session reply arrives late',
+    () async {
+      final platform = _Platform();
+      final firstReply = Completer<void>();
+      platform.block = firstReply;
+      final pip = AppScreenSharePictureInPicture(platform: platform);
+      const session = AppPictureInPictureSession(width: 16, height: 9);
+      pip.update(session);
+      await Future<void>.delayed(Duration.zero);
+      expect(platform.attempts, 1);
+      expect(platform.sessions, isEmpty);
+      pip.claim();
+      pip.update(session);
+      await Future<void>.delayed(Duration.zero);
+      expect(platform.attempts, 1);
+      firstReply.complete();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(platform.sessions.map((item) => item?.width).toList(), [
+        16.0,
+        16.0,
+      ]);
+      pip.dispose();
+      await Future<void>.delayed(Duration.zero);
+    },
+  );
+
+  test(
+    'a vacant reclaim reads the activity mode before publishing again',
+    () async {
+      const channel = MethodChannel('ssh_mobile/screen_share_pip_mode_update');
+      var systemActive = false;
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'currentMode') return systemActive;
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      Future<void> mode(bool active) {
+        systemActive = active;
+        return messenger.handlePlatformMessage(
+          channel.name,
+          const StandardMethodCodec().encodeMethodCall(
+            MethodCall('onModeChanged', active),
+          ),
+          (_) {},
+        );
+      }
+
+      final older = AppScreenSharePictureInPicture(
+        platform: MethodChannelAppPictureInPicture(channel: channel),
+      );
+      await mode(true);
+      final newer = AppScreenSharePictureInPicture(
+        platform: MethodChannelAppPictureInPicture(channel: channel),
+      );
+      await mode(false);
+      newer.dispose();
+      await Future<void>.delayed(Duration.zero);
+      older.update(const AppPictureInPictureSession(width: 16, height: 9));
+      await Future<void>.delayed(Duration.zero);
+      expect(older.active, isFalse);
+      expect(newer.active, isFalse);
+      older.dispose();
+    },
+  );
+
   test('a missing plugin disables later updates', () async {
     const channel = MethodChannel('ssh_mobile/screen_share_pip_missing');
     final pip = AppScreenSharePictureInPicture(
@@ -117,7 +328,13 @@ class _Platform implements AppPictureInPicturePlatform {
   void Function(bool active)? listener;
 
   @override
-  Future<void> setSession(AppPictureInPictureSession? session) async {
+  bool get holds => bound;
+
+  @override
+  Future<bool?> currentMode() async => null;
+
+  @override
+  Future<bool> setSession(AppPictureInPictureSession? session) async {
     attempts += 1;
     final gate = block;
     block = null;
@@ -127,12 +344,20 @@ class _Platform implements AppPictureInPicturePlatform {
       throw StateError('unavailable');
     }
     sessions.add(session);
+    return true;
   }
 
   @override
   void bind(void Function(bool active) onModeChanged) {
     bound = true;
     listener = onModeChanged;
+  }
+
+  @override
+  bool reclaimIfVacant(void Function(bool active) onModeChanged) {
+    if (bound) return true;
+    bind(onModeChanged);
+    return true;
   }
 
   @override

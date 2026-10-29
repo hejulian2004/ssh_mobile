@@ -36,6 +36,17 @@ class PictureInPictureCoordinatorTest {
     }
 
     @Test
+    fun releaseWhileActiveClearsEligibilityWithoutStartingTheActivity() {
+        val host = Host(sdk31 = true, active = true)
+        val coordinator = PictureInPictureCoordinator(host)
+        coordinator.setVideoAspect(16.0, 9.0)
+        coordinator.release()
+        assertTrue(host.events.contains("apply:null:false"))
+        assertFalse(host.events.contains("expand"))
+        assertFalse(host.events.any { it.startsWith("start") })
+    }
+
+    @Test
     fun stoppingAnActiveWindowExpandsBackToTheSameActivity() {
         val host = Host(sdk31 = true, active = true)
         val coordinator = PictureInPictureCoordinator(host)
@@ -81,6 +92,16 @@ class PictureInPictureCoordinatorTest {
         PictureInPictureCoordinator(old).setVideoAspect(16.0, 9.0)
         assertTrue(old.events.isEmpty())
         assertFalse(PictureInPictureCoordinator(old).shouldAvoidFinish())
+    }
+
+    @Test
+    fun currentModeReadsTheHostWithoutChangingTheWindow() {
+        val host = Host(active = true)
+        val coordinator = PictureInPictureCoordinator(host)
+        assertTrue(coordinator.currentMode())
+        host.active = false
+        assertFalse(coordinator.currentMode())
+        assertTrue(host.events.isEmpty())
     }
 
     @Test

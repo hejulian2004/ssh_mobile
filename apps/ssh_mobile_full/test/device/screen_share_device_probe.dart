@@ -47,6 +47,7 @@ void main(List<String> args) {
                   video: Texture(textureId: int.parse(surface.id.value)),
                   videoSize: _videoSize,
                   controls: _statusView(),
+                  allowPictureInPicture: true,
                   onStop: () {
                     if (!_stopped.isCompleted) _stopped.complete();
                   },
@@ -368,8 +369,11 @@ Future<void> _probe({
     }
   } on TimeoutException {
     _report('FAIL timeout');
-  } catch (_) {
-    _report('FAIL lifecycle');
+  } catch (error) {
+    final detail = error is StateError
+        ? error.message
+        : error.runtimeType.toString();
+    _report('FAIL lifecycle $detail');
   } finally {
     final activeSession = session;
     final activeOperation = operation;

@@ -350,6 +350,100 @@ void main() {
     expect(platform.calls, isEmpty);
   });
 
+  testWidgets(
+    'a covered receiver clears picture in picture without stopping the share',
+    (tester) async {
+      final pip = _PipPlatform();
+      var stopped = 0;
+      final annotation = ScreenShareAnnotationSession(
+        operationId: 'operation',
+        generation: 2,
+        transport: _AnnotationTransport(),
+      )..start();
+      addTearDown(annotation.dispose);
+      await tester.pumpWidget(
+        page(
+          pictureInPicture: true,
+          pip: pip,
+          annotation: annotation,
+          onStop: () => stopped++,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(pip.sessions.single?.width, 1080);
+      expect(pip.sessions.single?.height, 2400);
+      final video = tester.state(find.byType(_Video));
+      final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+      navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) => const Scaffold(body: Text('Covering route')),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Covering route'), findsOneWidget);
+      expect(pip.sessions.last, isNull);
+      expect(stopped, 0);
+      expect(annotation.strokes, isEmpty);
+      navigator.pop();
+      await tester.pumpAndSettle();
+      expect(pip.sessions.last?.width, 1080);
+      expect(pip.sessions.last?.height, 2400);
+      expect(stopped, 0);
+      expect(annotation.strokes, isEmpty);
+      expect(tester.state(find.byType(_Video)), same(video));
+    },
+  );
+
+  testWidgets(
+    'closing the newer share page republishes the receiver underneath',
+    (tester) async {
+      const channel = MethodChannel('ssh_mobile/screen_share_pip_pages');
+      final calls = <MethodCall>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'currentMode') return false;
+        calls.add(call);
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final covered = ValueNotifier<Size?>(const Size(1080, 2400));
+      final front = ValueNotifier<Size?>(const Size(640, 480));
+      addTearDown(covered.dispose);
+      addTearDown(front.dispose);
+      Widget share(ValueNotifier<Size?> videoSize) => AppScreenShareVideoPage(
+        video: const _Video(),
+        videoSize: videoSize,
+        controls: const Text('consent state'),
+        allowPictureInPicture: true,
+        pictureInPicturePlatform: MethodChannelAppPictureInPicture(
+          channel: channel,
+        ),
+        windowPlatform: platform,
+      );
+
+      await tester.pumpWidget(MaterialApp(home: share(covered)));
+      await tester.pump();
+      expect(calls.last.arguments, {'width': 1080.0, 'height': 2400.0});
+      final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+      navigator.push(MaterialPageRoute<void>(builder: (_) => share(front)));
+      await tester.pumpAndSettle();
+      expect(calls.last.arguments, {'width': 640.0, 'height': 480.0});
+      navigator.pop();
+      await tester.pumpAndSettle();
+      expect(calls.last.arguments, {'width': 1080.0, 'height': 2400.0});
+      await messenger.handlePlatformMessage(
+        channel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('onModeChanged', true),
+        ),
+        (_) {},
+      );
+      await tester.pump();
+      expect(find.byTooltip('Rotate view'), findsNothing);
+    },
+  );
+
   testWidgets('sender and an unread frame do not become eligible', (
     tester,
   ) async {
@@ -387,19 +481,36 @@ class _AnnotationTransport implements ScreenShareAnnotationTransport {
 class _PipPlatform implements AppPictureInPicturePlatform {
   final sessions = <AppPictureInPictureSession?>[];
   void Function(bool active)? listener;
+  var _holds = false;
 
   @override
-  Future<void> setSession(AppPictureInPictureSession? session) async {
+  bool get holds => _holds;
+
+  @override
+  Future<bool?> currentMode() async => null;
+
+  @override
+  Future<bool> setSession(AppPictureInPictureSession? session) async {
     sessions.add(session);
+    return true;
   }
 
   @override
   void bind(void Function(bool active) onModeChanged) {
+    _holds = true;
     listener = onModeChanged;
   }
 
   @override
+  bool reclaimIfVacant(void Function(bool active) onModeChanged) {
+    if (_holds) return true;
+    bind(onModeChanged);
+    return true;
+  }
+
+  @override
   void unbind() {
+    _holds = false;
     listener = null;
   }
 }

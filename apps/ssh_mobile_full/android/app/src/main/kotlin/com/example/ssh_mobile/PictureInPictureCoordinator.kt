@@ -55,6 +55,13 @@ internal class PictureInPictureCoordinator(
         if (wasEligible && next == null && host.isActive()) host.expand()
     }
 
+    /** Drops published eligibility. Teardown must not bring the activity forward. */
+    fun release() {
+        aspect = null
+        hasPublished = true
+        publish()
+    }
+
     fun onUserLeaveHint() {
         val ratio = aspect ?: return
         if (!host.sdkAtLeast26() || host.isActive()) return
@@ -62,6 +69,8 @@ internal class PictureInPictureCoordinator(
         if (host.sdkAtLeast31()) return
         if (!host.enter(ratio)) host.resumeImmersive()
     }
+
+    fun currentMode(): Boolean = host.isActive()
 
     fun onModeChanged(active: Boolean) {
         if (active) host.suspendImmersive() else host.resumeImmersive()

@@ -46,6 +46,7 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
   bool get _fullscreen => _window.fullscreen;
   int _quarterTurns = 0;
   bool _defaultFullscreenRequested = false;
+  bool _presented = true;
   bool _painting = false;
   ScreenShareAnnotationTool _tool = ScreenShareAnnotationTool.pen;
   ScreenShareAnnotationColor _color = ScreenShareAnnotationColor.red;
@@ -70,6 +71,16 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
   void _pipChanged() => setState(() {});
 
   void _onVideoSize() => _syncPictureInPicture();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final presented = ModalRoute.isCurrentOf(context) != false;
+    if (presented == _presented) return;
+    _presented = presented;
+    if (_presented) _pip.claim();
+    _syncPictureInPicture();
+  }
 
   @override
   void dispose() {
@@ -118,6 +129,10 @@ final class _VideoPageState extends State<AppScreenShareVideoPage> {
   }
 
   void _syncPictureInPicture() {
+    if (!_presented) {
+      _pip.update(null);
+      return;
+    }
     final size = widget.videoSize.value;
     final valid =
         widget.allowPictureInPicture &&
