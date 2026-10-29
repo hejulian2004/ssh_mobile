@@ -109,10 +109,12 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        testInstrumentationRunner = "com.example.ssh_mobile.test.WidgetInstrumentation"
     }
 
     sourceSets.getByName("androidTest") {
         java.srcDir("../../test/android/public_capture_fixture")
+        java.srcDir("../../test/android/widget_fixture")
         manifest.srcFile("../../test/android/public_capture_fixture/AndroidManifest.xml")
     }
 
@@ -147,6 +149,7 @@ kotlin {
 }
 
 dependencies {
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }

@@ -44,7 +44,11 @@ function JobApp([int]$Shard){
   }
 }
 function JobCoverage{$arguments=@('run','tool/check_coverage.dart','--minimum=90');foreach($shard in 0..($AppShards-1)){$coverageDir=Join-Path $LogDir "coverage\shard-$shard";$arguments+="--file=$(Join-Path $coverageDir 'lcov.info')";foreach($name in @('startup','system-admin')){$arguments+="--file=$(Join-Path $coverageDir "isolated-$name-lcov.info")"}};$arguments+='--source-root=lib';$coverageBaseRef=if($env:FULL_TEST_COVERAGE_BASE_REF){$env:FULL_TEST_COVERAGE_BASE_REF}elseif($env:CI_BASE_SHA){$env:CI_BASE_SHA}elseif($env:GITHUB_BASE_SHA){$env:GITHUB_BASE_SHA}else{$env:GITHUB_EVENT_BEFORE};if($coverageBaseRef){$arguments+="--base-ref=$coverageBaseRef"};Write-Host 'Enforce Full App coverage (90% minimum)';Cmd dart $arguments (Join-Path $root 'apps\ssh_mobile_full')}
-function JobAndroid{Cmd flutter @('build','apk','--debug','--no-pub') (Join-Path $root 'apps\ssh_mobile_full')}
+function JobAndroid{
+  Cmd flutter @('build','apk','--debug','--no-pub') (Join-Path $root 'apps\ssh_mobile_full')
+  Cmd (Join-Path $root 'apps\ssh_mobile_full\android\gradlew.bat') @(':android_server_widgets:verifyWidgetCoverage','--no-daemon','--console=plain') (Join-Path $root 'apps\ssh_mobile_full\android')
+  Cmd (Join-Path $root 'apps\ssh_mobile_full\android\gradlew.bat') @(':app:assembleDebugAndroidTest','--no-daemon','--console=plain') (Join-Path $root 'apps\ssh_mobile_full\android')
+}
 function JobWindows{Cmd flutter @('build','windows','--no-pub') (Join-Path $root 'apps\ssh_mobile_full')}
 function JobTerminal{Cmd flutter @('build','windows','--debug','--no-pub') (Join-Path $root 'apps\ssh_mobile_terminal')}
 function JobE2E{Script (Join-Path $PSScriptRoot '..\e2e\client_backend_e2e.ps1') @{Mode='smoke';TempRoot=$temp}}

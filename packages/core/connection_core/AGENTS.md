@@ -8,6 +8,10 @@
 - `ConnectionDatabase`（固定 `connection.sqlite`）由 AppRuntime 创建/关闭；
   Repository 不创建全局 DB、不静态隐藏 Owner。禁止旧统一业务 DB 或
   SharedPreferences 迁移适配器。生产打开失败不得回退内存。
+- `ConnectionCatalogChanges.watchConnections()` 是可选的公开只读目录能力，
+  `DriftConnectionRepository` 通过原有数据库发出不可变、无凭据的持久化快照。
+  订阅者只取消自己的订阅，不关闭数据库或另建目录缓存；导入、更新、删除必须
+  由同一查询流观察。App 层自行转换最小安全目录，不把结构配置传给平台插件。
 - Full App 旧 Connection 入口/模型导出（`apps/ssh_mobile_full/lib/features/connection/`）
   已关闭；调用方只能使用公开契约。
 - 可选保护只经 `CredentialCryptoPort` 使用平台认证/Keystore；Core 不实现密码算法，

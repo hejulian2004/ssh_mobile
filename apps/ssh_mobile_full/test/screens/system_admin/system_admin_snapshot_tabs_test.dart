@@ -62,6 +62,7 @@ void main() {
     required SystemAdminViewModel adminVm,
     required PerformanceMonitorViewModel monitorVm,
     double textScale = 1,
+    String? monitoringConnectionId,
   }) {
     return MultiProvider(
       providers: [
@@ -85,10 +86,62 @@ void main() {
             child: child!,
           );
         },
-        home: const SystemAdminScreen(),
+        home: SystemAdminScreen(monitoringConnectionId: monitoringConnectionId),
       ),
     );
   }
+
+  testWidgets(
+    'widget focus shows only its server without changing sampling or connecting',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final adminVm = StubSystemAdminViewModel();
+      final monitorVm = StubPerformanceMonitorViewModel();
+      adminVm.connections = [
+        ...fakeConnections,
+        ConnectionConfig(
+          id: 'conn_456',
+          name: 'Second Server',
+          host: 'example.invalid',
+          username: 'fixture-user',
+        ),
+      ];
+      monitorVm.isRunning = true;
+      monitorVm.selectedConnectionIds = {'conn_123', 'conn_456'};
+      monitorVm.monitoringConnectionIds = {'conn_123', 'conn_456'};
+      for (final id in monitorVm.monitoringConnectionIds) {
+        monitorVm.sampleOverrides[id] = [
+          PerformanceSample(
+            connectionId: id,
+            time: DateTime.utc(2026, 10, 29),
+            cpuPercent: 42,
+            memoryPercent: 63,
+            diskBytesPerSecond: 2048,
+            networkBytesPerSecond: 1024,
+          ),
+        ];
+      }
+      await tester.pumpWidget(
+        buildTestableWidget(
+          adminVm: adminVm,
+          monitorVm: monitorVm,
+          monitoringConnectionId: 'conn_123',
+        ),
+      );
+      // The running monitor deliberately animates its live indicator forever.
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.textContaining('Test Server 42'), findsWidgets);
+      expect(find.textContaining('Second Server '), findsNothing);
+      expect(monitorVm.selectedConnectionIds, {'conn_123', 'conn_456'});
+      expect(monitorVm.monitoringConnectionIds, {'conn_123', 'conn_456'});
+      expect(adminVm.connectIfNeededCalls, 0);
+      expect(monitorVm.fetchPortsCalls, isEmpty);
+    },
+  );
 
   testWidgets(
     'SystemAdminScreen displays empty state when no server selected',

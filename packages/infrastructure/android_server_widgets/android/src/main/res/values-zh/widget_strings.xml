@@ -1,0 +1,27 @@
+<resources>
+    <string name="server_widget_name">SSH Mobile · 服务器监控</string>
+    <string name="server_widget_description">查看服务器的 CPU、内存、网络与磁盘监控数据</string>
+    <string name="server_widget_choose">选择服务器</string>
+    <string name="server_widget_choose_hint">在桌面显示这台服务器最近一次监控采样。</string>
+    <string name="server_widget_empty">先打开 SSH Mobile 添加服务器，再添加此小组件。</string>
+    <string name="server_widget_open">打开 SSH Mobile</string>
+    <string name="server_widget_cancel">取消</string>
+    <string name="server_widget_save_failed">无法保存小组件，请重新选择服务器。</string>
+    <string name="server_widget_select_description">选择服务器 %1$s</string>
+    <string name="server_widget_cpu">CPU</string>
+    <string name="server_widget_memory">内存</string>
+    <string name="server_widget_memory_short">内存</string>
+    <string name="server_widget_network">网络吞吐</string>
+    <string name="server_widget_network_short">网络</string>
+    <string name="server_widget_disk">磁盘 I/O</string>
+    <string name="server_widget_disk_short">磁盘</string>
+    <string name="server_widget_sampled">采样于 %1$s</string>
+    <string name="server_widget_status_not_configured">选择服务器</string>
+    <string name="server_widget_status_not_started">监控未启动</string>
+    <string name="server_widget_status_waiting">采样中…</string>
+    <string name="server_widget_status_active">监控中</string>
+    <string name="server_widget_status_stopped">监控已停止</string>
+    <string name="server_widget_status_failed">采样失败</string>
+    <string name="server_widget_status_stale">数据已过期</string>
+    <string name="server_widget_status_removed">服务器已移除</string>
+</resources>

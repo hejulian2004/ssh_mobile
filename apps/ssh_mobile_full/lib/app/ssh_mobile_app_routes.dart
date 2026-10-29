@@ -113,7 +113,15 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
                       english: () => context.read<AppSettings>().isEnglish,
                       diagnostic: (message) =>
                           AppLogService.instance.warning(message),
-                      child: themedChild,
+                      child: MonitoringWidgetNavigationHost(
+                        repository: _runtime.connectionRepository,
+                        navigatorKey: _navigatorKey,
+                        ready: _startupReady,
+                        diagnostic: () => _runtime.appLogService.warning(
+                          'Widget navigation unavailable',
+                        ),
+                        child: themedChild,
+                      ),
                     );
                   },
                   initialRoute: AppShellRouteNames.root,
@@ -122,6 +130,7 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
                     if (routeName != null &&
                         routeName != AppShellRouteNames.root &&
                         routeName != AppShellRouteNames.performance &&
+                        routeName != AppShellRouteNames.monitoringDetails &&
                         routeName != AppShellRouteNames.screenShare &&
                         !AppRouteContributionCatalog.contains(routeName)) {
                       throw StateError(
@@ -138,7 +147,7 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
                                 appSettings: context.read<AppSettings>(),
                               ),
                               child: StartupScreen(
-                                onReady: widget.onStartupReady,
+                                onReady: _notifyStartupReady,
                               ),
                             ),
                           ),
@@ -193,6 +202,26 @@ extension _SshMobileAppRoutes on _SshMobileAppState {
                           builder: (_) => _createHomeRouteScopeForState(
                             const HomeScreen(initialIndex: 3),
                           ),
+                        );
+                      case AppShellRouteNames.monitoringDetails:
+                        final id = settings.arguments;
+                        final connection = id is String
+                            ? _runtime.connectionRepository.getConnection(id)
+                            : null;
+                        return MaterialPageRoute(
+                          settings: settings,
+                          builder: (_) => connection == null
+                              ? _createHomeRouteScopeForState(
+                                  const HomeScreen(),
+                                )
+                              : Scaffold(
+                                  appBar: AppBar(title: Text(connection.name)),
+                                  body: AppSystemAdminModuleScope(
+                                    child: system_admin.SystemAdminScreen(
+                                      monitoringConnectionId: connection.id,
+                                    ),
+                                  ),
+                                ),
                         );
                       case AppShellRouteNames.screenShare:
                         final arguments = settings.arguments;

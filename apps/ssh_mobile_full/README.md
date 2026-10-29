@@ -226,6 +226,32 @@ Package 和 App Shell 直接使用的插件；Feature 实现不得通过 App `/s
 
 ## 数据库
 
+Android 的 `MonitoringWidgetAdapter` 由 AppRuntime 持有，订阅现有监控服务和
+公开的 Connection 目录变化，把四项真实指标与采样时间转换为
+`android_server_widgets` 的安全快照。普通样本按通知去重并以至少十五秒间隔
+同步，状态变化立即同步；桥接不创建 Timer，不改变监控的显式启动策略。
+监控轮次时间和原生 writer session/sequence 防止旧样本或迟到写入恢复已停止状态。
+删除连接、修改目标和导入恢复会使相应缓存失效。Runtime 先取消桥接订阅再关闭
+监控 Module；Windows 不初始化 Android Widget 通道。
+
+Android 桌面现在可从标准 Widget 选择器添加 SSH Mobile，并在原生配置页选择
+服务器。每个实例独立保存选择；紧凑 2×2 和扩展 4×2 布局按桌面实际 dp 响应，
+展示 CPU、内存、网络总吞吐、磁盘总 I/O 和绝对采样时间，遵循系统深浅色。
+原生看板读取缓存时不需要 Flutter Engine，也不会启动第二套监控或 SSH 连接。
+删除一个实例不影响监控服务或其他实例；导入配置会失效旧实例的选择。
+
+点击看板通过 `MonitoringWidgetNavigationHost` 回到现有 Flutter 客户端。
+App 等待启动就绪，再核对当前连接目录并打开相应监控详情；连接已删除时回到
+首页。点击只导航，不启动监控、SSH 或远程操作。冷启动/热启动的消息归属与
+迟到结果由独立通道和 App 路由测试验证。原生设备测试入口和精确证据范围见
+基础设施包 README；模拟器固定测试数据不代表真实服务器或两台目标真机验收。
+
+原生最新快照由插件的应用私有 DataStore 保存，不计入 App 日志或 Feature 历史。
+目录只含内部 ID 和脱敏名称；完整连接配置、地址、用户名和凭据不进入原生缓存。
+纯 JVM 的持久化重建测试不能代替 Android 进程重建与真实监控验收。
+桥接回归入口为 `test/app/monitoring_widget_adapter_test.dart`，插件边界和验证命令见
+[`android_server_widgets`](../../packages/infrastructure/android_server_widgets/README.md)。
+
 App Shell 只拥有独立的 `app_logs` 日志数据库。Connection、AI、Terminal、SFTP、
 Playbook、RAG、MCP 和 LAN Share 数据库分别由对应 Core/Feature Module 拥有；不再创建
 统一 `AppDatabase`。

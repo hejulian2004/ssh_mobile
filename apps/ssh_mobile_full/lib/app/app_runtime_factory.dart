@@ -54,6 +54,7 @@ import 'lan_share_emulator_discovery.dart';
 import 'lan_share_emulator_host.dart';
 import 'mcp_feature_adapters.dart';
 import 'monitoring_feature_adapters.dart';
+import 'monitoring_widget_adapter.dart';
 import 'network_sdk_adapters.dart';
 import 'playbook_feature_adapters.dart';
 import 'ssh_native_stream_adapters.dart';

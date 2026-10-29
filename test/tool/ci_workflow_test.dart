@@ -30,6 +30,8 @@ void main() {
   _verifyScriptTrees(root);
   _verifyFullTestScripts(root);
   _testProtocolV2WorkflowChecker();
+  _testWidgetBridgeGates(root, workflow);
+  _testWidgetPresentationGates(root, workflow);
 
   _expect(pubspec.contains('\nmelos:\n'), '根 pubspec 必须声明 Melos 配置');
   _expect(pubspec.contains('    format:'), 'Melos 必须提供 format 脚本');
@@ -309,7 +311,7 @@ void main() {
     r'^\s+- ((?:apps|packages)/[^\s]+)$',
     multiLine: true,
   ).allMatches(pubspec).map((match) => match.group(1)!).toList();
-  _expect(workspaceMembers.length == 29, 'Workspace Member 数量发生漂移');
+  _expect(workspaceMembers.length == 30, 'Workspace Member 数量发生漂移');
   for (final member in workspaceMembers) {
     _expect(
       Directory('${root.path}/$member').existsSync(),

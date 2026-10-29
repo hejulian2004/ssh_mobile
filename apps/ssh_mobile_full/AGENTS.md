@@ -32,6 +32,20 @@
   owned resources on Activity teardown, settle accepted channel calls, and
   discard late cache results. A failed or aborted write never reports success.
   Do not log document URIs, names, bytes, local paths, or provider exceptions.
+- `MonitoringWidgetAdapter` is an Android-only App Scope borrower of the public
+  MonitoringService and Connection directory stream. Keep its single-flight,
+  coalesced writes and native writer-session/sequence protection. No new Timer,
+  sampler, SSH connection or MainActivity business logic. Dispose its listener,
+  subscription and import callback before releasing the monitoring Module;
+  stopping the adapter never stops the borrowed service. Only safe Widget DTOs
+  reach `android_server_widgets`; target configuration stays in its Core owner.
+- `MonitoringWidgetNavigationHost` owns the Android Widget navigation listener
+  under the existing App Shell. Wait for startup readiness and resolve each
+  bounded ID against the current public Connection directory. A missing server
+  returns home; a click must never select/start monitoring, open SSH or execute
+  a remote action. Cancel listener ownership on host disposal and ignore late
+  initialization or replaced requests. Native launch/configuration belongs in
+  `android_server_widgets`, not MainActivity.
 - `LanSystemNotificationHost` owns the process notification center for this
   app, using `AppNotificationIdentity.full`. It may resume the app or open an
   existing LAN chat. It must not accept a file transfer or screen share from a

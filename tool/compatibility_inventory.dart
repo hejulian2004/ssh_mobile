@@ -146,6 +146,8 @@ const compatibilityInventory = <CompatibilityModule>[
     baselineSourceCount: 0,
     appShellAdapters: <String>[
       'apps/ssh_mobile_full/lib/app/monitoring_feature_adapters.dart',
+      'apps/ssh_mobile_full/lib/app/monitoring_widget_adapter.dart',
+      'apps/ssh_mobile_full/lib/app/monitoring_widget_navigation_host.dart',
       'apps/ssh_mobile_full/lib/app/system_admin_feature_adapters.dart',
       'apps/ssh_mobile_full/lib/services/server_diagnostics_service.dart',
       'apps/ssh_mobile_full/lib/services/server_status_probe.dart',

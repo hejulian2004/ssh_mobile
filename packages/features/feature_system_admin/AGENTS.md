@@ -1,4 +1,4 @@
-最新更新时间：2026-08-30
+最新更新时间：2026-10-29
 
 # feature_system_admin 维护约束
 
@@ -11,6 +11,10 @@
 - No database or `system_admin.db`. Contract: allowed admin pages/VM/Module/
   command Service/Ports/tests; API changes sync App adapters/security tests;
   Module cancels commands before closing sessions, Route releases own listeners.
+- The optional `monitoringConnectionId` page focus is presentation only. Never
+  turn Widget navigation into selection, monitor start, SSH admission or a
+  management command. Removed targets show an unavailable state and retain the
+  existing public Port and Route-owned resource boundaries.
 
 ## 验证（代码变更）
 

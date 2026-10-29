@@ -360,7 +360,9 @@ class StubPerformanceMonitorViewModel extends ChangeNotifier
   final List<String> fetchApplicationsCalls = [];
   final List<String> fetchServicesCalls = [];
 
-  List<PerformanceSample> getSamples(String connectionId) => [];
+  final Map<String, List<PerformanceSample>> sampleOverrides = {};
+  List<PerformanceSample> getSamples(String connectionId) =>
+      sampleOverrides[connectionId] ?? [];
 
   List<DiskUsageSnapshot> getDiskUsage(String connectionId) => [];
 
@@ -482,7 +484,8 @@ class StubPerformanceMonitorViewModel extends ChangeNotifier
   }
 
   @override
-  List<PerformanceSample> visibleSamplesFor(String connectionId) => [];
+  List<PerformanceSample> visibleSamplesFor(String connectionId) =>
+      getSamples(connectionId);
 
   @override
   List<DiskUsageSnapshot> diskUsageFor(String connectionId) => [];

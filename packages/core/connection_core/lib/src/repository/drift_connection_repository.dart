@@ -12,7 +12,10 @@ import 'host_key_repository.dart';
 /// AppRuntime 创建和释放。所有写操作通过串行尾队列执行，避免快速连续保存、
 /// 删除和排序时出现内存快照与 SQLite 顺序不一致。
 final class DriftConnectionRepository
-    implements ConnectionRepository, HostKeyRepository {
+    implements
+        ConnectionRepository,
+        HostKeyRepository,
+        ConnectionCatalogChanges {
   /// 使用 AppRuntime 注入的 ConnectionDatabase 创建 Repository。
   factory DriftConnectionRepository({required ConnectionDatabase database}) =>
       DriftConnectionRepository._(database);
@@ -26,6 +29,11 @@ final class DriftConnectionRepository
 
   @override
   List<ConnectionConfig> get connections => _connections;
+
+  @override
+  Stream<List<ConnectionConfig>> watchConnections() => _database.connectionDao
+      .watchAll()
+      .map((rows) => List<ConnectionConfig>.unmodifiable(rows.map(_fromRow)));
 
   /// 初始化一次并建立内存快照。
   @override

@@ -26,6 +26,7 @@ workspace:
   - packages/features/feature_webview
   - packages/features/feature_developer
   - packages/infrastructure/app_notifications
+  - packages/infrastructure/android_server_widgets
   - packages/infrastructure/network_transport
   - packages/infrastructure/network_sdk
   - packages/infrastructure/realtime_media

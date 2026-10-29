@@ -1,0 +1,73 @@
+group 'com.hejulian.android_server_widgets'
+version '1.0-SNAPSHOT'
+
+buildscript {
+    ext.kotlin_version = '2.3.20'
+    repositories { google(); mavenCentral() }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:9.0.1'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        classpath "org.jetbrains.kotlin:compose-compiler-gradle-plugin:$kotlin_version"
+    }
+}
+
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+apply plugin: 'org.jetbrains.kotlin.plugin.compose'
+apply plugin: 'jacoco'
+
+android {
+    namespace 'com.hejulian.android_server_widgets'
+    compileSdk 37
+    defaultConfig { minSdk 23 }
+    buildFeatures { compose true }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+    testOptions {
+        unitTests.all {
+            jacoco.includeNoLocationClasses = true
+            jacoco.excludes = ['jdk.internal.*']
+        }
+    }
+}
+
+repositories { google(); mavenCentral() }
+dependencies {
+    implementation 'androidx.datastore:datastore-core:1.1.7'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
+    implementation 'androidx.glance:glance-appwidget:1.2.0'
+    testImplementation 'junit:junit:4.13.2'
+    // Host JVM tests need the JVM file-replacement implementation. The Android
+    // artifact uses Linux rename semantics, which cannot replace files on Windows.
+    testImplementation 'androidx.datastore:datastore-core-jvm:1.1.7'
+    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2'
+}
+
+configurations.matching { it.name.endsWith('UnitTestRuntimeClasspath') }.configureEach {
+    exclude group: 'androidx.datastore', module: 'datastore-core-android'
+}
+
+jacoco { toolVersion = '0.8.13' }
+def snapshotClasses = fileTree("$buildDir/tmp/kotlin-classes/debug") {
+    include 'com/hejulian/android_server_widgets/**'
+    // Engine/Context adapters require the device gate; pure storage is measured.
+    exclude '**/AndroidServerWidgetsPlugin*', '**/MonitorSnapshotStorage*',
+        '**/ServerMonitorWidget*', '**/WidgetConfigurationActivity*', '**/WidgetLaunchActivity*',
+        '**/WidgetUpdateDispatcher*', '**/ComposableSingletons*'
+}
+tasks.register('widgetCoverageReport', JacocoReport) {
+    dependsOn 'testDebugUnitTest'
+    classDirectories.setFrom(snapshotClasses)
+    sourceDirectories.setFrom(files('src/main/kotlin'))
+    executionData.setFrom(fileTree(buildDir) { include '**/testDebugUnitTest.exec' })
+    reports { xml.required = true; html.required = true }
+}
+tasks.register('verifyWidgetCoverage', JacocoCoverageVerification) {
+    dependsOn 'widgetCoverageReport'
+    classDirectories.setFrom(snapshotClasses)
+    executionData.setFrom(fileTree(buildDir) { include '**/testDebugUnitTest.exec' })
+    violationRules { rule { element = 'SOURCEFILE'; limit { counter = 'LINE'; minimum = 0.90 } } }
+}

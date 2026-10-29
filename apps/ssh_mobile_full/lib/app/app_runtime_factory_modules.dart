@@ -122,6 +122,30 @@ extension _AppRuntimeFactoryModules on _AppRuntimeFactoryContext {
     await monitoringModule.initialize();
     await monitoringModule.activate();
     monitoringService = monitoringModule.service;
+    // Directory observation is a public optional capability. Non-Android
+    // composition never creates the bridge or subscribes to this stream.
+    final catalog = runtimeConnectionRepository;
+    if (!kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        catalog is connection_core.ConnectionCatalogChanges) {
+      final adapter = MonitoringWidgetAdapter.createForCurrentPlatform(
+        monitoring: monitoringService,
+        catalog: (catalog as connection_core.ConnectionCatalogChanges)
+            .watchConnections(),
+        onError: () =>
+            logger.warning('Android widget snapshot synchronization failed'),
+      )!;
+      monitoringWidgetAdapter = adapter;
+      aiStorageAdapter.registerOnImportCallback(
+        adapter.invalidateConfiguration,
+      );
+      cleanup.add(() async {
+        aiStorageAdapter.unregisterOnImportCallback(
+          adapter.invalidateConfiguration,
+        );
+        await adapter.dispose();
+      }, priority: _CleanupPriority.adapter);
+    }
     aiSettingsAdapter = AppAiSettingsAdapter(appSettings);
     cleanup.add(aiSettingsAdapter.dispose, priority: _CleanupPriority.adapter);
     aiSshAdapter = AppAiSshAdapter(sshService);

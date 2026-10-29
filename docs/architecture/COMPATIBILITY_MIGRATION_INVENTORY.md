@@ -1,4 +1,4 @@
-最新更新时间：2026-10-12
+最新更新时间：2026-10-29
 
 # 兼容层迁移引用清单
 
@@ -24,6 +24,13 @@ Network V2 的 wire/pairing/storage 重构已经完成。LAN Share 当前遵循
 schema、`pending_remote` 和 `/api/lan/upload` 的删除由该 ADR 的专项验收负责，不能
 以本表的“旧 App 路径已关闭”代替。
 
+`monitoring_widget_adapter.dart` 是当前 App Shell 的公开监控数据桥接边界，
+可由独立 App 测试直接导入。它只把现有监控样本转换为 Android 基础设施的安全
+快照，不属于旧 Monitoring 实现、兼容 shim 或另一套采样器。
+`monitoring_widget_navigation_host.dart` 是同一能力的 App Shell 路由边界，
+其独立测试可直接导入；原生点击只传递有界提示，App 重新核对连接目录并导航，
+不会恢复旧 Monitoring 页面实现或创建额外 SSH Owner。
+
 屏幕共享的 `realtime_media` 是新增的 Infrastructure 生命周期契约，不是旧 App
 路径兼容层：此前 `network_sdk` 中的合成 `remoteVideo` 帧占位 API 已在 Phase 2
 删除，替换为绑定 `(realtimeId, peerId, generation, direction)` 的不透明 native
@@ -41,7 +48,7 @@ normalized snapshots 和 `source_device_id = 7` 都是当前 V2/SDK contract 的
 | Connection | `feature_connection` / `connection_core` | 0 条 / 0 个文件 | 已关闭 | `connection_feature_adapters.dart`、`connection_runtime_adapters.dart` | 旧 Connection Feature 路径已删除；仅保留 App Shell Port 适配器 |
 | Terminal | `feature_terminal` | 0 条 / 0 个文件 | 已关闭 | `terminal_feature_adapters.dart`、`terminal_ssh_capability_adapter.dart`、Terminal history/metadata backend | 旧 Feature 路径、导出和测试已删除；App Shell SSH/历史后端保留至 method-level migration |
 | SFTP | `feature_sftp` | 0 条 / 0 个文件 | 已关闭 | `sftp_feature_adapters.dart`、`sftp_backend_adapters.dart`、`sftp_io_backend_adapters.dart` | 旧 Feature UI/ViewModel/测试已删除；共享 SftpService/cache/protocol 后端保留为 App Shell 边界 |
-| Monitoring | `feature_monitoring` | 0 条 / 0 个文件 | 已关闭 | `monitoring_feature_adapters.dart`、`system_admin_feature_adapters.dart`、diagnostics/probe backend | 旧 Performance service/tool 已删除；诊断后端只作为 App Shell adapter 保留 |
+| Monitoring | `feature_monitoring` | 0 条 / 0 个文件 | 已关闭 | `monitoring_feature_adapters.dart`、`monitoring_widget_adapter.dart`、`system_admin_feature_adapters.dart`、diagnostics/probe backend | 旧 Performance service/tool 已删除；诊断后端只作为 App Shell adapter 保留 |
 | System Admin | `feature_system_admin` | 0 条 / 0 个文件 | 已关闭 | `system_admin_feature_adapters.dart` | 旧页面、命令 facade、测试和 Feature 目录已删除 |
 | LAN Share | `feature_lan_share` | 0 条 / 0 个文件 | 已关闭 | `lan_share_feature_adapters.dart` | 旧 LAN 路由、页面、测试、Service、Relay facade 和 Runtime getter 已删除 |
 | Playbook | `feature_playbook` | 0 条 / 0 个文件 | 已关闭 | `playbook_feature_adapters.dart` | 旧 UI/service、AI 调用和测试已切到 Package API |

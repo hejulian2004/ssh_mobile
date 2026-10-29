@@ -1,0 +1,15 @@
+<resources>
+    <color name="server_widget_surface">#101D30</color>
+    <color name="server_widget_text">#DCE8FA</color>
+    <color name="server_widget_muted">#A6B8D1</color>
+    <color name="server_widget_blue">#80B6FF</color>
+    <color name="server_widget_cyan">#5DD4DE</color>
+    <color name="server_widget_track">#2C405C</color>
+    <color name="server_widget_warning">#FFBF8A</color>
+    <style name="ServerWidgetConfigurationTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">@color/server_widget_blue</item>
+        <item name="android:windowBackground">@color/server_widget_surface</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
