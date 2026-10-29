@@ -66,7 +66,7 @@ Feature。Feature 之间默认禁止直接依赖，当前唯一登记的例外�
 | Feature | `feature_webview` | `app_core`, `app_ui` | WebView 会话与安全策略 |
 | Infrastructure | `app_diagnostics` | `app_core` | 本地结构化诊断输出；只依赖 app_core 公开契约，Feature 不导入该包 |
 | Infrastructure | `app_notifications` | 无 | Android 与 Windows 系统通知适配；不依赖 Feature，不保存聊天正文或文件路径 |
-| Infrastructure | `android_server_widgets` | 无 | Android-only Flutter Plugin；只持久化安全目录和每台服务器最新监控快照，不依赖 Feature、Connection Repository 或 SSH/Network SDK |
+| Infrastructure | `android_server_widgets` | 无 | Android-only Flutter Plugin；Glance 读取安全目录、最新快照与独立实例映射；原生配置/点击只输出导航提示，不依赖 Feature、Connection Repository 或 SSH/Network SDK |
 | Infrastructure | `network_transport` | `app_core`, `ssh_mobile_network_native` | App Scope 网络门面和 Native handle 适配器 |
 | Infrastructure | `network_sdk` | 无 | Flutter 层 Bootstrap、鉴权 API、Session、事件流客户端及注入式 JSON 适配 |
 | Infrastructure | `realtime_media` | 无 | 不透明屏幕媒体端点的 Dart 生命周期契约；不拥有 Runtime、采集、编解码或渲染实现 |

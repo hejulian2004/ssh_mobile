@@ -1,0 +1,19 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="12dp"
+    android:background="@drawable/server_widget_surface">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="@string/server_widget_preview_title" android:textColor="@color/server_widget_text"
+        android:textSize="14sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="CPU    —" android:textColor="@color/server_widget_blue" android:textSize="12sp" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="RAM    —" android:textColor="@color/server_widget_cyan" android:textSize="12sp" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="NET    —" android:textColor="@color/server_widget_text" android:textSize="12sp" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="I/O    —" android:textColor="@color/server_widget_text" android:textSize="12sp" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="@string/server_widget_status_not_configured"
+        android:textColor="@color/server_widget_muted" android:textSize="10sp" android:maxLines="1" />
+</LinearLayout>

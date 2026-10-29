@@ -1,0 +1,10 @@
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="130dp" android:minHeight="130dp"
+    android:minResizeWidth="130dp" android:minResizeHeight="130dp"
+    android:targetCellWidth="2" android:targetCellHeight="2"
+    android:resizeMode="horizontal|vertical" android:widgetCategory="home_screen"
+    android:initialLayout="@layout/server_widget_preview_compact"
+    android:previewLayout="@layout/server_widget_preview_compact"
+    android:description="@string/server_widget_description"
+    android:configure="com.hejulian.android_server_widgets.WidgetConfigurationActivity"
+    android:widgetFeatures="reconfigurable" android:updatePeriodMillis="0" />

@@ -1,0 +1,29 @@
+<resources>
+    <string name="server_widget_name">SSH Mobile · Server monitor</string>
+    <string name="server_widget_description">CPU, memory, network and disk from your server monitor</string>
+    <string name="server_widget_choose">Choose a server</string>
+    <string name="server_widget_choose_hint">Show this server’s latest monitoring sample on your home screen.</string>
+    <string name="server_widget_empty">Open SSH Mobile to add a server, then add this Widget again.</string>
+    <string name="server_widget_open">Open SSH Mobile</string>
+    <string name="server_widget_cancel">Cancel</string>
+    <string name="server_widget_save_failed">Could not save this Widget. Try selecting the server again.</string>
+    <string name="server_widget_select_description">Select server %1$s</string>
+    <string name="server_widget_cpu">CPU</string>
+    <string name="server_widget_memory">Memory</string>
+    <string name="server_widget_memory_short">RAM</string>
+    <string name="server_widget_network">Network</string>
+    <string name="server_widget_network_short">NET</string>
+    <string name="server_widget_disk">Disk I/O</string>
+    <string name="server_widget_disk_short">I/O</string>
+    <string name="server_widget_sampled">Sampled %1$s</string>
+    <string name="server_widget_status_not_configured">Choose a server</string>
+    <string name="server_widget_status_not_started">Not started</string>
+    <string name="server_widget_status_waiting">Sampling…</string>
+    <string name="server_widget_status_active">Monitoring</string>
+    <string name="server_widget_status_stopped">Stopped</string>
+    <string name="server_widget_status_failed">Sampling failed</string>
+    <string name="server_widget_status_stale">Data expired</string>
+    <string name="server_widget_status_removed">Server removed</string>
+    <string name="server_widget_preview_title">SSH Mobile</string>
+    <string name="server_widget_unknown">—</string>
+</resources>
