@@ -3,3 +3,4 @@ library;
 
 export 'src/monitoring_widget_snapshot.dart';
 export 'src/monitoring_widget_platform.dart';
+export 'src/monitoring_widget_navigation.dart';

@@ -4,11 +4,13 @@ part of 'system_admin_screen.dart';
 
 class _MonitorTab extends StatefulWidget {
   final AppStrings strings;
+  final String? connectionId;
   final TabController tabController;
   final Future<void> Function() onStartMonitoring;
 
   const _MonitorTab({
     required this.strings,
+    this.connectionId,
     required this.tabController,
     required this.onStartMonitoring,
   });
@@ -55,9 +57,16 @@ class _MonitorTabState extends State<_MonitorTab>
   Widget build(BuildContext context) {
     super.build(context);
     monitor = context.read<PerformanceMonitorViewModel>();
-    connections = context.select<SystemAdminViewModel, List<ConnectionConfig>>(
-      (vm) => vm.connections,
-    );
+    final directory = context
+        .select<SystemAdminViewModel, List<ConnectionConfig>>(
+          (vm) => vm.connections,
+        );
+    connections = widget.connectionId == null
+        ? directory
+        : [
+            for (final connection in directory)
+              if (connection.id == widget.connectionId) connection,
+          ];
 
     return Column(
       children: [

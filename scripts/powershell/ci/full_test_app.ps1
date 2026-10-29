@@ -47,6 +47,7 @@ function JobCoverage{$arguments=@('run','tool/check_coverage.dart','--minimum=90
 function JobAndroid{
   Cmd flutter @('build','apk','--debug','--no-pub') (Join-Path $root 'apps\ssh_mobile_full')
   Cmd (Join-Path $root 'apps\ssh_mobile_full\android\gradlew.bat') @(':android_server_widgets:verifyWidgetCoverage','--no-daemon','--console=plain') (Join-Path $root 'apps\ssh_mobile_full\android')
+  Cmd (Join-Path $root 'apps\ssh_mobile_full\android\gradlew.bat') @(':app:assembleDebugAndroidTest','--no-daemon','--console=plain') (Join-Path $root 'apps\ssh_mobile_full\android')
 }
 function JobWindows{Cmd flutter @('build','windows','--no-pub') (Join-Path $root 'apps\ssh_mobile_full')}
 function JobTerminal{Cmd flutter @('build','windows','--debug','--no-pub') (Join-Path $root 'apps\ssh_mobile_terminal')}

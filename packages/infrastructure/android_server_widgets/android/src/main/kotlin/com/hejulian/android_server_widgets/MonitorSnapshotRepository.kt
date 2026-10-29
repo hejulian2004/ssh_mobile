@@ -3,13 +3,34 @@ package com.hejulian.android_server_widgets
 import androidx.datastore.core.DataStore
 import java.io.IOException
 import java.util.UUID
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+
+/** Public display data excludes writer authorization and persistence metadata. */
+data class MonitorSnapshotState(
+    val servers: List<WidgetServer> = emptyList(),
+    val snapshots: Map<String, MonitorSnapshot> = emptyMap(),
+)
 
 /** Storage owner only: every update is one durable DataStore transaction. */
 class MonitorSnapshotRepository(
     private val dataStore: DataStore<MonitorStore>,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
+    /** Collectors own only their subscription; the process keeps the DataStore. */
+    fun observeState(): Flow<MonitorSnapshotState> = dataStore.data.map { current ->
+        val now = clock()
+        MonitorSnapshotState(current.servers.toList(), current.snapshots.mapValues { (_, value) ->
+            val snapshot = value.normalized(now)
+            snapshot.copy(status = snapshot.statusAt(now))
+        })
+    }.catch { error ->
+        if (error is IOException) emit(MonitorSnapshotState()) else throw error
+    }.distinctUntilChanged()
+
     suspend fun beginSession(): String {
         val session = UUID.randomUUID().toString()
         dataStore.updateData { current ->

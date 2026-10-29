@@ -4,8 +4,8 @@ Last updated: 2026-10-29
 
 - Own the Android-only Flutter Plugin, versioned safe snapshot DTO/channel,
   Kotlin latest-sample repository and application-private DataStore cache.
-  Presentation, configuration Activity and Widget instance mapping require
-  their own scoped delivery and tests.
+  Also owns standard Glance presentation, native configuration, per-instance
+  bindings and the native navigation hint; Feature business stays in the App.
 - Depend only on public Flutter/platform libraries. Never depend on
   `feature_monitoring`, `ConnectionRepository`, SSH or Network SDK; App Shell
   supplies safe directory entries and converted snapshots through public APIs.
@@ -29,6 +29,22 @@ Last updated: 2026-10-29
   without arguments, exception details, paths or private data. New behavior uses
   deterministic independent tests before implementation; production files stay
   below 500 lines through responsibility-based decomposition.
+- Glance reads persisted snapshots without Flutter. Use actual responsive dp,
+  keep four metrics and absolute sample time visible, and follow system theme.
+  Rendering must never construct an AppRuntime or connect to a server.
+  Glance composition owns both DataStore Flow collections and the native
+  configuration callback; cancel/unregister them on composition disposal.
+  Font-scale changes must recompose live responsive variants, without a Timer
+  or a process-global UI observer.
+- Persist only the selected ID for each real Widget instance. Cancellation does
+  not configure it; deletion removes only that mapping. Revalidate the safe
+  directory on save and the App's current Connection directory on navigation.
+  Imported configuration invalidates old selections. A click is a navigation
+  hint only and never authorizes a connection, command or monitoring start.
+- A persisted snapshot requires an explicit Glance update. Use the pure refresh
+  planner for targeted fifteen-second sample coalescing and immediate state,
+  first-sample, name and deletion updates. Active Flow collection applies the
+  same budget, publishing on the next existing data event; no polling loop.
 
 ## Required checks
 

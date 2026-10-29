@@ -48,7 +48,11 @@ typedef SftpService = SystemAdminFileBrowserPort;
 typedef SftpEntry = SystemAdminFileEntry;
 
 class SystemAdminScreen extends StatefulWidget {
-  const SystemAdminScreen({super.key});
+  const SystemAdminScreen({super.key, this.monitoringConnectionId});
+
+  /// View-only chart focus. Opening the route never changes monitor selection,
+  /// starts sampling, or acquires a management connection.
+  final String? monitoringConnectionId;
 
   @override
   State<SystemAdminScreen> createState() => _SystemAdminScreenState();
@@ -495,6 +499,7 @@ class _SystemAdminScreenState extends State<SystemAdminScreen>
               // Tab 0: Monitor
               _MonitorTab(
                 strings: strings,
+                connectionId: widget.monitoringConnectionId,
                 tabController: _tabController,
                 onStartMonitoring: () async {
                   final monitorVm = context.read<SystemAdminMonitoringPort>();

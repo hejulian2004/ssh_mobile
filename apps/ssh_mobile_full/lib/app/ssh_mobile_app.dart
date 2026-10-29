@@ -26,6 +26,9 @@ import 'package:app_ui/app_ui.dart';
 import '../services/app_log_service.dart';
 import 'app_runtime.dart';
 import 'lan_system_notification_host.dart';
+import 'monitoring_widget_navigation_host.dart';
+import 'package:feature_system_admin/feature_system_admin.dart' as system_admin;
+import 'system_admin_feature_adapters.dart';
 import 'connection_feature_adapters.dart';
 import 'lan_share_feature_adapters.dart';
 import 'terminal_feature_adapters.dart';
@@ -57,6 +60,14 @@ class SshMobileApp extends StatefulWidget {
 class _SshMobileAppState extends State<SshMobileApp>
     with WidgetsBindingObserver {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  final ValueNotifier<bool> _startupReady = ValueNotifier(false);
+
+  void _notifyStartupReady() {
+    if (!mounted) return;
+    _startupReady.value = true;
+    widget.onStartupReady?.call();
+  }
+
   AppTerminalSettingsAdapter? _terminalSettingsAdapter;
   AppTerminalShortcutAdapter? _terminalShortcutAdapter;
   AppConnectionRepositoryAdapter? _connectionRepositoryAdapter;
@@ -126,6 +137,7 @@ class _SshMobileAppState extends State<SshMobileApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _startupReady.dispose();
     _terminalSettingsAdapter?.dispose();
     _terminalShortcutAdapter?.dispose();
     final runtime = widget.runtime;

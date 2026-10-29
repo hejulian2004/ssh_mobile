@@ -16,6 +16,9 @@ abstract final class AppShellRouteNames {
   /// 兼容旧入口的性能监控 Home 子页面路由。
   static const performance = '/performance';
 
+  /// Existing monitor presentation focused on one validated server.
+  static const monitoringDetails = '/monitoring-details';
+
   /// Explicit screen-share consent/media route.
   static const screenShare = '/screen-share';
 }

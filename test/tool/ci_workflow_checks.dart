@@ -2,6 +2,32 @@
 
 part of 'ci_workflow_test.dart';
 
+void _testWidgetPresentationGates(Directory root, String workflow) {
+  final android = _jobSection(workflow, 'android-build');
+  _expect(
+    android.contains(':app:assembleDebugAndroidTest'),
+    'Android CI must compile the independent Widget instrumentation APK',
+  );
+  final gradle = File(
+    '${root.path}/apps/ssh_mobile_full/android/app/build.gradle.kts',
+  ).readAsStringSync();
+  _expect(
+    gradle.contains('com.example.ssh_mobile.test.WidgetInstrumentation') &&
+        gradle.contains('../../test/android/widget_fixture'),
+    'Widget device instrumentation must stay under test/ and be a registered runner',
+  );
+  for (final extension in const ['sh', 'ps1']) {
+    final shell = extension == 'sh' ? 'bash' : 'powershell';
+    final app = File(
+      '${root.path}/scripts/$shell/ci/full_test_app.$extension',
+    ).readAsStringSync();
+    _expect(
+      app.contains(':app:assembleDebugAndroidTest'),
+      '$shell must compile the same independent Android Widget tests',
+    );
+  }
+}
+
 void _testWidgetBridgeGates(Directory root, String workflow) {
   final core = _jobSection(workflow, 'workspace-core-quality');
   _expect(

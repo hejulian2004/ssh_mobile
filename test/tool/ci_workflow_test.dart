@@ -31,6 +31,7 @@ void main() {
   _verifyFullTestScripts(root);
   _testProtocolV2WorkflowChecker();
   _testWidgetBridgeGates(root, workflow);
+  _testWidgetPresentationGates(root, workflow);
 
   _expect(pubspec.contains('\nmelos:\n'), '根 pubspec 必须声明 Melos 配置');
   _expect(pubspec.contains('    format:'), 'Melos 必须提供 format 脚本');

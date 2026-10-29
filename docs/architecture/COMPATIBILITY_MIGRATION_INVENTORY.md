@@ -27,6 +27,9 @@ schema、`pending_remote` 和 `/api/lan/upload` 的删除由该 ADR 的专项验
 `monitoring_widget_adapter.dart` 是当前 App Shell 的公开监控数据桥接边界，
 可由独立 App 测试直接导入。它只把现有监控样本转换为 Android 基础设施的安全
 快照，不属于旧 Monitoring 实现、兼容 shim 或另一套采样器。
+`monitoring_widget_navigation_host.dart` 是同一能力的 App Shell 路由边界，
+其独立测试可直接导入；原生点击只传递有界提示，App 重新核对连接目录并导航，
+不会恢复旧 Monitoring 页面实现或创建额外 SSH Owner。
 
 屏幕共享的 `realtime_media` 是新增的 Infrastructure 生命周期契约，不是旧 App
 路径兼容层：此前 `network_sdk` 中的合成 `remoteVideo` 帧占位 API 已在 Phase 2

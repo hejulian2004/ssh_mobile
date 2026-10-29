@@ -29,6 +29,13 @@
   subscription and import callback before releasing the monitoring Module;
   stopping the adapter never stops the borrowed service. Only safe Widget DTOs
   reach `android_server_widgets`; target configuration stays in its Core owner.
+- `MonitoringWidgetNavigationHost` owns the Android Widget navigation listener
+  under the existing App Shell. Wait for startup readiness and resolve each
+  bounded ID against the current public Connection directory. A missing server
+  returns home; a click must never select/start monitoring, open SSH or execute
+  a remote action. Cancel listener ownership on host disposal and ignore late
+  initialization or replaced requests. Native launch/configuration belongs in
+  `android_server_widgets`, not MainActivity.
 - `LanSystemNotificationHost` owns the process notification center for this
   app, using `AppNotificationIdentity.full`. It may resume the app or open an
   existing LAN chat. It must not accept a file transfer or screen share from a

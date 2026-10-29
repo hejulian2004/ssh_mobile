@@ -1142,6 +1142,9 @@ jobs:
       - name: Test Android widget storage and per-file coverage
         working-directory: apps/ssh_mobile_full/android
         run: ./gradlew :android_server_widgets:verifyWidgetCoverage --no-daemon --console=plain
+      - name: Compile Android widget device tests
+        working-directory: apps/ssh_mobile_full/android
+        run: ./gradlew :app:assembleDebugAndroidTest --no-daemon --console=plain
 
   windows-build:
     needs: change_scope

@@ -1,4 +1,4 @@
-最新更新时间：2026-08-24
+最新更新时间：2026-10-29
 
 # feature_system_admin
 
@@ -11,6 +11,11 @@ App Shell 注入；不会创建全局 SSH/Storage，也不会直接引用
 
 当前模块不创建独立数据库。`SystemAdminModule` 持有管理服务并在 dispose 时关闭
 当前管理会话和活动命令；`SystemAdminViewModel` 由 Route Scope 持有。
+
+`FeatureSystemAdminScreen.monitoringConnectionId` 是可选的只读展示焦点，供 App
+从桌面 Widget 导航到现有监控页时使用。监控页展示该服务器的详情或已移除提示；
+此参数不修改监控选择，不启动监控、管理会话或 SSH。App 路由在传入前重新核对
+当前 Connection 目录，Feature 仍只消费已注入的公开监控 Port。
 
 管理会话使用 `SshTargetBinding` 不可变目标和 generation 绑定的专用 Lease；目标
 切换、Route dispose、连接迟到或输出超限都会使旧 generation 失效并释放 Lease。

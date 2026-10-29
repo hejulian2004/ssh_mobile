@@ -212,4 +212,6 @@ job_android() {
   step 'Build Android debug APK' run_in apps/ssh_mobile_full flutter build apk --debug --no-pub
   step 'Test Android widget storage and per-file coverage' run_in apps/ssh_mobile_full/android \
     ./gradlew :android_server_widgets:verifyWidgetCoverage --no-daemon --console=plain
+  step 'Compile Android widget device tests' run_in apps/ssh_mobile_full/android \
+    ./gradlew :app:assembleDebugAndroidTest --no-daemon --console=plain
 }
