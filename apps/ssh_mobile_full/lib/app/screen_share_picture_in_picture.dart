@@ -18,6 +18,9 @@ final class AppPictureInPictureSession {
 abstract interface class AppPictureInPicturePlatform {
   /// False when this page is not the current owner and the call was not sent.
   Future<bool> setSession(AppPictureInPictureSession? session);
+
+  /// Null when this page lost the channel before the activity answered.
+  Future<bool?> currentMode();
   bool get holds;
   void bind(void Function(bool active) onModeChanged);
 
@@ -62,6 +65,18 @@ final class MethodChannelAppPictureInPicture
                 },
         )
         .then((_) => true);
+  }
+
+  @override
+  Future<bool?> currentMode() {
+    final generation = _generation;
+    if (generation == null || !_lease.holds(generation)) {
+      return Future<bool?>.value(null);
+    }
+    return _channel.invokeMethod<bool>('currentMode').then((active) {
+      if (_generation != generation || !_lease.holds(generation)) return null;
+      return active == true;
+    });
   }
 
   @override
@@ -120,10 +135,13 @@ final class _PictureInPictureChannelLease {
 final class AppScreenSharePictureInPicture extends ChangeNotifier {
   AppScreenSharePictureInPicture({required this.platform}) {
     platform.bind(_onMode);
+    _readMode();
   }
 
   final AppPictureInPicturePlatform platform;
   bool _active = false;
+  int _modeEpoch = 0;
+  int _readSerial = 0;
   bool _disposed = false;
   bool _unsupported = false;
   bool _hasApplied = false;
@@ -143,6 +161,7 @@ final class AppScreenSharePictureInPicture extends ChangeNotifier {
     _applied = null;
     _failed = null;
     _rejected = null;
+    _readMode();
   }
 
   void update(AppPictureInPictureSession? session) {
@@ -153,6 +172,7 @@ final class AppScreenSharePictureInPicture extends ChangeNotifier {
         _hasApplied = false;
         _applied = null;
         _rejected = null;
+        _readMode();
       } else if (_work == null && _same(session, _rejected)) {
         return;
       }
@@ -161,7 +181,38 @@ final class AppScreenSharePictureInPicture extends ChangeNotifier {
     _schedule();
   }
 
+  void _readMode() {
+    if (_disposed || _unsupported) return;
+    final serial = ++_readSerial;
+    final epoch = _modeEpoch;
+    unawaited(_applyMode(serial, epoch));
+  }
+
+  Future<void> _applyMode(int serial, int epoch) async {
+    final bool? active;
+    try {
+      active = await platform.currentMode();
+    } on MissingPluginException {
+      return;
+    } catch (_) {
+      return;
+    }
+    if (active == null ||
+        _disposed ||
+        _unsupported ||
+        serial != _readSerial ||
+        epoch != _modeEpoch) {
+      return;
+    }
+    _setActive(active);
+  }
+
   void _onMode(bool active) {
+    _modeEpoch++;
+    _setActive(active);
+  }
+
+  void _setActive(bool active) {
     if (_disposed || _active == active) return;
     _active = active;
     notifyListeners();

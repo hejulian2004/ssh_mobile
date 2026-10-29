@@ -402,6 +402,7 @@ void main() {
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'currentMode') return false;
         calls.add(call);
         return null;
       });
@@ -484,6 +485,9 @@ class _PipPlatform implements AppPictureInPicturePlatform {
 
   @override
   bool get holds => _holds;
+
+  @override
+  Future<bool?> currentMode() async => null;
 
   @override
   Future<bool> setSession(AppPictureInPictureSession? session) async {

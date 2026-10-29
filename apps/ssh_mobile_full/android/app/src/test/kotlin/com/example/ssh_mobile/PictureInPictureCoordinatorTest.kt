@@ -95,6 +95,16 @@ class PictureInPictureCoordinatorTest {
     }
 
     @Test
+    fun currentModeReadsTheHostWithoutChangingTheWindow() {
+        val host = Host(active = true)
+        val coordinator = PictureInPictureCoordinator(host)
+        assertTrue(coordinator.currentMode())
+        host.active = false
+        assertFalse(coordinator.currentMode())
+        assertTrue(host.events.isEmpty())
+    }
+
+    @Test
     fun modeChangesSuspendAndRestoreTheFullscreenLease() {
         val host = Host()
         val coordinator = PictureInPictureCoordinator(host)

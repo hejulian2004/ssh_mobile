@@ -1,4 +1,4 @@
-> Last updated: 2026-10-28
+> Last updated: 2026-10-29
 
 # Client Current State
 
@@ -62,7 +62,8 @@ The same activity and texture stay in place; the small window hides controls
 and ink. Stopping the share brings that route forward. Destroying the activity
 controller clears eligibility and does not start the activity again. A newer
 share page owns the channel; after it closes, the presented page reclaims
-that channel. Senders and Windows do not enter
+that channel and adopts the activity's current picture-in-picture mode.
+Senders and Windows do not enter
 picture-in-picture. Device entry and restoration remain a manual check.
 
 ## Validation

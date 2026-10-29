@@ -1381,6 +1381,7 @@ void main() {
       final calls = <MethodCall>[];
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(pipChannel, (call) async {
+            if (call.method == 'currentMode') return false;
             calls.add(call);
             return null;
           });

@@ -19,16 +19,18 @@ internal class ScreenSharePictureInPicture(
 
     init {
         channel.setMethodCallHandler { call, result ->
-            if (call.method != "setSession") {
-                result.notImplemented()
-                return@setMethodCallHandler
+            when (call.method) {
+                "setSession" -> {
+                    val args = call.arguments as? Map<*, *>
+                    coordinator.setVideoAspect(
+                        (args?.get("width") as? Number)?.toDouble(),
+                        (args?.get("height") as? Number)?.toDouble(),
+                    )
+                    result.success(true)
+                }
+                "currentMode" -> result.success(coordinator.currentMode())
+                else -> result.notImplemented()
             }
-            val args = call.arguments as? Map<*, *>
-            coordinator.setVideoAspect(
-                (args?.get("width") as? Number)?.toDouble(),
-                (args?.get("height") as? Number)?.toDouble(),
-            )
-            result.success(true)
         }
     }
 

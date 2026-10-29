@@ -70,6 +70,8 @@ internal class PictureInPictureCoordinator(
         if (!host.enter(ratio)) host.resumeImmersive()
     }
 
+    fun currentMode(): Boolean = host.isActive()
+
     fun onModeChanged(active: Boolean) {
         if (active) host.suspendImmersive() else host.resumeImmersive()
         host.notifyFlutter(active)

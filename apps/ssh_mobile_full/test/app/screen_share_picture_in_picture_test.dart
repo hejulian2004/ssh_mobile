@@ -61,6 +61,7 @@ void main() {
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'currentMode') return false;
         calls.add(call);
         return null;
       });
@@ -103,6 +104,7 @@ void main() {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'currentMode') return false;
       calls.add(call);
       seen += 1;
       if (seen == 1) await firstReply.future;
@@ -150,6 +152,7 @@ void main() {
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'currentMode') return false;
         calls.add(call);
         return null;
       });
@@ -189,6 +192,91 @@ void main() {
     },
   );
 
+  test(
+    'a reclaimed page adopts the activity mode instead of its stale flag',
+    () async {
+      const channel = MethodChannel('ssh_mobile/screen_share_pip_mode');
+      var systemActive = false;
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'currentMode') return systemActive;
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      Future<void> mode(bool active) {
+        systemActive = active;
+        return messenger.handlePlatformMessage(
+          channel.name,
+          const StandardMethodCodec().encodeMethodCall(
+            MethodCall('onModeChanged', active),
+          ),
+          (_) {},
+        );
+      }
+
+      final older = AppScreenSharePictureInPicture(
+        platform: MethodChannelAppPictureInPicture(channel: channel),
+      );
+      await mode(true);
+      expect(older.active, isTrue);
+      final newer = AppScreenSharePictureInPicture(
+        platform: MethodChannelAppPictureInPicture(channel: channel),
+      );
+      await mode(false);
+      expect(newer.active, isFalse);
+      expect(older.active, isTrue);
+      newer.dispose();
+      await Future<void>.delayed(Duration.zero);
+      older.claim();
+      await Future<void>.delayed(Duration.zero);
+      expect(older.active, isFalse);
+      expect(newer.active, isFalse);
+      older.dispose();
+    },
+  );
+
+  test(
+    'a vacant reclaim reads the activity mode before publishing again',
+    () async {
+      const channel = MethodChannel('ssh_mobile/screen_share_pip_mode_update');
+      var systemActive = false;
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'currentMode') return systemActive;
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      Future<void> mode(bool active) {
+        systemActive = active;
+        return messenger.handlePlatformMessage(
+          channel.name,
+          const StandardMethodCodec().encodeMethodCall(
+            MethodCall('onModeChanged', active),
+          ),
+          (_) {},
+        );
+      }
+
+      final older = AppScreenSharePictureInPicture(
+        platform: MethodChannelAppPictureInPicture(channel: channel),
+      );
+      await mode(true);
+      final newer = AppScreenSharePictureInPicture(
+        platform: MethodChannelAppPictureInPicture(channel: channel),
+      );
+      await mode(false);
+      newer.dispose();
+      await Future<void>.delayed(Duration.zero);
+      older.update(const AppPictureInPictureSession(width: 16, height: 9));
+      await Future<void>.delayed(Duration.zero);
+      expect(older.active, isFalse);
+      expect(newer.active, isFalse);
+      older.dispose();
+    },
+  );
+
   test('a missing plugin disables later updates', () async {
     const channel = MethodChannel('ssh_mobile/screen_share_pip_missing');
     final pip = AppScreenSharePictureInPicture(
@@ -212,6 +300,9 @@ class _Platform implements AppPictureInPicturePlatform {
 
   @override
   bool get holds => bound;
+
+  @override
+  Future<bool?> currentMode() async => null;
 
   @override
   Future<bool> setSession(AppPictureInPictureSession? session) async {
