@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:app_core/app_core.dart';
 import 'package:feature_screen_share/feature_screen_share.dart';
