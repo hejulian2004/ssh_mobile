@@ -1,0 +1,25 @@
+# cargo-audit configuration for the Rust network SDK.
+#
+# cargo-audit reads project exceptions from `.cargo/audit.toml`, and CI runs
+# `cargo audit` with native/network_core as the working directory, so this file
+# is the only place a dependency exception may be recorded and every entry must
+# keep its rationale. test/tool/ci_production_config_test.dart fails when an
+# advisory appears here without also being reviewed there.
+
+[advisories]
+# Keep the default visibility of maintenance-level advisories (pin-utils,
+# rustix, tokio) so they stay reported instead of being silenced here.
+informational_warnings = ["unmaintained", "unsound", "notice"]
+ignore = [
+  # RUSTSEC-2026-0387: timing variability in crypto-bigint operations that are
+  # specified to be constant-time. A fix exists (crypto-bigint >=0.7.6) but this
+  # dependency graph cannot reach it: rtc 0.9.1 -> rtc-dtls 0.9.1 -> p256 0.13 ->
+  # elliptic-curve 0.13 pins crypto-bigint 0.5, and the crates.io metadata shows
+  # p256 is only dropped from rtc-dtls in 0.21.1. Closing this exception
+  # therefore requires the breaking rtc 0.9 -> 0.21 upgrade of
+  # crates/network-webrtc plus WebRTC validation, not a Cargo.lock refresh.
+  # rtc-dtls is the only consumer of this path, and it uses P-256 for the DTLS
+  # handshake key agreement, so the exception is recorded until that upgrade
+  # lands.
+  "RUSTSEC-2026-0387",
+]
