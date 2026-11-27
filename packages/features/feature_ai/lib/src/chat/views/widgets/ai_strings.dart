@@ -459,7 +459,7 @@ class AiStrings {
   String get planApprovalCancelled =>
       _en ? 'Plan execution was cancelled.' : '计划执行已取消。';
   String get planRevisionPrompt => _en ? 'Revise this plan: ' : '请按以下意见调整计划：';
-  String get todoTitle => _en ? 'Operation Tasks (TODO)' : '规划的运维任务清单 (TODO)';
+  String get todoTitle => _en ? 'Execution plan' : '执行计划';
   String get todoFailureGuidance => _en
       ? 'Fix cause and retry, skip if safe, or return to Plan Mode.'
       : '请先查看日志并修复原因后重试；仅在确认安全时跳过，也可以返回规划模式调整后续步骤。';

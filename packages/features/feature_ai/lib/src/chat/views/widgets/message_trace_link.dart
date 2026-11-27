@@ -14,6 +14,7 @@ class _AgentTraceLink extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final typography = context.typography;
     final language = context.select<AppSettings, AppLanguage>(
       (settings) => settings.language,
     );
@@ -31,48 +32,44 @@ class _AgentTraceLink extends StatelessWidget {
       label = '${strings.trace} · $shortRunId';
     }
 
-    return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 8),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          minHeight: 48,
-          maxWidth: (MediaQuery.sizeOf(context).width - 32).clamp(180.0, 520.0),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) =>
-                    AgentTraceDebugPage(chatId: chatId, runId: runId),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 48),
+      child: InkWell(
+        key: const ValueKey('agent-trace-link'),
+        borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => AgentTraceDebugPage(chatId: chatId, runId: runId),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: 12,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.account_tree_outlined,
+                size: 14,
+                color: colorScheme.primary.withValues(alpha: 0.9),
               ),
-            );
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.account_tree_outlined,
-                  size: 16,
-                  color: colorScheme.primary,
-                ),
-                const SizedBox(width: 7),
-                Flexible(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: colorScheme.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
+              const SizedBox(width: AppSpacing.sm),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: typography.caption.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

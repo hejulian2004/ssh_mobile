@@ -124,14 +124,17 @@ class _AgentRunInlineSummaryState extends State<AgentRunInlineSummary> {
 
         return Padding(
           key: ValueKey('agent-run-summary-${widget.runId}'),
-          padding: const EdgeInsets.only(left: 4, bottom: 2),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.md,
+          ),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 for (var i = 0; i < chips.length; i++) ...[
-                  if (i > 0) const SizedBox(width: 6),
+                  if (i > 0) const SizedBox(width: AppSpacing.sm),
                   chips[i],
                 ],
               ],
@@ -338,32 +341,34 @@ class _RunSummaryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final typography = context.typography;
     return Semantics(
       container: true,
       label: label,
       child: ExcludeSemantics(
         child: Container(
           constraints: BoxConstraints(maxWidth: maxWidth),
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.09),
-            borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-            border: Border.all(color: color.withValues(alpha: 0.22)),
+            color: color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(AppTheme.radiusPill),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 14, color: color),
-              const SizedBox(width: 4),
+              Icon(icon, size: 13, color: color),
+              const SizedBox(width: AppSpacing.xs),
               Flexible(
                 child: Text(
                   label,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                  style: typography.caption.copyWith(
                     color: color,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
