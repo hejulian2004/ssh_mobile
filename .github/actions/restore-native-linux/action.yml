@@ -17,9 +17,12 @@ runs:
         git diff --exit-code -- native/network_core
         test -z "$(git ls-files --others --exclude-standard -- native/network_core)"
         sha256sum -c native/network_core/target/native-library.sha256
-        # Artifact download does not preserve executable permissions. Cargo
-        # may run these host build scripts when its environment changes.
-        find native/network_core/target/release/build -type f -name 'build-script-*' -exec chmod +x {} +
+        # Artifact download drops the Unix exec bit. Cargo re-links and re-runs host
+        # build scripts whenever its registry or toolchain differs from the producer,
+        # and it copies the mode of its linker output (`build_script_<name>-<hash>`)
+        # onto the `build-script-<name>` path it execs. A hyphen-only pattern would
+        # leave that exec target 0644 and the re-run dies with "Permission denied".
+        find native/network_core/target -path '*/build/*' -exec chmod 0755 {} +
         # Downloaded outputs are newer than the checked-out exact-commit source.
         # Set the freshness markers after all outputs; Cargo still verifies
         # compiler/options/dependency fingerprints and rebuilds on mismatch.

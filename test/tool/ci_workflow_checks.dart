@@ -146,6 +146,16 @@ void _testNativeBuildArtifacts(String workflow) {
         ),
     'Restore must validate provenance/integrity and retain Cargo configuration checks',
   );
+  // Artifact download drops the Unix exec bit, and Cargo copies the mode of its
+  // linker output (`build_script_<name>-<hash>`) onto the `build-script-<name>`
+  // path it execs, so a hyphen-only pattern leaves the exec target 0644.
+  _expect(
+    restore.contains(
+          "find native/network_core/target -path '*/build/*' -exec chmod 0755 {} +",
+        ) &&
+        !restore.contains("-name 'build-script-*'"),
+    'Restore must keep every Cargo build-script output executable',
+  );
   _testActionsArePinned(
     restore,
     workflowName: 'restore-native-linux/action.yml',
