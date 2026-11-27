@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ssh_mobile/services/app_log_service.dart';
 import 'package:ssh_mobile/services/terminal_history_service.dart';
 
 void main() {
@@ -25,6 +26,11 @@ void main() {
   tearDown(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(pathProviderChannel, null);
+    // 错误路径会让进程级 AppLogService 在这个被 mock 的支持目录里惰性创建 app.log，
+    // 而它的磁盘写入是异步队列，可能在删除目录时才落盘：Linux 上表现为竞态性
+    // Directory not empty，Windows 上表现为文件被占用。先排空日志服务的待写队列，
+    // 测试才能回收整个临时目录，且不需要放宽断言或吞掉真实异常。
+    await AppLogService.instance.pendingWrites;
     if (await supportDirectory.exists()) {
       await supportDirectory.delete(recursive: true);
     }
