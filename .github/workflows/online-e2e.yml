@@ -13,7 +13,7 @@ permissions:
 
 env:
   FLUTTER_VERSION: '3.47.0'
-  GO_VERSION: '1.27.0'
+  GO_VERSION: '1.27.4'
   RUST_TOOLCHAIN: '1.97.1'
 
 concurrency:
