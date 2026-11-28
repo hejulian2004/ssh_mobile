@@ -1,4 +1,4 @@
-Last updated: 2026-09-12
+Last updated: 2026-11-26
 
 # WebRTC Screen Share TODO
 
@@ -180,6 +180,8 @@ macOS/iOS、Relay video forwarding 或 QoS/codec。
   descriptor additive-field helper 已同步实现；远端 PR head 的完整 CI 结果仍待绑定。
 - [ ] Windows/Android 双真机 capture、permission、trickle ICE、Answer、Texture/
   render、断线和资源释放 evidence 待补；在证据完成前只称为 flow/preview available。
+  （2026-11-26：Windows 主机 + Android 模拟器端的连接/断开场景矩阵已实测，见下方
+  「2026-11-26 Windows 主机 + Android 模拟器连接/断开场景矩阵」；双真机仍待补。）
 
 当前状态：Phase 0、Phase 1、Phase 2 的实现、exact-head CI 证据和 PR #67
 接受记录已齐；Phase 3/4 的 native platform owner、Phase 5 consent/Feature、
@@ -187,6 +189,53 @@ Phase 6 TURN issuer foundation 与 Phase 7 stats/adaptation/recovery bridge
 foundation 已分别落地，但对应硬件、设备、生产安全和最终 E2E gate 尚未接受。
 Windows/Android 双端验证、production TURN、拥塞恢复策略与完整 Phase 5–7
 仍不得描述为已交付产品能力。
+
+## 2026-11-26 Windows 主机 + Android 模拟器连接/断开场景矩阵
+
+环境：Windows 主机（Debug 探针，`flutter build windows --debug -t
+test/device/screen_share_scenario_probe.dart`）与 Android `emulator-5554`
+（同一入口的 Debug APK）。探针入口
+`apps/ssh_mobile_full/test/device/screen_share_scenario_probe.dart`
+驱动正式 App Shell 的 screen-share 操作（basic/reject/cancel-early/both-stop/
+peer-kill 场景，`rounds=N`/`reverse` 参数经应用私有 args 文件下发），断言只使用
+公开状态、`AppScreenShareSessions` 所有权与 `ProbeEndpointBackend` 端点计数。
+consent 弹窗自动点击、`adb forward tcp:47831`、监听端先 ready 再启动发起端等由
+主机侧临时编排脚本完成（未入库）。各 run 的完整双端日志保存在主机临时目录
+`ss\<tag>\` 下（本机取证，不属于仓库）。
+
+已完成场景（均双端 PASS）：
+
+| tag | 方向 | 场景 | 断言结果 |
+| --- | --- | --- | --- |
+| `r3_forward` | Windows 发送 → Android 接收 | basic（隐藏页 8 秒续共享、重挂、peer stop 收敛） | 双端 PASS |
+| `r4f_reverse` | Android 发送 → Windows 接收 | basic | 双端 PASS（MediaProjection 系统弹窗自动点击） |
+| `r5_reject` | Windows 发送 → Android 接收 | reject | 双端 `state=rejected`、0 端点、busy 释放 |
+| `r6_cancel_early` | Windows 发送 → Android 接收 | cancel-early | 双端 `state=cancelled`、0 端点、窗口不变 |
+| `r7_both_stop` | Windows 发送 → Android 接收 | both-stop | 活跃视频双端并发 stop，端点全部释放 |
+| `r8_peerkill_android` | Windows 幸存 | peer-kill | 幸存端约 3 秒内 `failed` fail-closed，恰 1 端点释放 |
+| `r9_peerkill_windows` | Android 幸存 | peer-kill | 幸存端 `failed`、端点释放、stats stale |
+| `r11c_reverse_rounds2` | Android 发送 → Windows 接收 | basic `rounds=2` | 第二轮 `generation=2` 重建、页面 pop/push 不产生第二 owner、双端 PASS |
+| `r13_forward_rounds2` | Windows 发送 → Android 接收 | basic `rounds=2` | 第二轮捕获恢复、拆建间隙 offer inbox 缓冲生效、双端 PASS |
+| `r12_wifi_partition` | Android 发送 → Windows 幸存 | peer-kill + `svc wifi disable` | 断网约 4 秒内双端 `failed`，幸存端端点释放、`peer_kill_converged` |
+
+结论与限制：
+
+- 连接建立、consent/拒绝/取消、并发 stop、对端进程被杀与网络分区均 fail
+  closed：无僵尸 busy、无重复 media owner、无 native endpoint 泄漏。本轮未发现
+  产品级 bug。
+- 过程中所有失败均归因到 harness 或环境，并已定位修复/记录：`adb reverse` 使
+  adbd 占用设备监听端口（改用 `adb forward`）；探针一次性订阅在对局拆建间隙
+  错过 consent REQUEST（改为 App Incoming Host 式的持续监听 + inbox 队列；
+  生产 Incoming Host 本就持续监听，不受影响）；探针 `startCalls` 断言误用跨轮
+  累计计数（改为 reopen 增量比较）；编排器在监听端 SDK ready 前启动发起端造成
+  冷启动竞态（SDK 以 typed `relayError` fail-closed，行为正确；编排器改为
+  监听端 ready 后再启动发起端）。
+- 环境限制：主机登录会话断开（`query session` 显示 `Disc`）时 Windows Graphics
+  Capture 不产出任何帧，Windows 作发送端的场景不能在该状态下完成（安全设计，
+  非产品缺陷）；会话重连（console `Active`）后 `r13_forward_rounds2` 已补跑
+  并双端 PASS。
+- 模拟器发送端不能替代真机硬件 codec 验收；上文 Phase 3 hardware gate 与
+  PR74「双真机」勾选项状态不因本节改变。
 
 ## PR #67 评审修正清单
 

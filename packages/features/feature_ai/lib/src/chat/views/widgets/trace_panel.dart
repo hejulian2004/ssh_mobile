@@ -12,52 +12,48 @@ class TracePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final typography = context.typography;
     final language = context.select<AppSettings, AppLanguage>(
       (settings) => settings.language,
     );
     final strings = _TracePanelStrings(language);
-    return Padding(
-      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 6),
-      child: Material(
-        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.34),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-          side: BorderSide(
-            color: colorScheme.outlineVariant.withValues(alpha: 0.72),
+    return Material(
+      type: MaterialType.transparency,
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          key: PageStorageKey<String>(storageKey),
+          tilePadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          childrenPadding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            0,
+            AppSpacing.md,
+            AppSpacing.sm,
           ),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Theme(
-          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-          child: ExpansionTile(
-            key: PageStorageKey<String>(storageKey),
-            tilePadding: const EdgeInsets.symmetric(horizontal: 10),
-            childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            minTileHeight: 48,
-            leading: Icon(
-              Icons.account_tree_outlined,
-              size: 17,
+          minTileHeight: 48,
+          leading: Icon(
+            Icons.account_tree_outlined,
+            size: 16,
+            color: colorScheme.onSurfaceVariant,
+          ),
+          title: Text(
+            strings.executionDetails(traces.length),
+            style: typography.metadata.copyWith(
+              fontWeight: FontWeight.w600,
               color: colorScheme.onSurfaceVariant,
             ),
-            title: Text(
-              strings.executionDetails(traces.length),
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-            children: [
-              for (var i = 0; i < traces.length; i++)
-                _TraceEntry(
-                  key: ValueKey<String>('trace-entry-${traces[i].id}'),
-                  trace: traces[i],
-                  index: i + 1,
-                  storageKey: '$storageKey-entry-${traces[i].id}',
-                  strings: strings,
-                ),
-            ],
           ),
+          children: [
+            for (var i = 0; i < traces.length; i++)
+              _TraceEntry(
+                key: ValueKey<String>('trace-entry-${traces[i].id}'),
+                trace: traces[i],
+                index: i + 1,
+                isFirst: i == 0,
+                storageKey: '$storageKey-entry-${traces[i].id}',
+                strings: strings,
+              ),
+          ],
         ),
       ),
     );
@@ -67,6 +63,7 @@ class TracePanel extends StatelessWidget {
 class _TraceEntry extends StatelessWidget {
   final AiMessageTrace trace;
   final int index;
+  final bool isFirst;
   final String storageKey;
   final _TracePanelStrings strings;
 
@@ -74,6 +71,7 @@ class _TraceEntry extends StatelessWidget {
     super.key,
     required this.trace,
     required this.index,
+    required this.isFirst,
     required this.storageKey,
     required this.strings,
   });
@@ -81,32 +79,37 @@ class _TraceEntry extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Material(
-        color: colorScheme.surface.withValues(alpha: 0.72),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-          side: BorderSide(color: colorScheme.outlineVariant),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Theme(
+    final typography = context.typography;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (!isFirst)
+          Container(
+            height: 1,
+            color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+          ),
+        Theme(
           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
           child: ExpansionTile(
             key: PageStorageKey<String>(storageKey),
-            tilePadding: const EdgeInsets.symmetric(horizontal: 10),
-            childrenPadding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+            tilePadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            childrenPadding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              0,
+              AppSpacing.md,
+              AppSpacing.md,
+            ),
             minTileHeight: 48,
             leading: Icon(
               _traceIcon(trace.kind),
-              size: 16,
+              size: 15,
               color: _traceColor(colorScheme, trace.kind),
             ),
             title: Text(
               '$index. ${strings.traceTitle(trace)}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              style: typography.metadata.copyWith(fontWeight: FontWeight.w500),
             ),
             children: [
               Align(
@@ -114,24 +117,15 @@ class _TraceEntry extends StatelessWidget {
                 child: _BoundedTraceContent(
                   traceId: trace.id,
                   content: trace.content.isEmpty ? '-' : trace.content,
-                  style: TextStyle(
-                    fontSize: 11,
-                    height: 1.3,
+                  style: typography.codeSmall.copyWith(
                     color: colorScheme.onSurface.withValues(alpha: 0.82),
-                    fontFamily: 'monospace',
-                    fontFamilyFallback: const [
-                      'Consolas',
-                      'Microsoft YaHei',
-                      'PingFang SC',
-                      'sans-serif',
-                    ],
                   ),
                 ),
               ),
             ],
           ),
         ),
-      ),
+      ],
     );
   }
 
@@ -183,7 +177,7 @@ class _BoundedTraceContent extends StatefulWidget {
 
   final String traceId;
   final String content;
-  final TextStyle style;
+  final TextStyle? style;
 
   @override
   State<_BoundedTraceContent> createState() => _BoundedTraceContentState();

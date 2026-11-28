@@ -23,7 +23,6 @@ class MessageActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final strings = AiStrings(context.read<AppSettings>().language);
-    final colorScheme = Theme.of(context).colorScheme;
     final copyText = assistantText?.trim().isNotEmpty == true
         ? assistantText!.trim()
         : null;
@@ -82,25 +81,14 @@ class MessageActions extends StatelessWidget {
             ? availableWidth
             : desiredWidth.clamp(buttonSize, availableWidth);
         return Padding(
-          padding: const EdgeInsets.only(left: 2, right: 2, bottom: 4),
+          padding: const EdgeInsets.only(left: 2, right: 2, bottom: 2),
           child: Align(
             alignment: isUser && !isError
                 ? Alignment.centerRight
                 : Alignment.centerLeft,
             child: ConstrainedBox(
               constraints: BoxConstraints(maxWidth: maxActionsWidth),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerHighest.withValues(
-                    alpha: 0.36,
-                  ),
-                  borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-                  border: Border.all(
-                    color: colorScheme.outlineVariant.withValues(alpha: 0.72),
-                  ),
-                ),
-                child: Wrap(children: children),
-              ),
+              child: Wrap(children: children),
             ),
           ),
         );

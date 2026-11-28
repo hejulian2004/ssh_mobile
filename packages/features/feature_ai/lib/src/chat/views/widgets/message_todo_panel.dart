@@ -35,62 +35,72 @@ class _ChatTodoPanelState extends State<ChatTodoPanel> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final typography = context.typography;
+    final statusColors = AppStatusColors.of(context);
     final snapshot = const PlanExecutionController().snapshot(
       widget.message.todoSteps,
     );
     final currentStepId = snapshot.currentStep?.id;
+    final total = widget.message.todoSteps.length;
+    final done = widget.message.todoSteps
+        .where(
+          (step) =>
+              step.status == StepStatus.success ||
+              step.status == StepStatus.skipped,
+        )
+        .length;
+    final allDone = total > 0 && done == total;
 
-    return Material(
-      color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.24),
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-        side: BorderSide(color: colorScheme.outlineVariant),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.sm,
+        AppSpacing.md,
+        AppSpacing.md,
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.rule_folder_outlined,
-                  size: 18,
-                  color: colorScheme.primary,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    widget.strings.todoTitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: colorScheme.onSurface,
-                    ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.assignment_outlined,
+                size: 16,
+                color: colorScheme.primary,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  widget.strings.todoTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: typography.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              ],
-            ),
-            const Divider(height: 12),
-            for (
-              var index = 0;
-              index < widget.message.todoSteps.length;
-              index++
-            ) ...[
-              _buildStepRow(
-                context,
-                widget.message.todoSteps[index],
-                currentStepId,
-                colorScheme,
               ),
-              if (index < widget.message.todoSteps.length - 1)
-                const SizedBox(height: 8),
+              Text(
+                '$done/$total',
+                style: typography.caption.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: allDone
+                      ? statusColors.success
+                      : colorScheme.onSurfaceVariant,
+                ),
+              ),
             ],
-          ],
-        ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          for (var index = 0; index < widget.message.todoSteps.length; index++)
+            _buildStepRow(
+              context,
+              widget.message.todoSteps[index],
+              currentStepId,
+              colorScheme,
+              isFirst: index == 0,
+              isLast: index == widget.message.todoSteps.length - 1,
+            ),
+        ],
       ),
     );
   }
@@ -99,14 +109,18 @@ class _ChatTodoPanelState extends State<ChatTodoPanel> {
     BuildContext context,
     AiTodoStep step,
     String? currentStepId,
-    ColorScheme colorScheme,
-  ) {
+    ColorScheme colorScheme, {
+    required bool isFirst,
+    required bool isLast,
+  }) {
+    final typography = context.typography;
     final isExpanded = _expandedStepIds.contains(step.id);
     final hasLogs =
         step.stdout?.isNotEmpty == true || step.stderr?.isNotEmpty == true;
     final isCurrent = currentStepId == step.id;
     final isFailed = step.status == StepStatus.failed;
     final isRunning = step.status == StepStatus.running;
+    final isSuccess = step.status == StepStatus.success;
     final connectionId = step.connectionId?.trim();
     final resolvedServerName = connectionId?.isNotEmpty == true
         ? widget.serverDisplayNameFor(connectionId!)?.trim()
@@ -116,7 +130,9 @@ class _ChatTodoPanelState extends State<ChatTodoPanel> {
               ? resolvedServerName!
               : widget.strings.serverTarget)
         : null;
-    final expandedIndent = MediaQuery.sizeOf(context).width < 360 ? 0.0 : 30.0;
+    final expandedIndent = MediaQuery.sizeOf(context).width < 360
+        ? 0.0
+        : AppSpacing.xxl;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -141,86 +157,85 @@ class _ChatTodoPanelState extends State<ChatTodoPanel> {
             child: Ink(
               decoration: BoxDecoration(
                 color: isRunning
-                    ? colorScheme.primary.withValues(alpha: 0.08)
+                    ? colorScheme.primary.withValues(alpha: 0.07)
                     : isFailed
-                    ? colorScheme.error.withValues(alpha: 0.08)
+                    ? colorScheme.error.withValues(alpha: 0.07)
                     : isCurrent && step.status == StepStatus.pending
-                    ? colorScheme.secondaryContainer.withValues(alpha: 0.3)
+                    ? colorScheme.secondaryContainer.withValues(alpha: 0.25)
                     : null,
                 borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-                border: Border.all(
-                  color: isRunning
-                      ? colorScheme.primary.withValues(alpha: 0.24)
-                      : isFailed
-                      ? colorScheme.error.withValues(alpha: 0.3)
-                      : isCurrent && step.status == StepStatus.pending
-                      ? colorScheme.secondary.withValues(alpha: 0.15)
-                      : Colors.transparent,
-                ),
               ),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 48),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 8,
-                    horizontal: 8,
-                  ),
+                child: IntrinsicHeight(
                   child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: _buildStatusIcon(
+                      _StepSpine(
+                        isFirst: isFirst,
+                        isLast: isLast,
+                        icon: _buildStatusIcon(
                           context,
                           step.status,
                           colorScheme,
                         ),
+                        lineColor: colorScheme.outlineVariant.withValues(
+                          alpha: 0.7,
+                        ),
                       ),
-                      const SizedBox(width: 8),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              step.name,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: step.status == StepStatus.success
-                                    ? colorScheme.onSurface.withValues(
-                                        alpha: 0.6,
-                                      )
-                                    : colorScheme.onSurface,
-                                decoration: step.status == StepStatus.success
-                                    ? TextDecoration.lineThrough
-                                    : null,
-                              ),
-                            ),
-                            if (step.description.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 2),
-                                child: Text(
-                                  step.description,
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.sm,
+                            vertical: AppSpacing.sm,
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      step.name,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: typography.bodyMedium.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        color: isSuccess
+                                            ? colorScheme.onSurface.withValues(
+                                                alpha: 0.55,
+                                              )
+                                            : colorScheme.onSurface,
+                                        decoration: isSuccess
+                                            ? TextDecoration.lineThrough
+                                            : null,
+                                      ),
+                                    ),
+                                    if (step.description.isNotEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 2),
+                                        child: Text(
+                                          step.description,
+                                          maxLines: 3,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: typography.caption,
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
-                          ],
+                              if (serverName != null) ...[
+                                const SizedBox(width: AppSpacing.sm),
+                                _TodoServerChip(
+                                  key: ValueKey('todo-server-${step.id}'),
+                                  name: serverName,
+                                ),
+                              ],
+                            ],
+                          ),
                         ),
                       ),
-                      if (serverName != null) ...[
-                        const SizedBox(width: 6),
-                        _TodoServerChip(
-                          key: ValueKey('todo-server-${step.id}'),
-                          name: serverName,
-                        ),
-                      ],
                     ],
                   ),
                 ),
@@ -230,7 +245,11 @@ class _ChatTodoPanelState extends State<ChatTodoPanel> {
         ),
         if (isExpanded)
           Padding(
-            padding: EdgeInsets.only(left: expandedIndent, top: 6, right: 4),
+            padding: EdgeInsets.only(
+              left: expandedIndent,
+              top: AppSpacing.xs,
+              right: AppSpacing.xs,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -241,24 +260,23 @@ class _ChatTodoPanelState extends State<ChatTodoPanel> {
                     semanticLabel: widget.strings.todoCommand,
                     maxHeight: 160,
                     backgroundColor: colorScheme.surfaceContainerHighest
-                        .withValues(alpha: 0.48),
-                    foregroundColor: colorScheme.primary,
-                    borderColor: colorScheme.outlineVariant,
-                    fontSize: 10.5,
+                        .withValues(alpha: 0.55),
+                    foregroundColor: colorScheme.onSurface,
+                    borderColor: colorScheme.outlineVariant.withValues(
+                      alpha: 0.5,
+                    ),
+                    fontSize: 11,
                   ),
                 if (isFailed) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   Text(
                     widget.strings.todoFailureGuidance,
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
+                    style: typography.caption,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                    spacing: AppSpacing.sm,
+                    runSpacing: AppSpacing.sm,
                     children: [
                       FilledButton.icon(
                         key: ValueKey('todo-retry-${step.id}'),
@@ -269,10 +287,12 @@ class _ChatTodoPanelState extends State<ChatTodoPanel> {
                           minimumSize: const Size(0, 48),
                           visualDensity: VisualDensity.standard,
                           tapTargetSize: MaterialTapTargetSize.padded,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          textStyle: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.md,
+                          ),
+                          textStyle: typography.button.copyWith(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
@@ -285,8 +305,10 @@ class _ChatTodoPanelState extends State<ChatTodoPanel> {
                           minimumSize: const Size(0, 48),
                           visualDensity: VisualDensity.standard,
                           tapTargetSize: MaterialTapTargetSize.padded,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          textStyle: const TextStyle(fontSize: 11),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.md,
+                          ),
+                          textStyle: typography.button.copyWith(fontSize: 12),
                         ),
                       ),
                       OutlinedButton.icon(
@@ -298,23 +320,25 @@ class _ChatTodoPanelState extends State<ChatTodoPanel> {
                           minimumSize: const Size(0, 48),
                           visualDensity: VisualDensity.standard,
                           tapTargetSize: MaterialTapTargetSize.padded,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          textStyle: const TextStyle(fontSize: 11),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.md,
+                          ),
+                          textStyle: typography.button.copyWith(fontSize: 12),
                         ),
                       ),
                     ],
                   ),
                 ],
                 if (hasLogs) ...[
-                  const SizedBox(height: 6),
+                  const SizedBox(height: AppSpacing.sm),
                   _TodoCodeBlock(
                     key: ValueKey('todo-logs-${step.id}'),
                     text: '${step.stdout ?? ''}\n${step.stderr ?? ''}'.trim(),
                     semanticLabel: widget.strings.todoLogs,
                     maxHeight: 180,
-                    backgroundColor: Colors.black.withValues(alpha: 0.84),
-                    foregroundColor: Colors.greenAccent,
-                    fontSize: 10,
+                    backgroundColor: AppTheme.terminalBg,
+                    foregroundColor: AppTheme.terminalGreen,
+                    fontSize: 11,
                   ),
                 ],
               ],
@@ -363,6 +387,44 @@ class _ChatTodoPanelState extends State<ChatTodoPanel> {
   }
 }
 
+/// 步骤时间轴脊线：状态点 + 连接上一/下一步的细线。
+class _StepSpine extends StatelessWidget {
+  final bool isFirst;
+  final bool isLast;
+  final Widget icon;
+  final Color lineColor;
+
+  const _StepSpine({
+    required this.isFirst,
+    required this.isLast,
+    required this.icon,
+    required this.lineColor,
+  });
+
+  static const double _iconTop = 9.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 24,
+      child: Column(
+        children: [
+          if (isFirst)
+            const SizedBox(height: _iconTop)
+          else
+            SizedBox(height: _iconTop, child: _buildLine()),
+          icon,
+          if (!isLast) Expanded(child: _buildLine()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLine() {
+    return Center(child: Container(width: 2, color: lineColor));
+  }
+}
+
 class _TodoServerChip extends StatelessWidget {
   final String name;
 
@@ -377,10 +439,13 @@ class _TodoServerChip extends StatelessWidget {
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xs,
+        ),
         decoration: BoxDecoration(
           color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+          borderRadius: BorderRadius.circular(AppTheme.radiusPill),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -390,7 +455,7 @@ class _TodoServerChip extends StatelessWidget {
               size: 12,
               color: colorScheme.onSurfaceVariant,
             ),
-            const SizedBox(width: 3),
+            const SizedBox(width: AppSpacing.xs),
             Flexible(
               child: Text(
                 name,
@@ -451,12 +516,13 @@ class _TodoCodeBlockState extends State<_TodoCodeBlock> {
 
   @override
   Widget build(BuildContext context) {
+    final baseStyle = context.typography.codeSmall;
     return Semantics(
       label: widget.semanticLabel,
       child: Container(
         width: double.infinity,
         constraints: BoxConstraints(maxHeight: widget.maxHeight),
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(AppSpacing.sm),
         decoration: BoxDecoration(
           color: widget.backgroundColor,
           borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
@@ -470,17 +536,9 @@ class _TodoCodeBlockState extends State<_TodoCodeBlock> {
             controller: _verticalController,
             child: OverflowScrollText(
               widget.text,
-              style: TextStyle(
-                fontFamily: 'monospace',
-                fontFamilyFallback: const [
-                  'Consolas',
-                  'Microsoft YaHei',
-                  'PingFang SC',
-                  'sans-serif',
-                ],
-                fontSize: widget.fontSize,
+              style: baseStyle.copyWith(
                 color: widget.foregroundColor,
-                height: 1.35,
+                fontSize: widget.fontSize,
               ),
             ),
           ),

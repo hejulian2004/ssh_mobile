@@ -59,10 +59,9 @@ class _AssistantMarkdownBody extends StatelessWidget {
   }
 
   Widget _buildMarkdown(BuildContext context, String value) {
-    final colorScheme = Theme.of(context).colorScheme;
     return GptMarkdown(
       value.isEmpty ? '...' : value,
-      style: TextStyle(color: colorScheme.onSurface, height: 1.35),
+      style: context.typography.body,
     );
   }
 }

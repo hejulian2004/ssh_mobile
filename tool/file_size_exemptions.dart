@@ -648,4 +648,26 @@ const fileSizeExemptions = <String, FileSizeExemption>{
     reviewedOn: '2026-09-02',
     expiresOn: '2027-03-31',
   ),
+  'apps/ssh_mobile_full/lib/app/screen_share_media_coordinator.dart':
+      FileSizeExemption(
+        owner: 'module-maintainer',
+        reason:
+            'Existing operation coordinator; split capture and readiness roles.',
+        reviewedOn: '2026-11-26',
+        expiresOn: '2027-03-31',
+      ),
+  'packages/infrastructure/ssh_mobile_network_native/lib/src/native_protocol_command_encoder.dart':
+      FileSizeExemption(
+        owner: 'module-maintainer',
+        reason: 'Existing native command encoder; split by command family.',
+        reviewedOn: '2026-11-26',
+        expiresOn: '2027-03-31',
+      ),
+  'packages/infrastructure/ssh_mobile_network_native/lib/src/native_realtime_event_decoder.dart':
+      FileSizeExemption(
+        owner: 'module-maintainer',
+        reason: 'Existing realtime event decoder; split by event family.',
+        reviewedOn: '2026-11-26',
+        expiresOn: '2027-03-31',
+      ),
 };

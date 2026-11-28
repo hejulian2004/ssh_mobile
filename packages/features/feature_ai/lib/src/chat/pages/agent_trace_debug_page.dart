@@ -1,10 +1,10 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'package:feature_ai/src/domain/ai_compat.dart';
+import 'package:feature_ai/src/chat/views/widgets/agent_trace_timeline.dart';
 import 'package:feature_ai/src/chat/views/widgets/ai_strings.dart';
 import 'package:app_ui/app_ui.dart';
 
@@ -274,7 +274,7 @@ class _TraceDebugBody extends StatelessWidget {
           SliverPadding(
             padding: EdgeInsets.fromLTRB(
               horizontalPadding,
-              14,
+              AppSpacing.lg,
               horizontalPadding,
               0,
             ),
@@ -307,7 +307,7 @@ class _TraceDebugBody extends StatelessWidget {
             SliverPadding(
               padding: EdgeInsets.fromLTRB(
                 horizontalPadding,
-                10,
+                AppSpacing.sm,
                 horizontalPadding,
                 0,
               ),
@@ -317,13 +317,14 @@ class _TraceDebugBody extends StatelessWidget {
                   final event = events[index];
                   return _TraceContentWidth(
                     key: ValueKey('trace-event-${event.id}'),
-                    child: _TraceTimelineItem(
+                    child: TraceTimelineItem(
                       key: ValueKey(event.id),
                       event: event,
                       strings: strings,
-                      offset: event.createdAt.difference(
-                        data.events.first.createdAt,
-                      ),
+                      isFirst: index == 0,
+                      isLast: index == events.length - 1,
+                      offsetLabel:
+                          '+${_formatDuration(event.createdAt.difference(data.events.first.createdAt))}',
                     ),
                   );
                 },
@@ -367,6 +368,7 @@ class _OverviewSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final summary = _summaryJson(events);
     final finalOutcome = summary['finalOutcome'] as String?;
     final selectedTools = (metrics?.selectedToolSet.isNotEmpty == true)
@@ -375,24 +377,41 @@ class _OverviewSection extends StatelessWidget {
     final memorySources = (metrics?.memorySources.isNotEmpty == true)
         ? metrics!.memorySources
         : _stringList(summary['memorySources']);
+    final statusColor = _statusColor(context, metrics, finalOutcome);
+    final provenance = <Widget>[
+      if (selectedTools.isNotEmpty)
+        _SmallLabel(strings.agentTraceSelectedTools, selectedTools.join(', ')),
+      if (memorySources.isNotEmpty)
+        _SmallLabel(strings.agentTraceMemorySources, memorySources.join(', ')),
+      if (finalOutcome != null)
+        _SmallLabel(
+          strings.agentTraceFinalReason,
+          _finalOutcomeLabel(finalOutcome, strings),
+        ),
+    ];
     return AppSectionCard(
       title: strings.agentTraceOverview,
       icon: Icons.analytics_outlined,
-      trailing: Text(strings.agentTraceEventCount(events.length)),
-      padding: const EdgeInsets.all(14),
-      contentGap: 10,
+      trailing: Text(
+        strings.agentTraceEventCount(events.length),
+        style: context.typography.caption.copyWith(
+          color: colorScheme.onSurfaceVariant,
+        ),
+      ),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      contentGap: AppSpacing.sm,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: AppSpacing.xs,
+            runSpacing: AppSpacing.xs,
             children: [
               _MetricPill(
                 strings.agentTraceMetricStatus,
                 _statusLabel(metrics, finalOutcome, strings),
+                valueColor: statusColor,
               ),
-              _MetricPill(strings.agentTraceMetricRun, runId),
               _MetricPill(
                 strings.agentTraceMetricModel,
                 metrics?.model ?? '${summary['model'] ?? '-'}',
@@ -409,6 +428,11 @@ class _OverviewSection extends StatelessWidget {
                 strings.agentTraceMetricElapsed,
                 _elapsed(metrics, summary),
               ),
+              _MetricPill(strings.agentTraceMetricRun, runId),
+              _MetricPill(
+                strings.agentTraceMetricTotal,
+                '${metrics?.totalTokens ?? _totalTokens(summary)}',
+              ),
               _MetricPill(
                 strings.agentTraceMetricPrompt,
                 '${metrics?.promptTokens ?? summary['promptTokens'] ?? 0}',
@@ -418,20 +442,8 @@ class _OverviewSection extends StatelessWidget {
                 '${metrics?.completionTokens ?? summary['completionTokens'] ?? 0}',
               ),
               _MetricPill(
-                strings.agentTraceMetricTotal,
-                '${metrics?.totalTokens ?? _totalTokens(summary)}',
-              ),
-              _MetricPill(
                 strings.agentTraceMetricTools,
                 '${metrics?.toolCalls ?? summary['toolCalls'] ?? _countKind(events, 'tool_request')}',
-              ),
-              _MetricPill(
-                strings.agentTraceMetricCacheHits,
-                '${metrics?.cacheHits ?? summary['cacheHits'] ?? 0}',
-              ),
-              _MetricPill(
-                strings.agentTraceMetricDedupBlocked,
-                '${metrics?.dedupBlockedCalls ?? summary['dedupBlockedCalls'] ?? 0}',
               ),
               _MetricPill(
                 strings.agentTraceMetricApprovals,
@@ -440,6 +452,14 @@ class _OverviewSection extends StatelessWidget {
               _MetricPill(
                 strings.agentTraceMetricApproved,
                 '${metrics?.approvedCount ?? summary['approvedCount'] ?? 0}',
+              ),
+              _MetricPill(
+                strings.agentTraceMetricCacheHits,
+                '${metrics?.cacheHits ?? summary['cacheHits'] ?? 0}',
+              ),
+              _MetricPill(
+                strings.agentTraceMetricDedupBlocked,
+                '${metrics?.dedupBlockedCalls ?? summary['dedupBlockedCalls'] ?? 0}',
               ),
               _MetricPill(
                 strings.agentTraceMetricAudits,
@@ -451,26 +471,11 @@ class _OverviewSection extends StatelessWidget {
               ),
             ],
           ),
-          if (selectedTools.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            _SmallLabel(
-              strings.agentTraceSelectedTools,
-              selectedTools.join(', '),
-            ),
-          ],
-          if (memorySources.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            _SmallLabel(
-              strings.agentTraceMemorySources,
-              memorySources.join(', '),
-            ),
-          ],
-          if (finalOutcome != null) ...[
-            const SizedBox(height: 10),
-            _SmallLabel(
-              strings.agentTraceFinalReason,
-              _finalOutcomeLabel(finalOutcome, strings),
-            ),
+          if (provenance.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            const TraceLedgerRule(),
+            const SizedBox(height: AppSpacing.xs),
+            ...provenance,
           ],
         ],
       ),
@@ -505,6 +510,31 @@ class _OverviewSection extends StatelessWidget {
     return metrics.success
         ? strings.agentTraceStatusSuccess
         : strings.agentTraceStatusFailed;
+  }
+
+  /// 状态色只表达结果，不做装饰：成功绿、失败红、拦截/审批类琥珀、取消灰。
+  static Color _statusColor(
+    BuildContext context,
+    AgentRunMetrics? metrics,
+    String? finalOutcome,
+  ) {
+    final status = AppStatusColors.of(context);
+    if (finalOutcome != null) {
+      switch (finalOutcome) {
+        case 'success':
+        case 'completed':
+          return status.success;
+        case 'cancelled':
+          return status.neutral;
+        case 'modelError':
+        case 'toolError':
+          return status.error;
+        default:
+          return status.warning;
+      }
+    }
+    if (metrics == null) return status.neutral;
+    return metrics.success ? status.success : status.error;
   }
 
   static String _elapsed(
@@ -558,9 +588,11 @@ class _FilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final typography = context.typography;
     return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+      spacing: AppSpacing.sm,
+      runSpacing: AppSpacing.sm,
       children: [
         for (final value in _TraceFilter.values)
           ChoiceChip(
@@ -568,6 +600,29 @@ class _FilterBar extends StatelessWidget {
             label: Text(_filterLabel(value, strings)),
             selected: selected == value,
             onSelected: (_) => onSelected(value),
+            showCheckmark: false,
+            avatar: Icon(
+              _filterIcon(value),
+              size: 15,
+              color: selected == value
+                  ? colorScheme.onSecondaryContainer
+                  : colorScheme.onSurfaceVariant,
+            ),
+            labelStyle: typography.button.copyWith(
+              color: selected == value
+                  ? colorScheme.onSecondaryContainer
+                  : colorScheme.onSurfaceVariant,
+              fontWeight: selected == value ? FontWeight.w600 : FontWeight.w500,
+            ),
+            backgroundColor: colorScheme.surfaceContainerHighest.withValues(
+              alpha: 0.35,
+            ),
+            selectedColor: colorScheme.secondaryContainer,
+            side: BorderSide.none,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
             visualDensity: VisualDensity.standard,
             materialTapTargetSize: MaterialTapTargetSize.padded,
           ),
@@ -576,197 +631,69 @@ class _FilterBar extends StatelessWidget {
   }
 }
 
-class _TraceTimelineItem extends StatelessWidget {
-  final AgentTraceEvent event;
-  final Duration offset;
-  final AiStrings strings;
-
-  const _TraceTimelineItem({
-    super.key,
-    required this.event,
-    required this.offset,
-    required this.strings,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final preview = _preview(event.content);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: Material(
-          color: colorScheme.surface,
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-            side: BorderSide(color: colorScheme.outlineVariant),
-          ),
-          child: ExpansionTile(
-            key: PageStorageKey<String>('trace-expansion-${event.id}'),
-            minTileHeight: 48,
-            tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-            childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            leading: Icon(
-              _iconForKind(event.kind),
-              color: _colorForEvent(colorScheme, event),
-            ),
-            title: Text(
-              '${event.sequence}. ${event.title}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  [
-                    '+${_formatDuration(offset)}',
-                    event.kind,
-                    if (event.status.isNotEmpty) event.status,
-                    if (event.toolName?.trim().isNotEmpty == true)
-                      event.toolName!,
-                  ].join(' · '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (preview.isNotEmpty)
-                  Text(
-                    preview,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: colorScheme.onSurfaceVariant,
-                      fontSize: 12,
-                    ),
-                  ),
-              ],
-            ),
-            children: [
-              Wrap(
-                alignment: WrapAlignment.start,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 8,
-                children: [
-                  TextButton.icon(
-                    key: ValueKey('trace-copy-${event.id}'),
-                    style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
-                    onPressed: () {
-                      Clipboard.setData(ClipboardData(text: event.content));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(strings.agentTraceCopied)),
-                      );
-                    },
-                    icon: const Icon(Icons.copy_outlined, size: 16),
-                    label: Text(strings.agentTraceCopyRaw),
-                  ),
-                  if (event.truncated)
-                    Text(
-                      strings.agentTraceTruncated,
-                      style: TextStyle(color: colorScheme.error),
-                    ),
-                ],
-              ),
-              _TraceRawContent(
-                key: ValueKey('trace-raw-content-${event.id}'),
-                event: event,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+IconData _filterIcon(_TraceFilter value) {
+  switch (value) {
+    case _TraceFilter.all:
+      return Icons.format_list_bulleted_rounded;
+    case _TraceFilter.tools:
+      return Icons.build_outlined;
+    case _TraceFilter.approvals:
+      return Icons.verified_user_outlined;
+    case _TraceFilter.blocked:
+      return Icons.block;
+    case _TraceFilter.errors:
+      return Icons.error_outline;
   }
 }
 
-class _TraceRawContent extends StatefulWidget {
-  final AgentTraceEvent event;
-
-  const _TraceRawContent({super.key, required this.event});
-
-  @override
-  State<_TraceRawContent> createState() => _TraceRawContentState();
-}
-
-class _TraceRawContentState extends State<_TraceRawContent> {
-  late final ScrollController _verticalController;
-
-  @override
-  void initState() {
-    super.initState();
-    _verticalController = ScrollController(keepScrollOffset: false);
-  }
-
-  @override
-  void dispose() {
-    _verticalController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      key: ValueKey('trace-raw-${widget.event.id}'),
-      width: double.infinity,
-      constraints: const BoxConstraints(maxHeight: 280),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-      ),
-      child: Scrollbar(
-        controller: _verticalController,
-        child: SingleChildScrollView(
-          controller: _verticalController,
-          child: OverflowScrollText(
-            widget.event.content,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontFamilyFallback: [
-                'Consolas',
-                'Microsoft YaHei',
-                'PingFang SC',
-                'sans-serif',
-              ],
-              fontSize: 12,
-              height: 1.35,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
+/// 指标单元：扁平等高块，标签弱化、数值加重，避免一排描边胶囊抢焦点。
 class _MetricPill extends StatelessWidget {
   final String label;
   final String value;
+  final Color? valueColor;
 
-  const _MetricPill(this.label, this.value);
+  const _MetricPill(this.label, this.value, {this.valueColor});
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final maxWidth = (MediaQuery.sizeOf(context).width - 28)
-        .clamp(160.0, 420.0)
+    final typography = context.typography;
+    final maxWidth = (MediaQuery.sizeOf(context).width - 32)
+        .clamp(140.0, 360.0)
         .toDouble();
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      child: DecoratedBox(
         decoration: BoxDecoration(
-          color: colorScheme.surface,
+          color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.38),
           borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-          border: Border.all(color: colorScheme.outlineVariant),
         ),
-        child: Text(
-          '$label: $value',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: 5,
+          ),
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: '$label: ',
+                  style: typography.caption.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                TextSpan(
+                  text: value,
+                  style: typography.metadata.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: valueColor ?? colorScheme.onSurface,
+                  ),
+                ),
+              ],
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
       ),
     );
@@ -781,13 +708,30 @@ class _SmallLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      '$label: $value',
-      maxLines: 2,
-      overflow: TextOverflow.ellipsis,
-      style: TextStyle(
-        fontSize: 12,
-        color: Theme.of(context).colorScheme.onSurfaceVariant,
+    final colorScheme = Theme.of(context).colorScheme;
+    final typography = context.typography;
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(
+              text: '$label: ',
+              style: typography.metadata.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            TextSpan(
+              text: value,
+              style: typography.metadata.copyWith(
+                fontWeight: FontWeight.w500,
+                color: colorScheme.onSurface.withValues(alpha: 0.9),
+              ),
+            ),
+          ],
+        ),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }
@@ -824,45 +768,6 @@ String _filterLabel(_TraceFilter value, AiStrings strings) {
     case _TraceFilter.errors:
       return strings.agentTraceFilterErrors;
   }
-}
-
-IconData _iconForKind(String kind) {
-  if (kind == 'tool_exposure') return Icons.inventory_2_outlined;
-  if (kind == 'multi_agent' || kind.contains('multi_agent')) {
-    return Icons.groups_outlined;
-  }
-  if (kind == 'tool_request') return Icons.build_circle_outlined;
-  if (kind == 'tool_result') return Icons.fact_check_outlined;
-  if (kind == 'approval') return Icons.verified_user_outlined;
-  if (kind == 'tool_blocked' || kind.contains('blocked')) {
-    return Icons.shield_outlined;
-  }
-  if (kind == 'budget' || kind.contains('audit')) return Icons.warning_amber;
-  if (kind == 'agent_run_summary') return Icons.analytics_outlined;
-  if (kind == 'error') return Icons.error_outline;
-  if (kind.contains('compression')) return Icons.compress_outlined;
-  return Icons.info_outline;
-}
-
-Color _colorForEvent(ColorScheme colorScheme, AgentTraceEvent event) {
-  final status = event.status.toLowerCase();
-  if (status.contains('error') ||
-      status.contains('failed') ||
-      status.contains('rejected')) {
-    return colorScheme.error;
-  }
-  if (status.contains('blocked') || status.contains('unavailable')) {
-    return colorScheme.tertiary;
-  }
-  if (event.kind.contains('tool')) return colorScheme.primary;
-  if (event.kind.contains('approval')) return colorScheme.secondary;
-  return colorScheme.onSurfaceVariant;
-}
-
-String _preview(String value) {
-  final normalized = value.replaceAll(RegExp(r'\s+'), ' ').trim();
-  if (normalized.length <= 220) return normalized;
-  return '${normalized.substring(0, 220)}...';
 }
 
 String _formatDuration(Duration duration) {

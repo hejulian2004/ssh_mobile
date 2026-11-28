@@ -1,4 +1,3 @@
-import 'package:feature_screen_share/feature_screen_share.dart';
 import 'package:realtime_media_android/realtime_media_android.dart';
 
 import 'screen_share_annotation_binding.dart';

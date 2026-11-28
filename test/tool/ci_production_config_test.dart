@@ -499,6 +499,91 @@ void main() {
     );
   }
 
+  // The relay Go floor, the images that build it, and the CI toolchain must not
+  // drift apart: a go.mod bump that outruns the image breaks every deploy.
+  final relayGo = RegExp(
+    r'^go (\d+)\.(\d+)',
+    multiLine: true,
+  ).firstMatch(File('${root.path}/relay/go.mod').readAsStringSync());
+  final workflowGo = RegExp(r"GO_VERSION: '(\d+)\.(\d+)").firstMatch(workflow);
+  _expect(
+    relayGo != null && workflowGo != null,
+    'relay/go.mod and the workflow GO_VERSION must pin Go versions.',
+  );
+  if (relayGo != null && workflowGo != null) {
+    final requiredMajor = int.parse(relayGo.group(1)!);
+    final requiredMinor = int.parse(relayGo.group(2)!);
+    _expect(
+      int.parse(workflowGo.group(1)!) == requiredMajor &&
+          int.parse(workflowGo.group(2)!) >= requiredMinor,
+      'CI GO_VERSION must stay on the relay go.mod major and satisfy its floor.',
+    );
+    for (final name in const ['Dockerfile.relay', 'Dockerfile.admin']) {
+      final image = File('${root.path}/relay/$name').readAsStringSync();
+      final from = RegExp(
+        r'^FROM golang:(\d+)\.(\d+)-alpine@sha256:([0-9a-f]{64}) AS build',
+        multiLine: true,
+      ).firstMatch(image);
+      _expect(
+        from != null,
+        'relay/$name must build on a digest-pinned golang Alpine image.',
+      );
+      if (from == null) {
+        continue;
+      }
+      _expect(
+        int.parse(from.group(1)!) == requiredMajor &&
+            int.parse(from.group(2)!) >= requiredMinor,
+        'relay/$name Go image must satisfy the relay go.mod floor.',
+      );
+      _expect(
+        int.parse(from.group(1)!) == int.parse(workflowGo.group(1)!) &&
+            int.parse(from.group(2)!) == int.parse(workflowGo.group(2)!),
+        'relay/$name Go image must be the Go minor CI actually tests with.',
+      );
+    }
+  }
+
+  // cargo-audit exceptions stay reviewed, and the config must stay inside the
+  // step's working directory, or an ignore list would silently widen the gate.
+  final auditConfig = File(
+    '${root.path}/native/network_core/.cargo/audit.toml',
+  ).readAsStringSync();
+  final rustJob = workflow.substring(
+    workflow.indexOf('native-network-quality:'),
+  );
+  _expect(
+    rustJob.contains('working-directory: native/network_core') &&
+        rustJob.contains('cargo audit'),
+    'cargo audit must run inside native/network_core so .cargo/audit.toml is used.',
+  );
+  _expect(
+    auditConfig.contains('[advisories]'),
+    'native/network_core/.cargo/audit.toml must declare the advisories section.',
+  );
+  final ignored = RegExp(
+    r'ignore\s*=\s*\[(.*?)\]',
+    dotAll: true,
+  ).firstMatch(auditConfig);
+  _expect(
+    ignored != null,
+    'native/network_core/.cargo/audit.toml must declare an explicit ignore list.',
+  );
+  _expect(
+    ignored != null &&
+        RegExp(r'"RUSTSEC-[0-9]{4}-[0-9]{4}"')
+            .allMatches(ignored.group(1)!)
+            .map((match) => match.group(0)!)
+            .toSet()
+            .difference(const {'"RUSTSEC-2026-0387"'})
+            .isEmpty,
+    'Every cargo-audit exception needs a reviewed entry in this test.',
+  );
+  _expect(
+    auditConfig.contains('rtc-dtls') && auditConfig.contains('p256'),
+    'cargo-audit exceptions must document the chain that blocks the fix.',
+  );
+
   stdout.writeln('CI production configuration tests passed.');
 }
 
